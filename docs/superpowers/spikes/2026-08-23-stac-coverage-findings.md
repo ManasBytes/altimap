@@ -135,6 +135,16 @@ valid min=-0.22 max=33.00 mean=4.73
 
 Task 9 should hard-code asset keys `image` (NAIP) and `data` (3dep-lidar-hag).
 
+> **Caveat — these properties are a single-tile spot check.** dtype, nodata,
+> CRS form, and blocksize above were read from **one** tile pair, in the
+> Wasatch AOI only. They were *not* cross-checked against the other selected
+> AOIs. 3DEP is delivered per workunit and different acquisitions can come
+> from different vendors, so a different nodata convention or CRS form in
+> another AOI is plausible. **Tasks 9 and 10 must not treat these as blanket
+> facts about the collections** — read `src.nodata` and `src.crs` from each
+> dataset at runtime rather than hard-coding these values, and spot-check at
+> least one tile per selected AOI.
+
 ## Deviations from spec assumptions
 
 1. **HAG CRS is a compound CRS, not a plain projected CRS.** `src.crs` for `3dep-lidar-hag` returns `COMPD_CS[...]` combining the horizontal UTM zone 12N (EPSG:26912) with a NAVD88 vertical datum component (EPSG:5703), rather than a single flat EPSG code like NAIP's `EPSG:26912`. Code that does `src.crs.to_epsg()` or similar simple EPSG extraction on the HAG source will likely get `None` or fail, and needs to either use `src.crs.to_wkt()` / handle the compound case, or extract just the horizontal sub-CRS before reprojecting/comparing against NAIP's CRS. This should be called out explicitly wherever Task 9 aligns NAIP and HAG rasters to a common grid.
