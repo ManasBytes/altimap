@@ -245,7 +245,7 @@ Spec §3.1 defines the contract every subsystem communicates through. It is buil
   - `Sidecar.from_json(path: Path) -> Sidecar`
   - `write_elevation_cog(path: Path, array: np.ndarray, transform: Affine, crs: CRS, sidecar: Sidecar) -> None`
   - `read_elevation(path: Path) -> tuple[np.ndarray, Affine, CRS]` — returns float32 array with nodata as NaN
-  - `make_synthetic_elevation(shape, transform, crs)` test fixture helper in `conftest.py`
+  - `make_synthetic_ndsm(shape: tuple[int, int] = (64, 64)) -> np.ndarray` module-level helper in `tests/conftest.py`, imported directly by later tasks as `from tests.conftest import make_synthetic_ndsm`
 
 - [ ] **Step 1: Create `pyproject.toml`**
 
