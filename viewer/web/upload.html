@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AltiMap — upload imagery</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230e1116'/><path d='M1 12 L5 6 L8 9 L11 4 L15 12 Z' fill='%234c9aff'/></svg>">
+<link rel="stylesheet" href="./css/app.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <aside id="scenes">
+    <header>
+      <h1>AltiMap <span class="tag">upload</span></h1>
+      <p class="sub">GeoTIFF, TIFF, PNG or JPG → 3D</p>
+      <a class="xlink" href="./offnadir.html">→ off-nadir Atlanta</a>
+      <a class="xlink" href="./index.html">→ relative-DSM viewer</a>
+
+      <div id="drop">
+        <p class="dz-main">Drop imagery here</p>
+        <p class="dz-sub">or click to choose a file</p>
+        <input type="file" id="file" accept=".tif,.tiff,.png,.jpg,.jpeg" hidden>
+      </div>
+      <p class="hint" id="up-status">Georeferenced input also gets a CRS readout
+        and an elevation-calibration attempt.</p>
+    </header>
+    <ul id="scene-list"></ul>
+  </aside>
+
+  <main id="stage">
+    <canvas id="view"></canvas>
+    <div id="overlay"><p id="status">upload an image to begin</p></div>
+  </main>
+
+  <aside id="controls">
+    <section>
+      <h2>Surface</h2>
+      <div class="seg" id="mode">
+        <button data-mode="raw" class="on">raw</button>
+        <button data-mode="detrended">detrended</button>
+      </div>
+      <label>exaggeration <output id="exag-out">0.15</output>
+        <input type="range" id="exag" min="0" max="1" step="0.01" value="0.15">
+      </label>
+      <label>colormap
+        <select id="cmap">
+          <option value="0">satellite RGB</option>
+          <option value="1">height (turbo)</option>
+          <option value="2">slope shade</option>
+        </select>
+      </label>
+      <div class="seg" id="nav">
+        <button data-nav="orbit" class="on">orbit</button>
+        <button data-nav="fly">fly</button>
+      </div>
+      <p class="hint" id="nav-hint">drag to orbit, scroll to zoom</p>
+    </section>
+
+    <section>
+      <h2>Georeferencing</h2>
+      <dl id="geo">
+        <dt>status</dt><dd id="g-status">—</dd>
+        <dt>CRS</dt><dd id="g-crs">—</dd>
+        <dt>ground sample</dt><dd id="g-gsd">—</dd>
+        <dt>footprint</dt><dd id="g-extent">—</dd>
+      </dl>
+      <p class="hint" id="g-note"></p>
+    </section>
+
+    <section>
+      <h2>Probe</h2>
+      <p class="hint">click the terrain</p>
+      <dl id="probe">
+        <dt>height</dt><dd id="p-height">—</dd>
+        <dt id="slope-label">display slope</dt><dd id="p-slope">—</dd>
+      </dl>
+      <p class="warn" id="p-warn">Relative and unitless. Display slope depends on
+        the exaggeration setting — it is not a ground slope.</p>
+    </section>
+
+    <section>
+      <h2>Scene metrics</h2>
+      <dl id="metrics">
+        <dt>plane R²</dt><dd id="m-r2">—</dd>
+        <dt>residual relief</dt><dd id="m-relief">—</dd>
+        <dt>structure alignment</dt><dd id="m-struct">—</dd>
+        <dt>source size</dt><dd id="m-size">—</dd>
+      </dl>
+      <p class="hint" id="m-caveat"></p>
+      <a id="glb" class="dl off" href="#" download>download terrain.glb</a>
+    </section>
+  </aside>
+</div>
+<script type="module" src="./js/upload.js"></script>
+</body>
+</html>
