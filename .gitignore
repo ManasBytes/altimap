@@ -3,5 +3,13 @@ __pycache__/
 *.pyc
 .pytest_cache/
 data/
+spikes/out/
+viewer/web/data/
+viewer/web/data-offnadir/
 *.tif
 !tests/fixtures/*.tif
+
+# Derived data -- regenerate with viewer/fetch_buildings.py and the exporters.
+viewer/cache/
+viewer/web/data-uploads/
+.coverage
