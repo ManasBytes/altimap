@@ -101,7 +101,11 @@ def main() -> None:
         (scene_dir / "meta.json").write_text(json.dumps(meta))
 
         rows.append({
-            "id": meta["id"], "class": meta["class"], "oa": meta["oa"],
+            # "oa" (off-nadir angle) only exists in the Atlanta export; the
+            # Inria set is single-view nadir and carries "num" (tile number)
+            # instead. Report whichever is present rather than assuming one.
+            "id": meta["id"], "class": meta["class"],
+            "oa": meta.get("oa", meta.get("num")),
             "n": stats["n_footprints"], "nh": stats["n_with_height"],
             "cov": stats["coverage"], "before": before, "after": after,
             "metric": result["metric"],
