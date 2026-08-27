@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AltiMap — GeoTIFF → 3D, no depth model</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230e1116'/><path d='M1 12 L5 6 L8 9 L11 4 L15 12 Z' fill='%234c9aff'/></svg>">
+<link rel="stylesheet" href="./css/app.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <aside id="scenes">
+    <header>
+      <h1>AltiMap <span class="tag" style="background:var(--warn)">no depth model</span></h1>
+      <p class="sub" id="ds-sub">GeoTIFF → real DEM → 3D · loading…</p>
+      <a class="xlink" href="./inria.html">→ Inria nadir (0.5m)</a>
+      <a class="xlink" href="./offnadir.html">→ off-nadir Atlanta</a>
+      <a class="xlink" href="./index.html">→ relative-DSM viewer</a>
+      <p class="hint" style="margin-top:12px;line-height:1.5">
+        These 5 tiles skip the depth model entirely. The terrain is the real
+        reference elevation (Copernicus GLO-30, 30&nbsp;m posting) draped with
+        the actual orthophoto — no ML guess, no calibration gate.
+      </p>
+    </header>
+    <ul id="scene-list"></ul>
+  </aside>
+
+  <main id="stage">
+    <canvas id="view"></canvas>
+    <div id="overlay"><p id="status">loading…</p></div>
+  </main>
+
+  <aside id="controls">
+    <section>
+      <h2>Surface</h2>
+      <div class="seg" id="mode">
+        <button data-mode="dem" class="on">DEM only</button>
+        <button data-mode="buildings" id="mode-buildings" disabled>+ buildings</button>
+      </div>
+      <p class="hint" id="mode-hint">30 m reference terrain — buildings are not
+        individually resolved at this posting.</p>
+      <label>exaggeration <output id="exag-out">1.00</output>
+        <input type="range" id="exag" min="0" max="3" step="0.01" value="1">
+      </label>
+      <button id="true-scale" class="dl" style="margin-top:4px">reset to true scale (1:1)</button>
+      <label>colormap
+        <select id="cmap">
+          <option value="0">satellite RGB</option>
+          <option value="1">height (turbo)</option>
+          <option value="2">slope shade</option>
+        </select>
+      </label>
+      <div class="seg" id="nav">
+        <button data-nav="orbit" class="on">orbit</button>
+        <button data-nav="fly">fly</button>
+      </div>
+      <p class="hint" id="nav-hint">drag to orbit, scroll to zoom</p>
+    </section>
+
+    <section>
+      <h2>Source</h2>
+      <dl id="geo">
+        <dt>DEM source</dt><dd id="g-dem">—</dd>
+        <dt>CRS</dt><dd id="g-crs">—</dd>
+        <dt>ground sample (image)</dt><dd id="g-gsd">—</dd>
+        <dt>footprint</dt><dd id="g-extent">—</dd>
+        <dt>elevation range</dt><dd id="g-range">—</dd>
+      </dl>
+      <p class="hint" id="g-note"></p>
+    </section>
+
+    <section>
+      <h2>Buildings (Overture)</h2>
+      <dl id="bld">
+        <dt>footprints</dt><dd id="b-fp">—</dd>
+        <dt>with known height</dt><dd id="b-known">—</dd>
+        <dt>extruded here</dt><dd id="b-ext">—</dd>
+      </dl>
+      <p class="hint">Footprints without a known height are left flat on the
+        DEM rather than assigned a guessed storey count.</p>
+    </section>
+
+    <section>
+      <h2>Probe</h2>
+      <p class="hint">click the terrain — always real metres, no gate</p>
+      <dl id="probe">
+        <dt>elevation</dt><dd id="p-height">—</dd>
+        <dt>ground slope</dt><dd id="p-slope">—</dd>
+      </dl>
+      <a id="glb" class="dl off" href="#" download>download terrain.glb (true scale)</a>
+    </section>
+  </aside>
+</div>
+<script type="module" src="./js/demdirect.js"></script>
+</body>
+</html>

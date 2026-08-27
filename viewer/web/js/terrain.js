@@ -3,7 +3,17 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { VERT, FRAG } from './shaders.js';
 
-const SEGMENTS = 384;   // mesh grid; independent of the 504^2 depth texture
+// Mesh grid; independent of the depth texture's own resolution. 3072 gives
+// ~0.49 m/vertex over a 1500 m tile -- essentially AT the 0.5 m/px source
+// imagery's own resolution now (1536 -> ~0.98 m/vertex, 768 -> ~1.95 m/vertex,
+// 384 -> ~3.9 m/vertex before that). This is the practical ceiling: the
+// imagery has no detail finer than 0.5 m/px to resolve, and the DEM ground
+// underneath is 30 m regardless of mesh density, so segments beyond this
+// point buy triangle count without buying visible detail. ~18.9M triangles
+// for one static terrain patch; fine on a discrete GPU (verified on an
+// RTX 3050 6 GB), but this is the first knob to turn back down if a page
+// ever needs to run on integrated graphics or a lower-end device.
+const DEFAULT_SEGMENTS = 3072;
 
 /**
  * Depth as a Float32Array, whichever way the exporter encoded it.
@@ -39,7 +49,18 @@ async function loadDepthArray(THREE, baseDir, spec) {
   return out;
 }
 
-export function initViewer(canvas) {
+/**
+ * @param opts.segments mesh grid resolution (default 384). Displacement is
+ *   sampled per-vertex from the depth texture, so a coarse mesh smooths away
+ *   real detail that IS present in the data -- most visibly, building
+ *   footprints (see export_dem_direct.py) carry real sub-metre polygon edges
+ *   that a 384-segment grid (~3.9 m/vertex over a 1500 m tile) blurs into a
+ *   soft bump. Geometry is built once here and reused for every scene swap
+ *   (only the textures change), so this only costs a one-time init and a
+ *   steady per-frame GPU cost -- never a per-scene reload cost.
+ */
+export function initViewer(canvas, opts = {}) {
+  const SEGMENTS = opts.segments ?? DEFAULT_SEGMENTS;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   if (!renderer.capabilities.isWebGL2) {
     throw new Error('WebGL2 is required and is not available in this browser');
@@ -160,10 +181,15 @@ export function initViewer(canvas) {
 
     const useRefined = opts.variant === 'refined' && !!meta.refined;
     const src = useRefined ? meta.refined : meta;
-    const packed = useRefined || meta.encoding === 'rg16-png';
+    // Two packed variants exist: 'rg16-png' (a depth-model guess) and
+    // 'rg16-png-elevation' (real DEM elevation, no model involved -- see
+    // export_dem_direct.py). Both decode identically; only the filename on
+    // disk differs, so this stays a single code path rather than branching.
+    const packed = useRefined || (meta.encoding ?? '').startsWith('rg16-png');
+    const packedFile = meta.encoding === 'rg16-png-elevation' ? 'elevation.png' : 'depth.png';
     const spec = {
       packed,
-      file: useRefined ? 'refined.png' : (packed ? 'depth.png' : 'depth.bin'),
+      file: useRefined ? 'refined.png' : (packed ? packedFile : 'depth.bin'),
       lo: src.depth_lo, hi: src.depth_hi,
     };
     const depth = await loadDepthArray(THREE, base, spec);
@@ -201,9 +227,15 @@ export function initViewer(canvas) {
       uniforms.uRawRange.value.set(src.depth_min, src.depth_max);
       uniforms.uResRange.value.set(src.depth_min, src.depth_max);
     } else {
-      uniforms.uPlane.value.set(meta.plane.a, meta.plane.b, meta.plane.c);
+      // meta.plane / residual_* only exist on model-depth scenes, where a
+      // fitted ramp is being subtracted (see viewer/metrics.py). Real-elevation
+      // scenes (export_dem_direct.py) have no ramp to subtract -- default to
+      // "no plane" so detrended and raw coincide instead of throwing.
+      const plane = meta.plane ?? { a: 0, b: 0, c: 0 };
+      uniforms.uPlane.value.set(plane.a, plane.b, plane.c);
       uniforms.uRawRange.value.set(meta.depth_min, meta.depth_max);
-      uniforms.uResRange.value.set(meta.residual_min, meta.residual_max);
+      uniforms.uResRange.value.set(
+        meta.residual_min ?? meta.depth_min, meta.residual_max ?? meta.depth_max);
     }
     uniforms.uTexel.value.set(1 / meta.width, 1 / meta.height);
 

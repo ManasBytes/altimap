@@ -113,3 +113,42 @@ def test_metric_scale_ignores_buildings_without_a_known_height():
     scale, offset, r2, n = metric_scale_from_buildings(rel, known)
     assert n == 2
     assert scale == pytest.approx(40.0, abs=1e-6)
+
+
+def test_extrude_known_buildings_uses_real_ground_plus_real_height():
+    from viewer.refine import extrude_known_buildings
+
+    elev = np.full((20, 20), 100.0)   # flat 100 m terrain
+    elev[5:15, 5:15] += 3.0           # local DEM bump under the footprint: 103 m
+    mask = np.zeros((20, 20), dtype=np.int32)
+    mask[5:15, 5:15] = 1              # one building footprint, id 1
+
+    fused, n = extrude_known_buildings(elev, mask, {1: 20.0})
+    assert n == 1
+    # ground under the footprint is 103 m (median of elev there), + 20 m building
+    assert np.allclose(fused[5:15, 5:15], 123.0)
+    assert np.allclose(fused[mask == 0], 100.0)   # untouched elsewhere
+
+
+def test_extrude_known_buildings_leaves_unknown_footprints_untouched():
+    from viewer.refine import extrude_known_buildings
+
+    elev = np.full((10, 10), 50.0)
+    mask = np.zeros((10, 10), dtype=np.int32)
+    mask[2:6, 2:6] = 1     # footprint exists...
+    mask[7:9, 7:9] = 2     # ...but neither has a known Overture height
+
+    fused, n = extrude_known_buildings(elev, mask, {})
+    assert n == 0
+    assert np.allclose(fused, elev)   # no fabricated height anywhere
+
+
+def test_extrude_known_buildings_skips_nan_heights_without_crashing():
+    from viewer.refine import extrude_known_buildings
+
+    elev = np.full((6, 6), 10.0)
+    mask = np.zeros((6, 6), dtype=np.int32)
+    mask[1:3, 1:3] = 1
+    fused, n = extrude_known_buildings(elev, mask, {1: float("nan")})
+    assert n == 0
+    assert np.allclose(fused, 10.0)

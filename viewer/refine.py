@@ -164,6 +164,38 @@ def refine(
     return result
 
 
+def extrude_known_buildings(
+    elevation: np.ndarray,
+    mask: np.ndarray,
+    known_m: dict[int, float],
+) -> tuple[np.ndarray, int]:
+    """Real elevation + real Overture building heights, no model anywhere.
+
+    Ground level under a footprint is the median of the (unmodified) elevation
+    field at that footprint -- valid because the reference DEM here is much
+    coarser than a building footprint (30 m posting against 0.5 m imagery), so
+    "ground under the building" and "ground at the building's map location"
+    are the same DEM cell.
+
+    Footprints with no known Overture height (most of them -- coverage ranged
+    0.8%-97% by region in this project's own testing) are left untouched
+    rather than assigned a guessed height: an unextruded footprint is honest,
+    a fabricated storey count is not.
+
+    Returns (fused_elevation, n_extruded).
+    """
+    out = np.array(elevation, dtype=np.float64, copy=True)
+    n_extruded = 0
+    for bid, height_m in known_m.items():
+        footprint = mask == bid
+        if not footprint.any() or not np.isfinite(height_m):
+            continue
+        ground_level = float(np.median(elevation[footprint]))
+        out[footprint] = ground_level + height_m
+        n_extruded += 1
+    return out, n_extruded
+
+
 def edge_sharpness(field: np.ndarray, mask: np.ndarray) -> float:
     """Mean gradient magnitude on footprint boundaries, normalised by the
     field's own spread.
