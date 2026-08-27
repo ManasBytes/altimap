@@ -6,6 +6,8 @@ data/
 spikes/out/
 viewer/web/data/
 viewer/web/data-offnadir/
+viewer/web/data-inria/
+viewer/web/data-demdirect/
 *.tif
 !tests/fixtures/*.tif
 

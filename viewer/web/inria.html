@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AltiMap — Inria nadir</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230e1116'/><path d='M1 12 L5 6 L8 9 L11 4 L15 12 Z' fill='%234c9aff'/></svg>">
+<link rel="stylesheet" href="./css/app.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <aside id="scenes">
+    <header>
+      <h1>AltiMap <span class="tag">nadir</span></h1>
+      <p class="sub" id="ds-sub">Inria HR 0.5m · loading…</p>
+      <a class="xlink" href="./offnadir.html">→ off-nadir Atlanta</a>
+      <a class="xlink" href="./demdirect.html">→ GeoTIFF → 3D (no depth model)</a>
+      <a class="xlink" href="./index.html">→ relative-DSM viewer</a>
+      <label class="sortrow">city
+        <select id="class-sel"></select>
+      </label>
+      <label class="sortrow">sort scenes
+        <select id="sort">
+          <option value="num">tile number</option>
+          <option value="plane_r2">least ramp first</option>
+          <option value="structure_alignment">most structure first</option>
+          
+        </select>
+      </label>
+    </header>
+    <ul id="scene-list"></ul>
+  </aside>
+
+  <main id="stage">
+    <canvas id="view"></canvas>
+    <div id="overlay"><p id="status">loading…</p></div>
+
+  </main>
+
+  <aside id="controls">
+    <section>
+      <h2>Surface</h2>
+      <div class="seg" id="mode">
+        <button data-mode="raw" class="on">raw</button>
+        <button data-mode="detrended">detrended</button>
+        <button data-mode="refined" id="mode-refined" disabled>refined</button>
+      </div>
+      <p class="hint" id="mode-hint">raw depth — the fitted ramp is included</p>
+      <label>exaggeration <output id="exag-out">0.15</output>
+        <input type="range" id="exag" min="0" max="1" step="0.01" value="0.15">
+      </label>
+      <label>colormap
+        <select id="cmap">
+          <option value="0">satellite RGB</option>
+          <option value="1">height (turbo)</option>
+          <option value="2">slope shade</option>
+        </select>
+      </label>
+      <div class="seg" id="nav">
+        <button data-nav="orbit" class="on">orbit</button>
+        <button data-nav="fly">fly</button>
+      </div>
+      <p class="hint" id="nav-hint">drag to orbit, scroll to zoom</p>
+    </section>
+
+    <section>
+      <h2>Georeferencing</h2>
+      <dl id="geo">
+        <dt>status</dt><dd id="g-status">—</dd>
+        <dt>CRS</dt><dd id="g-crs">—</dd>
+        <dt>ground sample</dt><dd id="g-gsd">—</dd>
+        <dt>footprint</dt><dd id="g-extent">—</dd>
+      </dl>
+      <p class="hint" id="g-note"></p>
+    </section>
+
+    <section>
+      <h2>Probe</h2>
+      <p class="hint">click the terrain</p>
+      <dl id="probe">
+        <dt>height</dt><dd id="p-height">—</dd>
+        <dt id="slope-label">display slope</dt><dd id="p-slope">—</dd>
+      </dl>
+      <p class="warn" id="p-warn">Relative and unitless. Display slope depends on
+        the exaggeration setting — it is not a ground slope.</p>
+    </section>
+
+    <section>
+      <h2>Scene metrics</h2>
+      <dl id="metrics">
+        <dt>plane R²</dt><dd id="m-r2">—</dd>
+        <dt>residual relief</dt><dd id="m-relief">—</dd>
+        <dt>structure alignment</dt><dd id="m-struct">—</dd>
+      </dl>
+      <dl id="refine-metrics">
+        <dt>footprints</dt><dd id="r-fp">—</dd>
+        <dt>edge sharpness</dt><dd id="r-edge">—</dd>
+        <dt>building calibration</dt><dd id="r-cal">—</dd>
+      </dl>
+      <p class="hint" id="m-context">—</p>
+      <p class="hint" id="m-caveat"></p>
+      <a id="glb" class="dl off" href="#" download>download terrain.glb</a>
+    </section>
+  </aside>
+</div>
+<script type="module" src="./js/inria.js"></script>
+</body>
+</html>

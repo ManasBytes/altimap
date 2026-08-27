@@ -124,29 +124,40 @@ def read_geo_meta(path: Path) -> dict:
     import rasterio
 
     with rasterio.open(path) as src:
-        has_crs = src.crs is not None
-        has_transform = not src.transform.is_identity
-        has_gcps = bool(src.gcps and src.gcps[0])
-        has_rpcs = bool(src.rpcs)
-        base = {"width": src.width, "height": src.height, "bands": src.count}
+        return geo_meta_from_dataset(src)
 
-        if not (has_crs and has_transform):
-            return {
-                **base,
-                "georeferenced": False,
-                "crs": None,
-                "bounds": None,
-                "res_m": None,
-                "ground_m": None,
-                "partial_hints": {"gcps": has_gcps, "rpcs": has_rpcs},
-            }
 
-        res = (abs(src.res[0]), abs(src.res[1]))
+def geo_meta_from_dataset(src) -> dict:
+    """Same shape as read_geo_meta, from an already-open rasterio dataset.
+
+    Split out so callers reading through GDAL's /vsizip/ (imagery packaged
+    inside a .zip, never extracted to a real path) get an identical dict --
+    downstream code (refine_scenes.py, validate.py, the dashboard JS) must not
+    care which one produced it.
+    """
+    has_crs = src.crs is not None
+    has_transform = not src.transform.is_identity
+    has_gcps = bool(src.gcps and src.gcps[0])
+    has_rpcs = bool(src.rpcs)
+    base = {"width": src.width, "height": src.height, "bands": src.count}
+
+    if not (has_crs and has_transform):
         return {
             **base,
-            "georeferenced": True,
-            "crs": str(src.crs),
-            "bounds": list(src.bounds),
-            "res_m": list(res),
-            "ground_m": list(ground_size_m(src.width, src.height, res)),
+            "georeferenced": False,
+            "crs": None,
+            "bounds": None,
+            "res_m": None,
+            "ground_m": None,
+            "partial_hints": {"gcps": has_gcps, "rpcs": has_rpcs},
         }
+
+    res = (abs(src.res[0]), abs(src.res[1]))
+    return {
+        **base,
+        "georeferenced": True,
+        "crs": str(src.crs),
+        "bounds": list(src.bounds),
+        "res_m": list(res),
+        "ground_m": list(ground_size_m(src.width, src.height, res)),
+    }
