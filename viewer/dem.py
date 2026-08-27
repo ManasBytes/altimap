@@ -23,14 +23,32 @@ COLLECTION = "3dep-seamless"
 FINE_SUFFIX = "-13"
 
 
+def bboxes_intersect(a: tuple[float, float, float, float],
+                     b: tuple[float, float, float, float]) -> bool:
+    """(w, s, e, n) overlap test. Pure so it is testable without rasterio/network."""
+    aw, as_, ae, an = a
+    bw, bs, be, bn = b
+    return aw < be and bw < ae and as_ < bn and bs < an
+
+
 class DemSource:
-    """Lazily-resolved reference DEM with per-tile windowed reads."""
+    """Lazily-resolved reference DEM with per-tile windowed reads.
+
+    Handle reuse across calls with DIFFERENT bboxes is only valid when they
+    fall inside the same source raster. This held for the Atlanta set (all 620
+    tiles share one 3DEP COG) but not for the Inria set (10 cities, each its
+    own Copernicus GLO-30 cell) -- naively reusing the first handle would
+    silently read all-NaN windows for every city after the first and report
+    "no DEM coverage" instead of erroring, which is how this bug was found:
+    the calibration numbers for cities 2-10 were uniformly None.
+    """
 
     def __init__(self, collection: str = COLLECTION):
         self.collection = collection
         self._item_id: str | None = None
         self._href: str | None = None
         self._handle = None
+        self._handle_bounds_lonlat: tuple[float, float, float, float] | None = None
 
     def _resolve(self, bbox_lonlat: list[float]) -> str:
         import planetary_computer
@@ -48,10 +66,23 @@ class DemSource:
 
     def _open(self, bbox_lonlat: list[float]):
         import rasterio
+        from rasterio.warp import transform_bounds
 
-        if self._handle is None:
+        needs_reopen = (
+            self._handle is None
+            or self._handle_bounds_lonlat is None
+            or not bboxes_intersect(tuple(bbox_lonlat), self._handle_bounds_lonlat)
+        )
+        if needs_reopen:
+            if self._handle is not None:
+                try:
+                    self._handle.close()
+                except Exception:
+                    pass
             self._href = self._resolve(bbox_lonlat)
             self._handle = rasterio.open(self._href)
+            self._handle_bounds_lonlat = transform_bounds(
+                self._handle.crs, "EPSG:4326", *self._handle.bounds)
         return self._handle
 
     @property
@@ -92,6 +123,7 @@ class DemSource:
                 except Exception:
                     pass
                 self._handle = None
+                self._handle_bounds_lonlat = None
                 src = self._open(bbox_lonlat)
 
         nodata = src.nodata
@@ -113,3 +145,4 @@ class DemSource:
                 self._handle.close()
             finally:
                 self._handle = None
+                self._handle_bounds_lonlat = None

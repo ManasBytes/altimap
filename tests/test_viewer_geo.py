@@ -88,3 +88,18 @@ def test_resample_to_is_a_noop_when_shapes_match():
 
 def test_ground_size_m_multiplies_pixel_count_by_resolution():
     assert ground_size_m(826, 826, (0.5173, 0.5173)) == pytest.approx((427.3, 427.3), abs=0.1)
+
+
+def test_bboxes_intersect_detects_overlap_and_disjoint():
+    """Regression: DemSource silently reused one city's raster handle for the
+    next, reading all-NaN windows and reporting 'no coverage' instead of
+    reopening. This is the check that should have caught it."""
+    from viewer.dem import bboxes_intersect
+
+    austin = (-97.9, 30.1, -97.6, 30.3)
+    vienna = (16.2, 48.1, 16.5, 48.3)
+    overlapping = (-97.8, 30.2, -97.5, 30.4)
+
+    assert bboxes_intersect(austin, overlapping) is True
+    assert bboxes_intersect(austin, vienna) is False
+    assert bboxes_intersect(austin, austin) is True
