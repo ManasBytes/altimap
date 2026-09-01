@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
@@ -38,11 +39,26 @@ SCENES_DIR = UPLOAD_DIR / "scenes"
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 ALLOWED_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
 PROCESS_RES = 504
+CLASSIFY_RES = 513  # matches gamus-terrain's HEIGHT_SAMPLE_WIDTH/HEIGHT
 
 app = FastAPI(title="AltiMap")
 
+# The gamus-terrain viewer (Vite dev server) runs on a different origin than
+# this API, and the classify-static response is consumed straight into a
+# canvas for pixel readback -- an uncorsed image would taint that canvas and
+# make getImageData throw, so this has to be wide open on responses, not just
+# reachable.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 _model = None
 _device = None
+_class_model = None
+_class_device = None
 _dem = None
 
 
@@ -66,6 +82,17 @@ def _get_dem():
 
         _dem = DemSource()
     return _dem
+
+
+def _get_class_model():
+    """Loaded on first use, same reasoning as _get_model: a multi-second
+    checkpoint load must not block every static file request at startup."""
+    global _class_model, _class_device
+    if _class_model is None:
+        from viewer.classify import load_model
+
+        _class_model, _class_device = load_model()
+    return _class_model, _class_device
 
 
 def _safe_stem(name: str) -> str:
@@ -193,6 +220,94 @@ async def upload(file: UploadFile = File(...), glb: bool = True):
 
     _write_upload_index()
     return JSONResponse(record)
+
+
+def _png_data_uri(arr: np.ndarray) -> str:
+    import base64
+    import io
+
+    buf = io.BytesIO()
+    Image.fromarray(arr, mode="RGB").save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+@app.post("/api/classify-static")
+async def classify_static(file: UploadFile = File(...)):
+    """Non-georeferenced path: classify land cover, elevate by fixed
+    per-class height constants. No depth model involved -- see
+    viewer/classify.py's module docstring for why, and for the plan to
+    calibrate a depth model against these same static values later.
+
+    Returns everything as data URIs rather than files under /data-uploads/,
+    so the response needs no follow-up fetch and (more importantly) never
+    taints the canvas the frontend reads pixels back from -- a real
+    same-origin URL would need CORS-correct caching semantics to guarantee
+    that on every browser, a data URI just structurally can't fail it.
+    """
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(415, f"unsupported type {suffix or '(none)'}; "
+                                 f"expected one of {sorted(ALLOWED_SUFFIXES)}")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "empty upload")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"file is {len(data)/1e6:.0f} MB; limit is "
+                                 f"{MAX_UPLOAD_BYTES/1e6:.0f} MB")
+
+    from viewer.classify import classes_to_rgb, classes_to_static_height, predict_classes
+
+    started = time.perf_counter()
+    rgb_full = _read_rgb_bytes(data, suffix)
+    rgb = np.asarray(
+        Image.fromarray(rgb_full).resize((CLASSIFY_RES, CLASSIFY_RES), Image.BILINEAR),
+        dtype=np.uint8,
+    )
+
+    model, device = _get_class_model()
+    class_map = predict_classes(rgb, model, device)
+    height = classes_to_static_height(class_map)
+    height_u8 = np.clip(height * 255.0, 0, 255).astype(np.uint8)
+    elapsed = time.perf_counter() - started
+
+    counts = {name: int((class_map == i).sum()) for i, name in enumerate(
+        ["background", "ground", "low_vegetation", "buildings", "water", "roads", "trees"]
+    )}
+
+    return JSONResponse({
+        "seconds": round(elapsed, 3),
+        "width": CLASSIFY_RES,
+        "height_px": CLASSIFY_RES,
+        "class_pixel_counts": counts,
+        "rgb": _png_data_uri(rgb),
+        "height": _png_data_uri(np.stack([height_u8] * 3, axis=-1)),
+        "classes": _png_data_uri(classes_to_rgb(class_map)),
+    })
+
+
+def _read_rgb_bytes(data: bytes, suffix: str) -> np.ndarray:
+    """Same normalization as _read_rgb, for bytes already read into memory
+    (this endpoint never stages the upload to disk -- it's not saved
+    anywhere and there is no georeferencing path that would need the file)."""
+    import io
+
+    if suffix in {".tif", ".tiff"}:
+        try:
+            import rasterio
+
+            with rasterio.MemoryFile(data) as memfile, memfile.open() as src:
+                bands = min(3, src.count)
+                arr = np.transpose(src.read(list(range(1, bands + 1))), (1, 2, 0))
+            if arr.shape[2] == 1:
+                arr = np.repeat(arr, 3, axis=2)
+            if arr.dtype != np.uint8:
+                a = arr.astype(np.float64)
+                lo, hi = np.percentile(a, [2, 98])
+                arr = np.clip((a - lo) / max(hi - lo, 1e-9) * 255, 0, 255).astype(np.uint8)
+            return np.ascontiguousarray(arr[:, :, :3])
+        except Exception:
+            pass
+    return np.asarray(Image.open(io.BytesIO(data)).convert("RGB"), dtype=np.uint8)
 
 
 @app.get("/api/uploads")
