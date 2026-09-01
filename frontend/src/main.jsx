@@ -5,7 +5,6 @@ import {
   Eye,
   FileImage,
   Layers3,
-  Map,
   Maximize2,
   Minus,
   Mountain,
@@ -424,8 +423,13 @@ const CLASS_HEIGHT_CAP = [0.72, 0.62, 0.42, 0.78, 0.28, 0.56, 0.34];
 const HEIGHT_WORLD_SCALE = 0.62;
 const TERRAIN_BASELINE = 0.32;
 const BUILDING_CLASS_INDEX = 3;
-const BUILDING_NORMALIZE_LOW = 0.08;
-const BUILDING_NORMALIZE_HIGH = 0.94;
+const BUILDING_NORMALIZE_LOW = 0.1;
+// A handful of genuinely tall structures (or noisy AGL pixels) can otherwise
+// set the top of the scale, which then over-amplifies an ordinary house's
+// own single highest pixel (e.g. its roof ridge) toward that same cap.
+// Trimming the top percentile further keeps that ceiling closer to what
+// "tall" buildings in the scene actually look like.
+const BUILDING_NORMALIZE_HIGH = 0.88;
 
 // Raw height-map pixels are single-sample estimates, so buildings render as
 // bristling, knife-edge columns. A box/Gaussian blur would remove that noise
@@ -523,26 +527,37 @@ function buildClassField(px, width, height) {
   return out;
 }
 
-function limitHeightDiscontinuities(field, width, height) {
-  const out = field.slice();
-  const maxJump = 0.12;
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
-      const index = y * width + x;
-      let neighborTotal = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx || dy) neighborTotal += field[(y + dy) * width + x + dx];
+// A single clamp pass only compares a pixel to its immediate neighbors, so a
+// ridge-shaped spike a few pixels wide (a roof peak, a noisy AGL cluster)
+// keeps a high neighbor-mean along its whole length and survives untouched.
+// Running several passes lets each one erode a bit more off the spike's
+// edges, so by the last pass even a multi-pixel ridge has been ground back
+// down toward its surrounding roofline instead of just its outermost rim.
+function limitHeightDiscontinuities(field, width, height, passes = 4) {
+  const maxJump = 0.07;
+  let current = field;
+  for (let pass = 0; pass < passes; pass++) {
+    const out = current.slice();
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const index = y * width + x;
+        let neighborTotal = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx || dy)
+              neighborTotal += current[(y + dy) * width + x + dx];
+          }
         }
+        const neighborMean = neighborTotal / 8;
+        out[index] = Math.min(
+          neighborMean + maxJump,
+          Math.max(neighborMean - maxJump, current[index]),
+        );
       }
-      const neighborMean = neighborTotal / 8;
-      out[index] = Math.min(
-        neighborMean + maxJump,
-        Math.max(neighborMean - maxJump, field[index]),
-      );
     }
+    current = out;
   }
-  return out;
+  return current;
 }
 
 function applyClassHeightScale(rawHeight, classField, width, height) {
@@ -1426,7 +1441,34 @@ function TerrainCanvas({
   );
 }
 
+// Non-georeferenced path: classify (7 land-cover classes) + elevate by fixed
+// per-class height constants -- no depth model. See viewer/classify.py in
+// the AltiMap backend for why depth is deliberately skipped here and the
+// plan to calibrate one against these same static values later.
+const CLASSIFY_API_URL = "http://localhost:8000/api/classify-static";
+const CLASSIFY_CLASS_LABELS = [
+  "background",
+  "ground",
+  "low_vegetation",
+  "buildings",
+  "water",
+  "roads",
+  "trees",
+];
+// Maps the classifier's plural class names to the singular .class-dot
+// modifiers the terrain workspace's legend already defines in blender.css.
+const CLASS_DOT_STYLE = {
+  background: "",
+  ground: "ground",
+  low_vegetation: "vegetation",
+  buildings: "building",
+  water: "water",
+  roads: "road",
+  trees: "tree",
+};
+
 function App() {
+  const [view, setView] = useState("terrain"); // terrain | upload
   const [split, setSplit] = useState("train");
   const [sample, setSample] = useState(initialSample);
   const [layer, setLayer] = useState("texture");
@@ -1442,7 +1484,12 @@ function App() {
   const [waypointCount, setWaypointCount] = useState(0);
   const [selectedWaypoint, setSelectedWaypoint] = useState(null);
   const [pathCommand, setPathCommand] = useState({ type: "idle", id: 0 });
+  const [uploadFileName, setUploadFileName] = useState("");
+  const [uploadStatus, setUploadStatus] = useState("idle"); // idle | loading | error
+  const [uploadError, setUploadError] = useState("");
+  const [uploadMeta, setUploadMeta] = useState(null);
   const fileRef = useRef(null);
+  const uploadFileRef = useRef(null);
   const notify = (msg) => {
     setToast(msg);
     setTimeout(() => setToast(""), 1800);
@@ -1455,6 +1502,57 @@ function App() {
     setSelectedWaypoint(null);
     setPlaying(false);
     notify(`Loaded ${s.id}`);
+  };
+  const runClassification = async (file) => {
+    setUploadFileName(file.name);
+    setUploadStatus("loading");
+    setUploadError("");
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch(CLASSIFY_API_URL, { method: "POST", body });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        throw new Error(detail?.detail || `Server returned ${res.status}`);
+      }
+      const data = await res.json();
+      // Reuses the exact same `sample` shape as a catalog scene (rgb/height/
+      // classes URLs + label/coord/max) so every existing viewer feature --
+      // layer switching, waypoints, measuring -- works on it unmodified.
+      setSample({
+        id: "upload",
+        label: file.name,
+        coord: "No coordinates · non-georeferenced",
+        rgb: data.rgb,
+        height: data.height,
+        classes: data.classes,
+        max: "static estimate",
+        thumb: data.rgb,
+      });
+      setUploadMeta({
+        seconds: data.seconds,
+        width: data.width,
+        height_px: data.height_px,
+        class_pixel_counts: data.class_pixel_counts,
+      });
+      setProfileCleared(false);
+      setWaypointCount(0);
+      setSelectedWaypoint(null);
+      setPlaying(false);
+      setUploadStatus("idle");
+      notify(`Classified ${file.name}`);
+    } catch (err) {
+      setUploadError(
+        err.message === "Failed to fetch"
+          ? "Couldn't reach the classifier backend — is it running at localhost:8000?"
+          : err.message,
+      );
+      setUploadStatus("error");
+    }
+  };
+  const onPickUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (file) runClassification(file);
   };
   const sceneIndex = Math.max(
     0,
@@ -1545,13 +1643,18 @@ function App() {
         </div>
         <div className="rail-nav">
           <button
-            className="active"
-            onClick={() => notify("Terrain workspace active")}
+            className={view === "terrain" ? "active" : ""}
+            onClick={() => setView("terrain")}
+            title="Terrain workspace"
           >
             <Layers3 size={18} />
           </button>
-          <button onClick={() => notify("Map overview selected")}>
-            <Map size={18} />
+          <button
+            className={view === "upload" ? "active" : ""}
+            onClick={() => setView("upload")}
+            title="Upload & classify"
+          >
+            <Upload size={18} />
           </button>
           <button onClick={() => notify("Analytics panel selected")}>
             <Activity size={18} />
@@ -1821,6 +1924,7 @@ function App() {
                 <span>42.8 m</span>
               </div>
             </div>
+            {view === "terrain" ? (
             <div className="control-section scene-switcher">
               <div className="label-row">
                 <label>Scene</label>
@@ -1871,6 +1975,76 @@ function App() {
                 <button onClick={() => changeScene(1)}>Next →</button>
               </div>
             </div>
+            ) : (
+            <div className="control-section upload-switcher">
+              <div className="label-row">
+                <label>Upload &amp; classify</label>
+                <span>non-georeferenced</span>
+              </div>
+              <p className="upload-copy">
+                Upload a plain PNG/JPG with no coordinate metadata — it's
+                classified into 7 land-cover classes, then elevated with
+                fixed per-class height constants. No depth model runs on
+                this path yet.
+              </p>
+              <input
+                ref={uploadFileRef}
+                type="file"
+                accept=".png,.jpg,.jpeg"
+                onChange={onPickUpload}
+                hidden
+              />
+              <button
+                className="upload-dropzone"
+                onClick={() => uploadFileRef.current?.click()}
+                disabled={uploadStatus === "loading"}
+              >
+                <Upload size={20} />
+                <span>
+                  {uploadStatus === "loading"
+                    ? `Classifying ${uploadFileName}…`
+                    : uploadFileName
+                      ? `${uploadFileName} — click to replace`
+                      : "Click to choose an image"}
+                </span>
+              </button>
+              {uploadStatus === "error" && (
+                <div className="upload-error">{uploadError}</div>
+              )}
+              {uploadMeta && (
+                <>
+                  <div className="metric-grid">
+                    <div>
+                      <small>Processed in</small>
+                      <strong>{uploadMeta.seconds.toFixed(2)}s</strong>
+                    </div>
+                    <div>
+                      <small>Resolution</small>
+                      <strong>
+                        {uploadMeta.width}×{uploadMeta.height_px}
+                      </strong>
+                    </div>
+                  </div>
+                  <div className="class-breakdown">
+                    {CLASSIFY_CLASS_LABELS.map((name) => {
+                      const count = uploadMeta.class_pixel_counts?.[name] ?? 0;
+                      const total = uploadMeta.width * uploadMeta.height_px;
+                      const pct = total
+                        ? ((count / total) * 100).toFixed(1)
+                        : "0.0";
+                      return (
+                        <div key={name} className="class-breakdown-row">
+                          <i className={`class-dot ${CLASS_DOT_STYLE[name]}`} />
+                          <span>{name.replace("_", " ")}</span>
+                          <strong>{pct}%</strong>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+            )}
             <div className="control-section waypoint-panel">
               <div className="label-row">
                 <label>Camera route</label>
