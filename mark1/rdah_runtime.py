@@ -90,11 +90,16 @@ class RDAHNetPredictor:
             relative = np.pad(relative, ((0, pad_y), (0, pad_x)), mode="edge")
         if relative.shape != rgb_pad.shape[:2] or not np.isfinite(relative).all():
             raise RDAHCheckpointError("relative-depth prior must return finite raw depth on the padded input grid")
-        image_tensor = self.torch.from_numpy(np.moveaxis(rgb_pad, -1, 0)[None].astype(np.float32) / 255.0).to(self.device)
+        image_array = np.moveaxis(rgb_pad, -1, 0)[None].astype(np.float32) / 255.0
+        # Match the authors' testing loader exactly: ToTensor followed by
+        # ImageNet channel normalisation (loaddata.py / nyu_transform.py).
+        mean = np.asarray((0.485, 0.456, 0.406), dtype=np.float32)[None, :, None, None]
+        std = np.asarray((0.229, 0.224, 0.225), dtype=np.float32)[None, :, None, None]
+        image_array = (image_array - mean) / std
+        image_tensor = self.torch.from_numpy(image_array).to(self.device)
         depth_tensor = self.torch.from_numpy(relative[None, None]).to(self.device)
         with self.torch.inference_mode():
             ndsm = self.model(depth_tensor, image_tensor)[0, 0].float().cpu().numpy()
         return np.maximum(ndsm[:height, :width], 0.0).astype(np.float32), None
-
 
 

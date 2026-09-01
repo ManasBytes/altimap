@@ -2,7 +2,7 @@
 
 AltiMap Mark‑1 is a prepared, browser-based demonstration of single-view remote-sensing height estimation. It keeps the Biplab Three.js terrain experience and is packaged as a static site. The intended offline research pipeline is **Depth Anything V2 (DAV2) → pretrained RDAH-Net → predicted above-ground height**, followed by comparison with GAMUS reference data.
 
-The current container serves the prepared frontend assets. It does not run PyTorch inference, accept live GAMUS HDF5 uploads, or fine-tune a model at runtime.
+The current container serves prepared frontend assets. It does not run PyTorch inference, accept live GAMUS HDF5 uploads, or fine-tune a model at runtime. The raw Track-1 RDAH output collapses on GAMUS, so the visible Mark-1 prediction uses an explicitly labelled DAV2 + CLS semantic-prior fallback: class-height medians are fitted on the six training AGL scenes only, then DAV2 supplies within-class shape. Validation/test AGL remains evaluation-only.
 
 ## Run the demo
 
@@ -38,7 +38,7 @@ metrics, maps and prepared 3D assets
 Biplab Three.js viewer
 ```
 
-DAV2 and RDAH weights remain frozen. Mark‑1 does not train or fine-tune either network. A later experiment may fit a single global scale calibration, but it must not fit one scale per scene.
+DAV2 and RDAH weights remain frozen. Mark‑1 does not train or fine-tune either network. The prototype does fit seven simple class-height medians from the training split; this is semantic-prior calibration, not neural-network training. The supplied GAMUS CLS files are reference labels, not predictions from a classification model, and must eventually be replaced by an RGB segmentation model for arbitrary uploads.
 
 The current repository packaging is deliberately separate from that GPU preprocessing step. The browser should receive generated assets and a scene manifest; it should not need the HDF5 files or multi-gigabyte model weights merely to launch the demo.
 

@@ -35,6 +35,12 @@ import "./blender.css";
 const N = 512,
   S = N + 1;
 const EMPTY = { mae: null, mse: null, rmse: null, bias: null };
+const CLASS_LEGEND = [
+  [0, "Other", "#28303a"], [1, "Ground", "#7b9d70"],
+  [2, "Low vegetation", "#58b06a"], [3, "Building", "#da7e4c"],
+  [4, "Water", "#4192c9"], [5, "Road", "#ac945c"],
+  [6, "Tree", "#367448"],
+];
 const fallbackPairs = [
   ["train", "DC_01_25"],
   ["train", "DC_02_24"],
@@ -106,11 +112,34 @@ function sceneOf(input) {
       predictedHeight: l.predictedHeight || predicted,
       referenceHeight: l.referenceHeight || reference,
       errorHeatmap: l.errorHeatmap || l.error || null,
+      classes: l.classes || null,
+      predictedSurface: l.predictedSurface || l.predictedHeight || predicted,
+      referenceSurface: l.referenceSurface || l.referenceHeight || reference,
     },
     geometry: { predicted, reference, error: g.error || predicted },
     metrics: { ...EMPTY, ...(input.metrics || {}) },
     classMetrics: input.classMetrics || {},
   };
+}
+
+function ScaleLegend({ sample, layer, mode }) {
+  if (layer === "classes")
+    return <div className="class-legend">{CLASS_LEGEND.map(([id, name, color]) =>
+      <span key={id}><b style={{ background: color }} />{id} {name}</span>)}</div>;
+  if (layer === "texture")
+    return <div className="legend-note">Original GAMUS RGB texture</div>;
+  const range = layer === "depth"
+    ? sample.depthRange
+    : layer === "error"
+      ? sample.errorRangeM
+      : sample.surfaceRangesM?.[mode === "reference" ? "reference" : "predicted"];
+  if (!range || range.length < 2) return <div className="legend-note">Scale unavailable</div>;
+  const [low, high] = range.map(Number), middle = (low + high) / 2;
+  const unit = layer === "depth" ? "DAV2 units" : "m";
+  return <div className={`numeric-legend ${layer === "error" ? "error-scale" : ""}`}>
+    <div className="legend-gradient" />
+    <div className="legend-values"><span>{low.toFixed(2)} {unit}</span><span>{middle.toFixed(2)} {unit}</span><span>{high.toFixed(2)} {unit}</span></div>
+  </div>;
 }
 function metric(v, unit) {
   return Number.isFinite(Number(v)) ? `${Number(v).toFixed(2)} ${unit}` : "—";
@@ -443,8 +472,12 @@ function Terrain({
             ? data.layers.depth
             : layer === "error"
               ? data.layers.errorHeatmap
-              : layer === "classes"
+            : layer === "classes"
                 ? data.layers.classes
+              : layer === "surface"
+                ? mode === "reference"
+                  ? data.layers.referenceSurface
+                  : data.layers.predictedSurface
               : mode === "reference"
                 ? data.layers.referenceHeight
                 : data.layers.predictedHeight;
@@ -776,17 +809,7 @@ function App() {
               </div>
             </div>
             <div className="viewport-footer">
-              <div className="legend">
-                <span>
-                  <b className="swatch low" /> Low
-                </span>
-                <span>
-                  <b className="swatch mid" /> Mid
-                </span>
-                <span>
-                  <b className="swatch high" /> High
-                </span>
-              </div>
+              <ScaleLegend sample={sample} layer={layer} mode={mode} />
               <div className="footer-note">
                 <Eye size={14} /> 512 × 512 interactive mesh ·{" "}
                 {sample.localGrid
@@ -814,6 +837,12 @@ function App() {
                 <span>
                   Preview-only assets. Prediction metrics are not available.
                 </span>
+              </div>
+            )}
+            {sample.predictionMethod && (
+              <div className="method-notice">
+                <strong>{sample.predictionMethod.name}</strong>
+                <span>{sample.predictionMethod.class_source}</span>
               </div>
             )}
             <div className="metric-grid">

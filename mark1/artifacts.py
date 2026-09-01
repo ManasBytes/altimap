@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from .codec import encode_rg16
 from .metrics import HeightMetrics, evaluate_height
@@ -16,6 +17,18 @@ def _preview(values: np.ndarray, path: Path, low: float, high: float) -> None:
     rgb = np.rint(scaled * 255).astype(np.uint8)
     from .codec import _write_png
     _write_png(path, rgb, 0)
+
+
+def _color_preview(values: np.ndarray, path: Path, low: float, high: float, error: bool = False) -> None:
+    scaled = np.clip((np.nan_to_num(values, nan=low) - low) / max(high - low, 1e-6), 0, 1)
+    stops = np.asarray(
+        [(35, 69, 188), (232, 210, 72), (204, 51, 69)] if error else
+        [(9, 45, 74), (42, 119, 142), (112, 193, 157), (247, 207, 88)],
+        dtype=np.float32,
+    )
+    positions = np.linspace(0, 1, len(stops))
+    channels = [np.interp(scaled, positions, stops[:, channel]) for channel in range(3)]
+    Image.fromarray(np.stack(channels, axis=-1).astype(np.uint8), mode="RGB").save(path)
 
 
 def export_scene(
@@ -35,19 +48,24 @@ def export_scene(
     arrays = {"relative_depth": relative_depth, "predicted": predicted, "reference_agl": reference_agl, "classes": classes}
     for name, array in arrays.items():
         np.save(root / f"{name}.npy", np.asarray(array))
-    from PIL import Image
     Image.fromarray(np.asarray(rgb, dtype=np.uint8), mode="RGB").save(root / "rgb.jpg", quality=92, optimize=True)
     metrics: HeightMetrics = evaluate_height(predicted, reference_agl, classes)
-    valid_values = np.concatenate([np.asarray(predicted)[np.isfinite(predicted)], np.asarray(reference_agl)[np.isfinite(reference_agl)]])
-    lo, hi = float(max(0, np.min(valid_values))), float(max(np.max(valid_values), np.min(valid_values) + 1e-6))
+    valid_values = np.concatenate([np.asarray(predicted)[np.isfinite(predicted)], np.asarray(reference_agl)[np.isfinite(reference_agl) & (reference_agl >= 0)]])
+    lo = 0.0
+    hi = float(max(np.percentile(valid_values, 99.5), 1e-6))
+    pred_hi = float(max(np.percentile(np.asarray(predicted)[np.isfinite(predicted)], 99.5), 1e-6))
+    ref_valid = np.asarray(reference_agl)[np.isfinite(reference_agl) & (reference_agl >= 0)]
+    ref_hi = float(max(np.percentile(ref_valid, 99.5), 1e-6))
     encode_rg16(predicted, root / "predicted-height.png", lo, hi)
     encode_rg16(reference_agl, root / "reference-height.png", lo, hi)
     error = np.abs(np.asarray(predicted, dtype=np.float32) - np.asarray(reference_agl, dtype=np.float32))
     encode_rg16(np.nan_to_num(error, nan=0.0), root / "error-height.png", 0.0, max(1e-6, float(np.nanmax(error))))
-    _preview(relative_depth, root / "dav2-depth.png", float(np.nanmin(relative_depth)), float(np.nanmax(relative_depth)))
-    _preview(predicted, root / "predicted-height-preview.png", lo, hi)
-    _preview(reference_agl, root / "reference-height-preview.png", lo, hi)
-    _preview(np.nan_to_num(error, nan=0.0), root / "error-heatmap.png", 0.0, max(1e-6, float(np.nanmax(error))))
+    depth_lo, depth_hi = [float(v) for v in np.nanpercentile(relative_depth, (2, 98))]
+    error_hi = float(max(1e-6, np.nanpercentile(error, 99.5)))
+    _color_preview(relative_depth, root / "dav2-depth.png", depth_lo, depth_hi)
+    _color_preview(predicted, root / "predicted-height-preview.png", 0.0, pred_hi)
+    _color_preview(reference_agl, root / "reference-height-preview.png", 0.0, ref_hi)
+    _color_preview(np.nan_to_num(error, nan=0.0), root / "error-heatmap.png", 0.0, error_hi, error=True)
     class_preview = np.zeros((*classes.shape, 3), dtype=np.uint8)
     class_colors = {
         0: (40, 48, 58), 1: (123, 157, 112), 2: (88, 176, 106),
@@ -69,6 +87,10 @@ def export_scene(
         "pixel_spacing_m": 0.33,
         "crs": None,
         "height_range_m": [lo, hi],
+        "predicted_range_m": [0.0, pred_hi],
+        "reference_range_m": [0.0, ref_hi],
+        "depth_range": [depth_lo, depth_hi],
+        "error_range_m": [0.0, error_hi],
         "metrics": metrics.as_dict(),
         "classMetrics": metrics.class_mae_m,
         "assets": {

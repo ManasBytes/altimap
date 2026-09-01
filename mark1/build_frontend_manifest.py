@@ -30,8 +30,16 @@ def main() -> None:
                 "crs": None,
                 "pixelSpacingM": item.get("pixel_spacing_m"),
                 "model": item.get("model"),
+                "predictionMethod": item.get("prediction_method"),
                 "calibration": item.get("calibration"),
                 "heightRangeM": item.get("height_range_m"),
+                "surfaceRangesM": {
+                    "predicted": item.get("predicted_range_m"),
+                    "reference": item.get("reference_range_m"),
+                    "error": item.get("predicted_range_m"),
+                },
+                "depthRange": item.get("depth_range"),
+                "errorRangeM": item.get("error_range_m"),
                 "metrics": {
                     "mae": metrics["mae_m"], "mse": metrics["mse_m2"],
                     "rmse": metrics["rmse_m"], "bias": metrics["bias_m"],
@@ -46,6 +54,8 @@ def main() -> None:
                     "referenceHeight": f"{base}/reference-height.png",
                     "errorHeatmap": f"{base}/error-heatmap.png",
                     "classes": f"{base}/classes-preview.png",
+                    "predictedSurface": f"{base}/predicted-height-preview.png",
+                    "referenceSurface": f"{base}/reference-height-preview.png",
                 },
                 "geometry": {
                     "predicted": f"{base}/predicted-height.png",
@@ -58,7 +68,7 @@ def main() -> None:
         "version": 2,
         "source": "earthflow/GAMUS",
         "scope": "Mark-1 selected 18 scenes",
-        "notes": "Offline frozen DAV2 + RDAH prediction assets; metrics are computed against GAMUS AGL after inference.",
+        "notes": "DAV2 + train-fitted CLS semantic-prior fallback after raw RDAH failed the GAMUS non-collapse gate; metrics use GAMUS AGL after prediction.",
         "scenes": scenes,
     }
     args.public.mkdir(parents=True, exist_ok=True)

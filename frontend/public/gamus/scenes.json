@@ -2,7 +2,7 @@
   "version": 2,
   "source": "earthflow/GAMUS",
   "scope": "Mark-1 selected 18 scenes",
-  "notes": "Offline frozen DAV2 + RDAH prediction assets; metrics are computed against GAMUS AGL after inference.",
+  "notes": "DAV2 + train-fitted CLS semantic-prior fallback after raw RDAH failed the GAMUS non-collapse gate; metrics use GAMUS AGL after prediction.",
   "scenes": [
     {
       "id": "DC_01_25",
@@ -12,28 +12,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        44.51300048828125
+        37.481998443603516
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          23.363720655441284
+        ],
+        "reference": [
+          0.0,
+          38.61800003051758
+        ],
+        "error": [
+          0.0,
+          23.363720655441284
+        ]
+      },
+      "depthRange": [
+        0.8012255728244781,
+        1.488487720489502
+      ],
+      "errorRangeM": [
+        0.0,
+        26.08893632888794
       ],
       "metrics": {
-        "mae": 10.972509461206467,
-        "mse": 263.42949382547835,
-        "rmse": 16.230511200374384,
-        "bias": -10.93247532145184,
+        "mae": 5.848253123754085,
+        "mse": 78.29996328691642,
+        "rmse": 8.848726647767826,
+        "bias": -2.26165492068591,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 5.057680673406278,
-        "tree": 21.278003123557685
+        "building": 3.739496275372837,
+        "tree": 10.449892240571502
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -42,7 +73,9 @@
         "predictedHeight": "/gamus/train/DC_01_25/predicted-height.png",
         "referenceHeight": "/gamus/train/DC_01_25/reference-height.png",
         "errorHeatmap": "/gamus/train/DC_01_25/error-heatmap.png",
-        "classes": "/gamus/train/DC_01_25/classes-preview.png"
+        "classes": "/gamus/train/DC_01_25/classes-preview.png",
+        "predictedSurface": "/gamus/train/DC_01_25/predicted-height-preview.png",
+        "referenceSurface": "/gamus/train/DC_01_25/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/train/DC_01_25/predicted-height.png",
@@ -58,28 +91,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        38.22200012207031
+        33.15353775024414
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          23.343740940093994
+        ],
+        "reference": [
+          0.0,
+          34.4202766418457
+        ],
+        "error": [
+          0.0,
+          23.343740940093994
+        ]
+      },
+      "depthRange": [
+        0.672185629606247,
+        1.4100922346115112
+      ],
+      "errorRangeM": [
+        0.0,
+        28.273448944091797
       ],
       "metrics": {
-        "mae": 11.766806523601415,
-        "mse": 235.0520789193365,
-        "rmse": 15.331408249711979,
-        "bias": -11.745188793463571,
+        "mae": 6.139755886118662,
+        "mse": 79.72640870743233,
+        "rmse": 8.928964593245531,
+        "bias": -2.3741649336172843,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 9.1037126878835,
-        "tree": 17.612406004755016
+        "building": 5.11408085302026,
+        "tree": 7.504787802878314
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -88,7 +152,9 @@
         "predictedHeight": "/gamus/train/DC_10_17/predicted-height.png",
         "referenceHeight": "/gamus/train/DC_10_17/reference-height.png",
         "errorHeatmap": "/gamus/train/DC_10_17/error-heatmap.png",
-        "classes": "/gamus/train/DC_10_17/classes-preview.png"
+        "classes": "/gamus/train/DC_10_17/classes-preview.png",
+        "predictedSurface": "/gamus/train/DC_10_17/predicted-height-preview.png",
+        "referenceSurface": "/gamus/train/DC_10_17/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/train/DC_10_17/predicted-height.png",
@@ -104,28 +170,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        36.79399871826172
+        30.40418815612793
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          25.120279550552368
+        ],
+        "reference": [
+          0.0,
+          32.120304107666016
+        ],
+        "error": [
+          0.0,
+          25.120279550552368
+        ]
+      },
+      "depthRange": [
+        0.5245789587497711,
+        1.3659831881523132
+      ],
+      "errorRangeM": [
+        0.0,
+        20.929795265197754
       ],
       "metrics": {
-        "mae": 7.4591580978500325,
-        "mse": 114.93820625413655,
-        "rmse": 10.720923759365913,
-        "bias": -7.423228613485673,
+        "mae": 4.406482639359118,
+        "mse": 45.22518986761365,
+        "rmse": 6.724967648071896,
+        "bias": 0.4752249586928774,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 6.899601468828807,
-        "tree": 13.354874883111698
+        "building": 3.4281905873139933,
+        "tree": 7.291539921112491
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -134,7 +231,9 @@
         "predictedHeight": "/gamus/train/DC_10_18/predicted-height.png",
         "referenceHeight": "/gamus/train/DC_10_18/reference-height.png",
         "errorHeatmap": "/gamus/train/DC_10_18/error-heatmap.png",
-        "classes": "/gamus/train/DC_10_18/classes-preview.png"
+        "classes": "/gamus/train/DC_10_18/classes-preview.png",
+        "predictedSurface": "/gamus/train/DC_10_18/predicted-height-preview.png",
+        "referenceSurface": "/gamus/train/DC_10_18/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/train/DC_10_18/predicted-height.png",
@@ -150,28 +249,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        33.02000045776367
+        26.79199981689453
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          24.54413866996765
+        ],
+        "reference": [
+          0.0,
+          27.981000900268555
+        ],
+        "error": [
+          0.0,
+          24.54413866996765
+        ]
+      },
+      "depthRange": [
+        0.5596515834331512,
+        1.4893858432769775
+      ],
+      "errorRangeM": [
+        0.0,
+        20.910056114196777
       ],
       "metrics": {
-        "mae": 7.446777660553982,
-        "mse": 106.74600994606179,
-        "rmse": 10.331796065837818,
-        "bias": -7.417938995755169,
+        "mae": 4.3614051741840445,
+        "mse": 42.125332735771615,
+        "rmse": 6.490403125829059,
+        "bias": -0.37237413808555386,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 7.03496042236803,
-        "tree": 12.79450508828706
+        "building": 3.808494149953709,
+        "tree": 6.38463567067505
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -180,7 +310,9 @@
         "predictedHeight": "/gamus/train/DC_10_19/predicted-height.png",
         "referenceHeight": "/gamus/train/DC_10_19/reference-height.png",
         "errorHeatmap": "/gamus/train/DC_10_19/error-heatmap.png",
-        "classes": "/gamus/train/DC_10_19/classes-preview.png"
+        "classes": "/gamus/train/DC_10_19/classes-preview.png",
+        "predictedSurface": "/gamus/train/DC_10_19/predicted-height-preview.png",
+        "referenceSurface": "/gamus/train/DC_10_19/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/train/DC_10_19/predicted-height.png",
@@ -196,28 +328,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        45.80099868774414
+        40.78846300125118
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          22.155759811401367
+        ],
+        "reference": [
+          0.0,
+          41.94691848754883
+        ],
+        "error": [
+          0.0,
+          22.155759811401367
+        ]
+      },
+      "depthRange": [
+        0.4300217479467392,
+        1.5757676362991333
+      ],
+      "errorRangeM": [
+        0.0,
+        30.870569705963135
       ],
       "metrics": {
-        "mae": 17.9096144429591,
-        "mse": 499.5146505878805,
-        "rmse": 22.34982439724931,
-        "bias": -17.882168108218444,
+        "mae": 9.772629109673193,
+        "mse": 173.5644653752311,
+        "rmse": 13.174386717233979,
+        "bias": -7.7038452179744,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 8.933460845374134,
-        "tree": 25.81164683324438
+        "building": 4.155064548262725,
+        "tree": 13.215776760610312
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -226,7 +389,9 @@
         "predictedHeight": "/gamus/train/DC_10_21/predicted-height.png",
         "referenceHeight": "/gamus/train/DC_10_21/reference-height.png",
         "errorHeatmap": "/gamus/train/DC_10_21/error-heatmap.png",
-        "classes": "/gamus/train/DC_10_21/classes-preview.png"
+        "classes": "/gamus/train/DC_10_21/classes-preview.png",
+        "predictedSurface": "/gamus/train/DC_10_21/predicted-height-preview.png",
+        "referenceSurface": "/gamus/train/DC_10_21/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/train/DC_10_21/predicted-height.png",
@@ -242,28 +407,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        46.763999938964844
+        39.59540161132803
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          15.065411686897278
+        ],
+        "reference": [
+          0.0,
+          40.590338706970215
+        ],
+        "error": [
+          0.0,
+          15.065411686897278
+        ]
+      },
+      "depthRange": [
+        0.4479966163635254,
+        2.382231593132019
+      ],
+      "errorRangeM": [
+        0.0,
+        28.78346562385559
       ],
       "metrics": {
-        "mae": 10.517920944745027,
-        "mse": 258.4482575992124,
-        "rmse": 16.076325998163025,
-        "bias": -10.465294390660759,
+        "mae": 6.106914927416326,
+        "mse": 98.14265604073753,
+        "rmse": 9.906697534533773,
+        "bias": -4.18627873883217,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 8.394114848491714,
-        "tree": 20.771976401159083
+        "building": 4.046364136909131,
+        "tree": 11.420458014662294
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -272,7 +468,9 @@
         "predictedHeight": "/gamus/train/DC_10_27/predicted-height.png",
         "referenceHeight": "/gamus/train/DC_10_27/reference-height.png",
         "errorHeatmap": "/gamus/train/DC_10_27/error-heatmap.png",
-        "classes": "/gamus/train/DC_10_27/classes-preview.png"
+        "classes": "/gamus/train/DC_10_27/classes-preview.png",
+        "predictedSurface": "/gamus/train/DC_10_27/predicted-height-preview.png",
+        "referenceSurface": "/gamus/train/DC_10_27/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/train/DC_10_27/predicted-height.png",
@@ -288,28 +486,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        41.516998291015625
+        36.14099884033203
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          24.567152500152588
+        ],
+        "reference": [
+          0.0,
+          37.21824884414673
+        ],
+        "error": [
+          0.0,
+          24.567152500152588
+        ]
+      },
+      "depthRange": [
+        0.6350328028202057,
+        1.7289276123046875
+      ],
+      "errorRangeM": [
+        0.0,
+        24.20469617843628
       ],
       "metrics": {
-        "mae": 7.8119333787293215,
-        "mse": 156.06962428547186,
-        "rmse": 12.492782887950622,
-        "bias": -7.764333086440403,
+        "mae": 4.701132843720293,
+        "mse": 57.15131323218524,
+        "rmse": 7.559848757229554,
+        "bias": -0.43010554664039347,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 4.845755740095753,
-        "tree": 17.616316911200595
+        "building": 3.586184505453135,
+        "tree": 9.519444816752799
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -318,7 +547,9 @@
         "predictedHeight": "/gamus/val/DC_02_26/predicted-height.png",
         "referenceHeight": "/gamus/val/DC_02_26/reference-height.png",
         "errorHeatmap": "/gamus/val/DC_02_26/error-heatmap.png",
-        "classes": "/gamus/val/DC_02_26/classes-preview.png"
+        "classes": "/gamus/val/DC_02_26/classes-preview.png",
+        "predictedSurface": "/gamus/val/DC_02_26/predicted-height-preview.png",
+        "referenceSurface": "/gamus/val/DC_02_26/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/val/DC_02_26/predicted-height.png",
@@ -334,28 +565,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        103.26300048828125
+        22.104000091552734
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          13.788558840751648
+        ],
+        "reference": [
+          0.0,
+          24.014602661132812
+        ],
+        "error": [
+          0.0,
+          13.788558840751648
+        ]
+      },
+      "depthRange": [
+        0.2552978992462158,
+        3.967841863632202
+      ],
+      "errorRangeM": [
+        0.0,
+        18.15593957901001
       ],
       "metrics": {
-        "mae": 5.881763912189556,
-        "mse": 79.36256895123356,
-        "rmse": 8.908567166005628,
-        "bias": -5.823671407263556,
+        "mae": 3.208937744348793,
+        "mse": 27.984779361962282,
+        "rmse": 5.290064211515989,
+        "bias": -1.9735397571429896,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 9.76808111980903,
-        "tree": 11.941087253473247
+        "building": 5.165897988478036,
+        "tree": 5.206841353049845
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -364,7 +626,9 @@
         "predictedHeight": "/gamus/val/DC_20_13/predicted-height.png",
         "referenceHeight": "/gamus/val/DC_20_13/reference-height.png",
         "errorHeatmap": "/gamus/val/DC_20_13/error-heatmap.png",
-        "classes": "/gamus/val/DC_20_13/classes-preview.png"
+        "classes": "/gamus/val/DC_20_13/classes-preview.png",
+        "predictedSurface": "/gamus/val/DC_20_13/predicted-height-preview.png",
+        "referenceSurface": "/gamus/val/DC_20_13/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/val/DC_20_13/predicted-height.png",
@@ -380,28 +644,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        33.685001373291016
+        25.822797775268555
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          25.822797775268555
+        ],
+        "reference": [
+          0.0,
+          26.497404098510742
+        ],
+        "error": [
+          0.0,
+          25.822797775268555
+        ]
+      },
+      "depthRange": [
+        0.634287416934967,
+        1.7734014391899109
+      ],
+      "errorRangeM": [
+        0.0,
+        20.48216414451599
       ],
       "metrics": {
-        "mae": 6.237892803831211,
-        "mse": 83.70458114210453,
-        "rmse": 9.149020775039508,
-        "bias": -6.190532762885848,
+        "mae": 3.8669481046480083,
+        "mse": 37.76517204812159,
+        "rmse": 6.145337423455411,
+        "bias": 0.6905668023441581,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 6.566688775219597,
-        "tree": 12.350083452193667
+        "building": 3.1817569732267734,
+        "tree": 7.186610427345329
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -410,7 +705,9 @@
         "predictedHeight": "/gamus/val/DC_20_14/predicted-height.png",
         "referenceHeight": "/gamus/val/DC_20_14/reference-height.png",
         "errorHeatmap": "/gamus/val/DC_20_14/error-heatmap.png",
-        "classes": "/gamus/val/DC_20_14/classes-preview.png"
+        "classes": "/gamus/val/DC_20_14/classes-preview.png",
+        "predictedSurface": "/gamus/val/DC_20_14/predicted-height-preview.png",
+        "referenceSurface": "/gamus/val/DC_20_14/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/val/DC_20_14/predicted-height.png",
@@ -426,28 +723,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        34.827999114990234
+        27.900999069213867
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          23.815703630447388
+        ],
+        "reference": [
+          0.0,
+          28.88800048828125
+        ],
+        "error": [
+          0.0,
+          23.815703630447388
+        ]
+      },
+      "depthRange": [
+        0.5367712378501892,
+        1.6745730638504028
+      ],
+      "errorRangeM": [
+        0.0,
+        22.662147045135498
       ],
       "metrics": {
-        "mae": 8.920308789518067,
-        "mse": 145.3921927360799,
-        "rmse": 12.057868498871594,
-        "bias": -8.889326582833231,
+        "mae": 4.664588862310368,
+        "mse": 47.48691249565737,
+        "rmse": 6.891074843277888,
+        "bias": -0.9477261910003818,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 7.88077471560576,
-        "tree": 14.544996769218779
+        "building": 4.137850624573403,
+        "tree": 6.193445485811118
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -456,7 +784,9 @@
         "predictedHeight": "/gamus/val/DC_20_18/predicted-height.png",
         "referenceHeight": "/gamus/val/DC_20_18/reference-height.png",
         "errorHeatmap": "/gamus/val/DC_20_18/error-heatmap.png",
-        "classes": "/gamus/val/DC_20_18/classes-preview.png"
+        "classes": "/gamus/val/DC_20_18/classes-preview.png",
+        "predictedSurface": "/gamus/val/DC_20_18/predicted-height-preview.png",
+        "referenceSurface": "/gamus/val/DC_20_18/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/val/DC_20_18/predicted-height.png",
@@ -472,28 +802,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        35.257999420166016
+        27.371072387695257
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          25.822797775268555
+        ],
+        "reference": [
+          0.0,
+          28.64900016784668
+        ],
+        "error": [
+          0.0,
+          25.822797775268555
+        ]
+      },
+      "depthRange": [
+        0.6809931099414825,
+        1.8716962337493896
+      ],
+      "errorRangeM": [
+        0.0,
+        20.21769952774048
       ],
       "metrics": {
-        "mae": 9.194523425878167,
-        "mse": 142.41404201486483,
-        "rmse": 11.933735459396813,
-        "bias": -9.172805755355267,
+        "mae": 4.684120687477645,
+        "mse": 42.76154577719962,
+        "rmse": 6.539231283354307,
+        "bias": 0.18693012099609652,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 7.982633497521952,
-        "tree": 13.553510007350258
+        "building": 3.7250423142425597,
+        "tree": 6.327329529973644
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -502,7 +863,9 @@
         "predictedHeight": "/gamus/val/DC_20_19/predicted-height.png",
         "referenceHeight": "/gamus/val/DC_20_19/reference-height.png",
         "errorHeatmap": "/gamus/val/DC_20_19/error-heatmap.png",
-        "classes": "/gamus/val/DC_20_19/classes-preview.png"
+        "classes": "/gamus/val/DC_20_19/classes-preview.png",
+        "predictedSurface": "/gamus/val/DC_20_19/predicted-height-preview.png",
+        "referenceSurface": "/gamus/val/DC_20_19/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/val/DC_20_19/predicted-height.png",
@@ -518,28 +881,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        29.14900016784668
+        21.156139450073198
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          19.830859422683716
+        ],
+        "reference": [
+          0.0,
+          22.36821174621582
+        ],
+        "error": [
+          0.0,
+          19.830859422683716
+        ]
+      },
+      "depthRange": [
+        0.5199354290962219,
+        1.65293687582016
+      ],
+      "errorRangeM": [
+        0.0,
+        18.575117588043213
       ],
       "metrics": {
-        "mae": 4.9506450939645426,
-        "mse": 53.34211245192172,
-        "rmse": 7.30356847382988,
-        "bias": -4.900393963145181,
+        "mae": 2.9069474656458625,
+        "mse": 22.945757032776953,
+        "rmse": 4.7901729648079465,
+        "bias": 0.08154115712891563,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 6.5476413660088415,
-        "tree": 10.354028497020906
+        "building": 2.8552261232193272,
+        "tree": 5.66317446764657
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -548,7 +942,9 @@
         "predictedHeight": "/gamus/val/DC_20_29/predicted-height.png",
         "referenceHeight": "/gamus/val/DC_20_29/reference-height.png",
         "errorHeatmap": "/gamus/val/DC_20_29/error-heatmap.png",
-        "classes": "/gamus/val/DC_20_29/classes-preview.png"
+        "classes": "/gamus/val/DC_20_29/classes-preview.png",
+        "predictedSurface": "/gamus/val/DC_20_29/predicted-height-preview.png",
+        "referenceSurface": "/gamus/val/DC_20_29/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/val/DC_20_29/predicted-height.png",
@@ -564,28 +960,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        42.573001861572266
+        35.255001068115234
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          25.530394554138184
+        ],
+        "reference": [
+          0.0,
+          36.25749744415279
+        ],
+        "error": [
+          0.0,
+          25.530394554138184
+        ]
+      },
+      "depthRange": [
+        0.80780228972435,
+        1.6444847583770752
+      ],
+      "errorRangeM": [
+        0.0,
+        29.364415168762207
       ],
       "metrics": {
-        "mae": 11.121200444219495,
-        "mse": 240.8835086506215,
-        "rmse": 15.520422309029529,
-        "bias": -11.09101123935764,
+        "mae": 6.107357739173553,
+        "mse": 82.03213295105719,
+        "rmse": 9.057159209766448,
+        "bias": -2.629229985695437,
         "validPixels": 1043132
       },
       "classMetrics": {
-        "building": 7.4862845651707906,
-        "tree": 19.24037826372534
+        "building": 4.435142976484186,
+        "tree": 8.634448697059783
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -594,7 +1021,9 @@
         "predictedHeight": "/gamus/test/DC_03_26/predicted-height.png",
         "referenceHeight": "/gamus/test/DC_03_26/reference-height.png",
         "errorHeatmap": "/gamus/test/DC_03_26/error-heatmap.png",
-        "classes": "/gamus/test/DC_03_26/classes-preview.png"
+        "classes": "/gamus/test/DC_03_26/classes-preview.png",
+        "predictedSurface": "/gamus/test/DC_03_26/predicted-height-preview.png",
+        "referenceSurface": "/gamus/test/DC_03_26/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/test/DC_03_26/predicted-height.png",
@@ -610,28 +1039,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        28.849000930786133
+        24.291000366210938
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          15.96294617652893
+        ],
+        "reference": [
+          0.0,
+          25.08300018310547
+        ],
+        "error": [
+          0.0,
+          15.96294617652893
+        ]
+      },
+      "depthRange": [
+        0.6099236607551575,
+        2.4445059299468994
+      ],
+      "errorRangeM": [
+        0.0,
+        20.300344944000244
       ],
       "metrics": {
-        "mae": 6.648000706398487,
-        "mse": 96.15072147006089,
-        "rmse": 9.80564742737882,
-        "bias": -6.596398476894919,
+        "mae": 4.245498883750383,
+        "mse": 46.78003587477937,
+        "rmse": 6.839593253606487,
+        "bias": -2.2070202645572214,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 12.172856443285287,
-        "tree": 9.815853842740793
+        "building": 7.269317817590126,
+        "tree": 5.833469586883522
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -640,7 +1100,9 @@
         "predictedHeight": "/gamus/test/DC_20_12/predicted-height.png",
         "referenceHeight": "/gamus/test/DC_20_12/reference-height.png",
         "errorHeatmap": "/gamus/test/DC_20_12/error-heatmap.png",
-        "classes": "/gamus/test/DC_20_12/classes-preview.png"
+        "classes": "/gamus/test/DC_20_12/classes-preview.png",
+        "predictedSurface": "/gamus/test/DC_20_12/predicted-height-preview.png",
+        "referenceSurface": "/gamus/test/DC_20_12/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/test/DC_20_12/predicted-height.png",
@@ -656,28 +1118,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        36.38800048828125
+        28.666245231628295
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          25.822797775268555
+        ],
+        "reference": [
+          0.0,
+          30.29882049560547
+        ],
+        "error": [
+          0.0,
+          25.822797775268555
+        ]
+      },
+      "depthRange": [
+        0.6518836915493011,
+        1.7877548336982727
+      ],
+      "errorRangeM": [
+        0.0,
+        23.77145004272461
       ],
       "metrics": {
-        "mae": 8.730682592135773,
-        "mse": 134.38633805344386,
-        "rmse": 11.592512154552345,
-        "bias": -8.70832343892973,
+        "mae": 4.6343459154722355,
+        "mse": 47.78170541995954,
+        "rmse": 6.9124312235247265,
+        "bias": -0.6038747661049565,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 6.791687534986384,
-        "tree": 14.041175699962954
+        "building": 3.124934252776772,
+        "tree": 5.974088694271309
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -686,7 +1179,9 @@
         "predictedHeight": "/gamus/test/DC_20_15/predicted-height.png",
         "referenceHeight": "/gamus/test/DC_20_15/reference-height.png",
         "errorHeatmap": "/gamus/test/DC_20_15/error-heatmap.png",
-        "classes": "/gamus/test/DC_20_15/classes-preview.png"
+        "classes": "/gamus/test/DC_20_15/classes-preview.png",
+        "predictedSurface": "/gamus/test/DC_20_15/predicted-height-preview.png",
+        "referenceSurface": "/gamus/test/DC_20_15/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/test/DC_20_15/predicted-height.png",
@@ -702,28 +1197,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        40.21099853515625
+        31.95400047302246
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          25.21953558921814
+        ],
+        "reference": [
+          0.0,
+          34.45453929901123
+        ],
+        "error": [
+          0.0,
+          25.21953558921814
+        ]
+      },
+      "depthRange": [
+        0.6185538470745087,
+        1.8142815232276917
+      ],
+      "errorRangeM": [
+        0.0,
+        24.934447288513184
       ],
       "metrics": {
-        "mae": 11.319564587357554,
-        "mse": 221.5339226831189,
-        "rmse": 14.884015677333819,
-        "bias": -11.293701942397814,
+        "mae": 6.0843883912986625,
+        "mse": 72.07779425703423,
+        "rmse": 8.489864207219938,
+        "bias": -1.5240488112551023,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 9.710536738885624,
-        "tree": 17.14978351911047
+        "building": 5.603136439529175,
+        "tree": 7.886070645840398
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -732,7 +1258,9 @@
         "predictedHeight": "/gamus/test/DC_20_20/predicted-height.png",
         "referenceHeight": "/gamus/test/DC_20_20/reference-height.png",
         "errorHeatmap": "/gamus/test/DC_20_20/error-heatmap.png",
-        "classes": "/gamus/test/DC_20_20/classes-preview.png"
+        "classes": "/gamus/test/DC_20_20/classes-preview.png",
+        "predictedSurface": "/gamus/test/DC_20_20/predicted-height-preview.png",
+        "referenceSurface": "/gamus/test/DC_20_20/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/test/DC_20_20/predicted-height.png",
@@ -748,27 +1276,58 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        46.09000015258789
+        41.91999816894531
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          25.822797775268555
+        ],
+        "reference": [
+          0.0,
+          42.856998443603516
+        ],
+        "error": [
+          0.0,
+          25.822797775268555
+        ]
+      },
+      "depthRange": [
+        1.5192251801490784,
+        2.414906620979309
+      ],
+      "errorRangeM": [
+        0.0,
+        30.28144884109497
       ],
       "metrics": {
-        "mae": 24.81591238603225,
-        "mse": 755.7052478992047,
-        "rmse": 27.490093632055977,
-        "bias": -24.798080856186417,
+        "mae": 11.582644127968956,
+        "mse": 204.561454404661,
+        "rmse": 14.302498187542657,
+        "bias": -10.720864297289436,
         "validPixels": 992524
       },
       "classMetrics": {
-        "tree": 28.72150453188379
+        "tree": 12.60815964059756
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -777,7 +1336,9 @@
         "predictedHeight": "/gamus/test/DC_20_23/predicted-height.png",
         "referenceHeight": "/gamus/test/DC_20_23/reference-height.png",
         "errorHeatmap": "/gamus/test/DC_20_23/error-heatmap.png",
-        "classes": "/gamus/test/DC_20_23/classes-preview.png"
+        "classes": "/gamus/test/DC_20_23/classes-preview.png",
+        "predictedSurface": "/gamus/test/DC_20_23/predicted-height-preview.png",
+        "referenceSurface": "/gamus/test/DC_20_23/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/test/DC_20_23/predicted-height.png",
@@ -793,28 +1354,59 @@
       "localGrid": true,
       "crs": null,
       "pixelSpacingM": 0.33,
-      "model": "DAV2 + RDAH-Net (frozen)",
-      "calibration": {
-        "accepted": false,
-        "scale": 40.37230127734748,
-        "offset": 7.750947195380219,
-        "minimum_validation_improvement": 0.05,
-        "fit": "train (rejected on validation)"
+      "model": "DAV2 + GAMUS CLS semantic-prior fallback",
+      "predictionMethod": {
+        "name": "CLS-assisted semantic-prior fallback",
+        "reason": "Raw pretrained RDAH output failed the GAMUS non-collapse gate",
+        "class_source": "Provided GAMUS CLS reference labels; not inferred from RGB",
+        "fit_split": "train only",
+        "height_priors_m": {
+          "other": 4.303945541381836,
+          "ground": 0.0,
+          "low vegetation": 0.16032257676124573,
+          "building": 6.355000019073486,
+          "water": 0.0,
+          "road": 0.3070000112056732,
+          "tree": 19.128000259399414
+        }
       },
+      "calibration": null,
       "heightRangeM": [
         0.0,
-        44.375999450683594
+        38.52067947387695
+      ],
+      "surfaceRangesM": {
+        "predicted": [
+          0.0,
+          25.822797775268555
+        ],
+        "reference": [
+          0.0,
+          39.76599884033203
+        ],
+        "error": [
+          0.0,
+          25.822797775268555
+        ]
+      },
+      "depthRange": [
+        0.6504892110824585,
+        1.908271610736847
+      ],
+      "errorRangeM": [
+        0.0,
+        24.873687028884888
       ],
       "metrics": {
-        "mae": 19.369352627922908,
-        "mse": 505.84800804397247,
-        "rmse": 22.491065071356058,
-        "bias": -19.35388366951515,
+        "mae": 6.313747379655816,
+        "mse": 66.30686936417752,
+        "rmse": 8.142903005941893,
+        "bias": -3.878597820005949,
         "validPixels": 1048576
       },
       "classMetrics": {
-        "building": 6.797946798360025,
-        "tree": 24.270813395273382
+        "building": 3.8972524964972632,
+        "tree": 7.146132580179971
       },
       "heightEncoding": "rg16-linear",
       "layers": {
@@ -823,7 +1415,9 @@
         "predictedHeight": "/gamus/test/DC_20_25/predicted-height.png",
         "referenceHeight": "/gamus/test/DC_20_25/reference-height.png",
         "errorHeatmap": "/gamus/test/DC_20_25/error-heatmap.png",
-        "classes": "/gamus/test/DC_20_25/classes-preview.png"
+        "classes": "/gamus/test/DC_20_25/classes-preview.png",
+        "predictedSurface": "/gamus/test/DC_20_25/predicted-height-preview.png",
+        "referenceSurface": "/gamus/test/DC_20_25/reference-height-preview.png"
       },
       "geometry": {
         "predicted": "/gamus/test/DC_20_25/predicted-height.png",

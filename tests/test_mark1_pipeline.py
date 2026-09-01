@@ -9,6 +9,7 @@ from mark1.codec import encode_rg16
 from mark1.gamus import GamusScene, GamusTriplet, MissingH5DependencyError
 from mark1.metrics import evaluate_height
 from mark1.models import DAV2Predictor, MissingModelDependencyError, RDAHPredictor
+from mark1.semantic_prior import fit_class_priors, predict_semantic_height
 
 
 def test_metrics_mask_units_and_class_mae() -> None:
@@ -52,6 +53,20 @@ def test_codec_and_exporter_write_scientific_and_browser_assets(tmp_path: Path) 
         assert (tmp_path / name).is_file()
     codec = encode_rg16(reference, tmp_path / "codec.png", 0, 10)
     assert codec["encoding"] == "rg16-linear"
+
+
+def test_semantic_prior_uses_training_medians_and_depth_shape() -> None:
+    reference = np.array([[0, 0, 8, 12], [1, 2, 16, 20]], dtype=np.float32)
+    classes = np.array([[1, 1, 3, 3], [2, 2, 6, 6]], dtype=np.int16)
+    priors = fit_class_priors([(reference, classes)])
+    assert priors[1] == 0
+    assert priors[3] == 10
+    assert priors[6] == 18
+    depth = np.arange(8, dtype=np.float32).reshape(2, 4)
+    prediction = predict_semantic_height(depth, classes, priors)
+    assert prediction.shape == reference.shape
+    assert np.all(prediction[classes == 1] == 0)
+    assert prediction[1, 3] > prediction[0, 3]
 
 
 def test_local_gamus_triplet_is_wired_when_h5py_is_available() -> None:
