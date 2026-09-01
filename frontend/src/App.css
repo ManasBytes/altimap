@@ -1,0 +1,78 @@
+/* Ported from viewer/web/css/app.css -- same theme/layout as the original
+   vanilla-JS upload dashboard, now driving React components instead of
+   direct DOM manipulation. */
+:root {
+  --bg: #0e1116; --panel: #151a21; --line: #232b36;
+  --fg: #e6edf3; --dim: #8b98a5; --accent: #4c9aff; --warn: #d9a441;
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+  font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+#app { display: grid; grid-template-columns: 260px 1fr 260px; height: 100%; }
+aside { background: var(--panel); overflow-y: auto; }
+#scenes { border-right: 1px solid var(--line); }
+#controls { border-left: 1px solid var(--line); padding: 14px; }
+header { padding: 14px; border-bottom: 1px solid var(--line); }
+h1 { margin: 0; font-size: 15px; letter-spacing: .02em; }
+h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--dim); margin: 18px 0 8px; }
+section:first-child h2 { margin-top: 0; }
+.sub { margin: 2px 0 10px; color: var(--dim); font-size: 11px; }
+select, input[type=range] { width: 100%; margin-top: 4px; }
+select { background: #0d1117; color: var(--fg); border: 1px solid var(--line);
+  border-radius: 5px; padding: 4px; }
+#scene-list { list-style: none; margin: 0; padding: 0; }
+#scene-list li { display: flex; gap: 9px; padding: 8px 12px; cursor: pointer;
+  border-bottom: 1px solid var(--line); align-items: center; }
+#scene-list li:hover { background: #1b222c; }
+#scene-list li.on { background: #1d2937; box-shadow: inset 2px 0 0 var(--accent); }
+#scene-list img { width: 44px; height: 44px; object-fit: cover; border-radius: 3px;
+  background: #000; flex: none; }
+#scene-list .name { font-size: 12px; }
+#scene-list .meta { color: var(--dim); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+#scene-list li.err .name { color: var(--warn); }
+.thumb-status { width: 44px; height: 44px; border-radius: 3px; flex: none;
+  display: grid; place-items: center; font-size: 15px; background: #0d1117;
+  color: var(--dim); }
+.thumb-status.processing, .thumb-status.pending { animation: pulse 1.4s ease-in-out infinite; }
+.thumb-status.failed { color: var(--warn); }
+@keyframes pulse { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
+#stage { position: relative; min-width: 0; }
+canvas { display: block; width: 100%; height: 100%; }
+#overlay { position: absolute; inset: 0; display: grid; place-items: center;
+  pointer-events: none; }
+#status { background: #000000aa; padding: 8px 14px; border-radius: 6px;
+  color: var(--dim); max-width: 70%; text-align: center; }
+.seg { display: flex; }
+.seg button { flex: 1; background: #0d1117; color: var(--dim); border: 1px solid var(--line);
+  padding: 6px; cursor: pointer; font-size: 12px; }
+.seg button:first-child { border-radius: 5px 0 0 5px; }
+.seg button:last-child { border-radius: 0 5px 5px 0; border-left: none; }
+.seg button.on { background: var(--accent); color: #06101f; border-color: var(--accent); }
+label { display: block; margin: 10px 0; font-size: 11px; color: var(--dim); }
+output { float: right; color: var(--fg); font-variant-numeric: tabular-nums; }
+dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; margin: 0; }
+dt { color: var(--dim); font-size: 11.5px; }
+dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere; }
+.hint { color: var(--dim); font-size: 10.5px; margin: 6px 0; }
+.hint.alert { color: var(--warn); }
+.warn { color: var(--warn); font-size: 10.5px; line-height: 1.4; margin: 8px 0 0; }
+.dl { display: block; margin-top: 12px; padding: 7px; text-align: center;
+  border: 1px solid var(--line); border-radius: 5px; color: var(--accent);
+  text-decoration: none; font-size: 11.5px; }
+.dl:hover { background: #1b222c; }
+.dl.off { opacity: .35; pointer-events: none; }
+.badge { font-size: 9px; text-transform: uppercase; letter-spacing: .06em;
+  border: 1px solid var(--accent); color: var(--accent);
+  padding: 0 3px; border-radius: 3px; }
+#drop { border: 1.5px dashed var(--line); border-radius: 8px; padding: 16px 10px;
+  text-align: center; cursor: pointer; margin: 10px 0 6px;
+  transition: border-color .12s, background .12s; }
+#drop:hover, #drop.over { border-color: var(--accent); background: #16202c; }
+#drop.busy { opacity: .55; pointer-events: none; }
+.dz-main { margin: 0; font-size: 12px; color: var(--fg); }
+.dz-sub { margin: 3px 0 0; font-size: 10.5px; color: var(--dim); }
+#scene-list li .x { margin-left: auto; background: none; border: none;
+  color: var(--dim); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
+#scene-list li .x:hover { color: var(--warn); }
