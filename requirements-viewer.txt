@@ -1,0 +1,9 @@
+# Runtime dependencies for the FastAPI reconstruction service.
+# Install a CUDA-compatible torch build separately when GPU depth inference is needed.
+fastapi>=0.141
+uvicorn>=0.52
+pillow>=12.3
+trimesh>=5.0
+pyproj>=3.7
+torchvision>=0.28
+depth-anything-3>=0.0.0

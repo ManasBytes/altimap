@@ -22,24 +22,37 @@ import uuid
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from viewer.geo import encode_rg16, fit_absolute_elevation, read_geo_meta
+from viewer.geo import (
+    encode_rg16,
+    fit_absolute_elevation,
+    geo_meta_from_dataset,
+    read_geo_meta,
+)
 from viewer.metrics import luminance, scene_metrics
 from viewer.terrain import build_terrain, height_field
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 UPLOAD_DIR = WEB_DIR / "data-uploads"
 SCENES_DIR = UPLOAD_DIR / "scenes"
+CLASSIFICATIONS_DIR = UPLOAD_DIR / "classifications"
+RECONSTRUCTIONS_DIR = UPLOAD_DIR / "reconstructions"
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
-ALLOWED_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+TIFF_SUFFIXES = {".tif", ".tiff", ".geotif", ".geotiff"}
+ALLOWED_SUFFIXES = {*TIFF_SUFFIXES, ".png", ".jpg", ".jpeg"}
 PROCESS_RES = 504
 CLASSIFY_RES = 513  # matches gamus-terrain's HEIGHT_SAMPLE_WIDTH/HEIGHT
+RECONSTRUCT_RES = CLASSIFY_RES
+
+# Direct GeoTIFF reconstruction uses only georeferenced elevation values.
+# Class labels are visual/semantic output; they never modify the height field.
+DIRECT_RECONSTRUCT_RES = 1025  # 4× the 513² interactive-grid cell count
 
 app = FastAPI(title="AltiMap")
 
@@ -60,6 +73,8 @@ _device = None
 _class_model = None
 _class_device = None
 _dem = None
+_global_dem = None
+_building_indexes: dict[str, object] = {}
 
 
 def _get_model():
@@ -82,6 +97,16 @@ def _get_dem():
 
         _dem = DemSource()
     return _dem
+
+
+def _get_global_dem():
+    """Copernicus GLO-30 fallback when the 3DEP US DEM has no coverage."""
+    global _global_dem
+    if _global_dem is None:
+        from viewer.dem import DemSource
+
+        _global_dem = DemSource(collection="cop-dem-glo-30")
+    return _global_dem
 
 
 def _get_class_model():
@@ -231,6 +256,350 @@ def _png_data_uri(arr: np.ndarray) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+def _finite_json_number(value):
+    """Use None, rather than NaN, for values carried in the JSON response."""
+    if value is None:
+        return None
+    value = float(value)
+    return value if np.isfinite(value) else None
+
+
+def _rgb_from_raster_dataset(source) -> np.ndarray:
+    """Read the visible bands from an open GDAL dataset as model-ready RGB."""
+    bands = min(3, source.count)
+    if bands < 1:
+        raise ValueError("the GeoTIFF has no raster bands")
+    rgb = np.transpose(source.read(list(range(1, bands + 1))), (1, 2, 0))
+    if rgb.shape[2] == 1:
+        rgb = np.repeat(rgb, 3, axis=2)
+    elif rgb.shape[2] == 2:
+        rgb = np.concatenate([rgb, rgb[:, :, 1:2]], axis=2)
+    if rgb.dtype != np.uint8:
+        values = rgb.astype(np.float64)
+        low, high = np.percentile(values, [2, 98])
+        rgb = np.clip(
+            (values - low) / max(high - low, 1e-9) * 255, 0, 255
+        ).astype(np.uint8)
+    return np.ascontiguousarray(rgb[:, :, :3])
+
+
+def _read_upload_rgb_and_geo(
+    data: bytes, suffix: str
+) -> tuple[np.ndarray, dict | None, dict | None, dict | None]:
+    """Read an uploaded image while retaining its GeoTIFF spatial profile.
+
+    The RGB array is a display/model representation. The original profile,
+    CRS, affine transform, and dataset tags are retained separately so the
+    predicted class raster can be written back on exactly the source grid.
+    """
+    import io
+
+    if suffix in TIFF_SUFFIXES:
+        try:
+            import rasterio
+
+            with rasterio.MemoryFile(data) as memfile, memfile.open() as source:
+                rgb = _rgb_from_raster_dataset(source)
+                geo = geo_meta_from_dataset(source)
+                geo.update(
+                    {
+                        "transform": [float(value) for value in source.transform],
+                        "nodata": _finite_json_number(source.nodata),
+                        "driver": source.driver,
+                        "band_descriptions": list(source.descriptions),
+                    }
+                )
+                return rgb, geo, source.profile.copy(), source.tags().copy()
+        except Exception as error:
+            # Do not silently use Pillow here: that would display the pixels
+            # while dropping the coordinate reference the user supplied.
+            raise HTTPException(422, f"could not read GeoTIFF metadata: {error}") from error
+    try:
+        return np.asarray(Image.open(io.BytesIO(data)).convert("RGB"), dtype=np.uint8), None, None, None
+    except Exception as error:
+        raise HTTPException(422, f"could not read image: {error}") from error
+
+
+def _write_georeferenced_class_mask(
+    class_map: np.ndarray,
+    source_profile: dict,
+    source_tags: dict,
+    source_name: str,
+) -> str:
+    """Persist a class mask on the original GeoTIFF grid with CRS intact."""
+    import rasterio
+
+    CLASSIFICATIONS_DIR.mkdir(parents=True, exist_ok=True)
+    mask_name = f"{_safe_stem(source_name)}__{uuid.uuid4().hex[:8]}_classes.tif"
+    destination_path = CLASSIFICATIONS_DIR / mask_name
+    profile = source_profile.copy()
+    # Semantic IDs are uint8; spatial keys (crs/transform/width/height) stay
+    # unchanged because class_map is restored to the source image dimensions.
+    profile.pop("photometric", None)
+    profile.pop("interleave", None)
+    profile.pop("predictor", None)
+    profile.update(count=1, dtype="uint8", nodata=255, compress="deflate")
+    with rasterio.open(destination_path, "w", **profile) as destination:
+        destination.write(class_map.astype(np.uint8), 1)
+        if source_tags:
+            destination.update_tags(**source_tags)
+        destination.update_tags(
+            semantic_classes="background,ground,low_vegetation,buildings,water,roads,trees",
+            model="seven-class static land-cover classifier",
+            source_image=source_name,
+        )
+    return f"/data-uploads/classifications/{mask_name}"
+
+
+def _resize_rgb(image: np.ndarray, width: int = RECONSTRUCT_RES, height: int = RECONSTRUCT_RES) -> np.ndarray:
+    return np.asarray(
+        Image.fromarray(image).resize((width, height), Image.Resampling.BILINEAR),
+        dtype=np.uint8,
+    )
+
+
+def _resize_height(field: np.ndarray, width: int, height: int) -> np.ndarray:
+    """Resize a float elevation/depth raster without propagating nodata."""
+    values = np.asarray(field, dtype=np.float32)
+    finite = np.isfinite(values)
+    if not finite.any():
+        raise HTTPException(422, "elevation source contains no finite values")
+    filled = np.where(finite, values, float(np.nanmedian(values[finite])))
+    return np.asarray(
+        Image.fromarray(filled, mode="F").resize(
+            (width, height), Image.Resampling.BILINEAR
+        ),
+        dtype=np.float32,
+    )
+
+
+def _height_preview(field: np.ndarray) -> tuple[np.ndarray, float, float]:
+    """Float field -> browser-readable grayscale while retaining its range."""
+    values = np.asarray(field, dtype=np.float32)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        raise HTTPException(422, "elevation source contains no finite values")
+    low, high = float(finite.min()), float(finite.max())
+    span = max(high - low, 1e-9)
+    preview = np.clip((values - low) / span * 255, 0, 255)
+    preview[~np.isfinite(preview)] = 0
+    return preview.astype(np.uint8), low, high
+
+
+def _extract_embedded_elevation(
+    data: bytes, requested_band: int | None = None
+) -> tuple[np.ndarray | None, str | None, str | None]:
+    """Find a genuine elevation band embedded in a GeoTIFF, when declared.
+
+    RGB GeoTIFFs usually contain *location* metadata but not a DSM. We only
+    treat an internal band as elevation when it is clearly labelled as such,
+    or when a georeferenced source has a single non-image band. This avoids
+    accidentally turning a near-infrared image band into terrain.
+    """
+    import rasterio
+
+    pattern = re.compile(r"(?:^|[_\s-])(dem|dsm|dtm|elevation|height|altitude|hag|ndsm)(?:$|[_\s-])", re.I)
+    with rasterio.MemoryFile(data) as memfile, memfile.open() as source:
+        explicit = source.tags().get("elevation_band")
+        candidates: list[tuple[int, str]] = []
+        if requested_band is not None:
+            if not 1 <= requested_band <= source.count:
+                raise HTTPException(
+                    422,
+                    f"requested elevation band {requested_band} is outside the GeoTIFF's 1–{source.count} bands",
+                )
+            candidates.append((requested_band, "user-selected GeoTIFF elevation band"))
+        if explicit and str(explicit).isdigit():
+            band = int(explicit)
+            if 1 <= band <= source.count:
+                candidates.append((band, "GeoTIFF elevation_band tag"))
+        for band in range(1, source.count + 1):
+            name = " ".join(
+                [
+                    source.descriptions[band - 1] or "",
+                    *source.tags(band).keys(),
+                    *source.tags(band).values(),
+                ]
+            )
+            if pattern.search(name):
+                candidates.append((band, "embedded GeoTIFF elevation band"))
+        if not candidates:
+            for band, dtype in enumerate(source.dtypes, start=1):
+                if np.dtype(dtype).kind == "f":
+                    candidates.append((band, "embedded floating-point GeoTIFF elevation band"))
+        if not candidates and source.count == 1 and source.crs is not None:
+            candidates.append((1, "single-band georeferenced elevation raster"))
+        if not candidates:
+            return None, None, None
+        band, label = candidates[0]
+        band_text = " ".join(
+            [
+                source.descriptions[band - 1] or "",
+                *source.tags(band).keys(),
+                *source.tags(band).values(),
+            ]
+        ).lower()
+        # A DSM already contains roof/canopy height and must not receive a
+        # second building extrusion. A DEM/DTM is ground-only and can safely
+        # be refined with measured footprint heights.
+        elevation_kind = (
+            "surface"
+            if "dsm" in band_text or "surface" in band_text
+            else "terrain"
+            if any(token in band_text for token in ("dem", "dtm", "hag", "bare earth"))
+            else "unknown"
+        )
+        field = source.read(band).astype(np.float32)
+        if source.nodata is not None and np.isfinite(source.nodata):
+            field[field == source.nodata] = np.nan
+        return field, label, elevation_kind
+
+
+def _reference_elevation(geo: dict, shape: tuple[int, int]) -> tuple[np.ndarray, str]:
+    """Read real terrain for a georeferenced RGB image, with global fallback."""
+    if not geo.get("georeferenced"):
+        raise HTTPException(422, "a direct terrain path requires CRS and affine transform")
+    patch = _get_dem().patch(geo["bounds"], geo["crs"], shape)
+    source = "3dep-seamless"
+    if patch is None:
+        patch = _get_global_dem().patch(geo["bounds"], geo["crs"], shape)
+        source = "cop-dem-glo-30"
+    if patch is None:
+        raise HTTPException(
+            422,
+            "no reference DEM coverage for this GeoTIFF; include a DEM/DSM band or use a location with DEM coverage",
+        )
+    return np.asarray(patch, dtype=np.float32), source
+
+
+def _bbox_intersects(left, right) -> bool:
+    west, south, east, north = left
+    other_west, other_south, other_east, other_north = right
+    return west < other_east and other_west < east and south < other_north and other_south < north
+
+
+def _building_index_for_geo(geo: dict):
+    """Load an Overture footprint cache only when it covers this GeoTIFF."""
+    from rasterio.warp import transform_bounds
+
+    bounds_ll = tuple(transform_bounds(geo["crs"], "EPSG:4326", *geo["bounds"]))
+    cache_dir = Path(__file__).resolve().parent / "cache"
+    for stem in ("buildings_atlanta", "buildings_inria"):
+        parquet_path = cache_dir / f"{stem}.parquet"
+        meta_path = cache_dir / f"{stem}.json"
+        if not parquet_path.is_file() or not meta_path.is_file():
+            continue
+        metadata = json.loads(meta_path.read_text())
+        coverage = []
+        if metadata.get("bbox"):
+            coverage.append(tuple(metadata["bbox"]))
+        coverage.extend(tuple(bounds) for bounds in metadata.get("regions", {}).values())
+        if not any(_bbox_intersects(bounds_ll, area) for area in coverage):
+            continue
+        if stem not in _building_indexes:
+            from viewer.footprints import BuildingIndex
+
+            _building_indexes[stem] = BuildingIndex(parquet_path)
+        return _building_indexes[stem], stem
+    return None, None
+
+
+def _refine_with_known_buildings(elevation: np.ndarray, geo: dict) -> tuple[np.ndarray, dict]:
+    """Mirror demdirect: extrude only footprints carrying a known height."""
+    index, cache_name = _building_index_for_geo(geo)
+    if index is None:
+        return elevation, {
+            "source": None,
+            "cache": None,
+            "n_footprints": 0,
+            "n_with_height": 0,
+            "n_extruded": 0,
+        }
+    from viewer.refine import extrude_known_buildings
+
+    mask, known_m, stats = index.rasterize(
+        geo["bounds"], geo["crs"], elevation.shape
+    )
+    fused, n_extruded = extrude_known_buildings(elevation, mask, known_m)
+    return fused.astype(np.float32), {
+        "source": "overture-building-heights",
+        "cache": cache_name,
+        **stats,
+        "n_extruded": n_extruded,
+    }
+
+
+def _write_georeferenced_elevation(
+    elevation: np.ndarray,
+    source_profile: dict,
+    source_tags: dict,
+    source_name: str,
+    elevation_source: str,
+) -> str:
+    """Write a float32 elevation product on the exact source GeoTIFF grid."""
+    import rasterio
+
+    RECONSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    output_name = f"{_safe_stem(source_name)}__{uuid.uuid4().hex[:8]}_elevation.tif"
+    output_path = RECONSTRUCTIONS_DIR / output_name
+    profile = source_profile.copy()
+    profile.pop("photometric", None)
+    profile.pop("interleave", None)
+    profile.pop("predictor", None)
+    profile.update(count=1, dtype="float32", nodata=np.nan, compress="deflate")
+    with rasterio.open(output_path, "w", **profile) as destination:
+        destination.write(elevation.astype(np.float32), 1)
+        if source_tags:
+            destination.update_tags(**source_tags)
+        destination.update_tags(
+            vertical_unit="m",
+            elevation_source=elevation_source,
+            source_image=source_name,
+        )
+    return f"/data-uploads/reconstructions/{output_name}"
+
+
+def _write_terrain_glb(
+    height: np.ndarray,
+    rgb: np.ndarray,
+    source_name: str,
+    height_world_scale: float,
+    resolution: int = 512,
+) -> str:
+    """Export the same textured terrain used by the Three.js viewer as GLB."""
+    artifact_name = f"{_safe_stem(source_name)}__{uuid.uuid4().hex[:8]}"
+    artifact_dir = RECONSTRUCTIONS_DIR / artifact_name
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    texture_path = artifact_dir / "rgb.jpg"
+    glb_path = artifact_dir / "terrain.glb"
+    Image.fromarray(rgb).save(texture_path, quality=92)
+    values = np.asarray(height, dtype=np.float32)
+    low, high = float(np.nanmin(values)), float(np.nanmax(values))
+    height01 = (
+        (values - low) / (high - low)
+        if high > low
+        else np.zeros_like(values, dtype=np.float32)
+    )
+    # build_terrain uses a one-unit-wide world; the interactive mesh uses
+    # eight units, hence the /8 that retains the same real aspect ratio.
+    build_terrain(
+        height01,
+        texture_path,
+        glb_path,
+        res=resolution,
+        exaggeration=height_world_scale / 8.0,
+    )
+    return f"/data-uploads/reconstructions/{artifact_name}/terrain.glb"
+
+
+def _true_scale_world_height(elevation_range_m: float, geo: dict | None) -> float:
+    """Map metre relief to the viewer's fixed 8-unit horizontal world width."""
+    footprint = max((geo or {}).get("ground_m") or [0.0])
+    if not np.isfinite(footprint) or footprint <= 0:
+        return 0.62
+    return float(np.clip(8.0 * elevation_range_m / footprint, 0.03, 3.0))
+
+
 @app.post("/api/classify-static")
 async def classify_static(file: UploadFile = File(...)):
     """Non-georeferenced path: classify land cover, elevate by fixed
@@ -258,7 +627,7 @@ async def classify_static(file: UploadFile = File(...)):
     from viewer.classify import classes_to_rgb, classes_to_static_height, predict_classes
 
     started = time.perf_counter()
-    rgb_full = _read_rgb_bytes(data, suffix)
+    rgb_full, geo, source_profile, source_tags = _read_upload_rgb_and_geo(data, suffix)
     rgb = np.asarray(
         Image.fromarray(rgb_full).resize((CLASSIFY_RES, CLASSIFY_RES), Image.BILINEAR),
         dtype=np.uint8,
@@ -274,6 +643,25 @@ async def classify_static(file: UploadFile = File(...)):
         ["background", "ground", "low_vegetation", "buildings", "water", "roads", "trees"]
     )}
 
+    mask_geo_tiff_url = None
+    if geo and geo["georeferenced"]:
+        # The classifier runs at its stable 513×513 working size. Reproject its
+        # labels back to the *native source grid* with nearest neighbour so no
+        # class IDs are blended, while the original affine transform remains
+        # exact and the bounds/ground sampling distance stay unchanged.
+        full_class_map = np.asarray(
+            Image.fromarray(class_map).resize(
+                (rgb_full.shape[1], rgb_full.shape[0]), Image.Resampling.NEAREST
+            ),
+            dtype=np.uint8,
+        )
+        mask_geo_tiff_url = _write_georeferenced_class_mask(
+            full_class_map,
+            source_profile,
+            source_tags,
+            Path(file.filename or "upload.tif").name,
+        )
+
     return JSONResponse({
         "seconds": round(elapsed, 3),
         "width": CLASSIFY_RES,
@@ -282,32 +670,168 @@ async def classify_static(file: UploadFile = File(...)):
         "rgb": _png_data_uri(rgb),
         "height": _png_data_uri(np.stack([height_u8] * 3, axis=-1)),
         "classes": _png_data_uri(classes_to_rgb(class_map)),
+        "geo": geo,
+        "mask_geo_tiff_url": mask_geo_tiff_url,
     })
 
 
-def _read_rgb_bytes(data: bytes, suffix: str) -> np.ndarray:
-    """Same normalization as _read_rgb, for bytes already read into memory
-    (this endpoint never stages the upload to disk -- it's not saved
-    anywhere and there is no georeferencing path that would need the file)."""
-    import io
+@app.post("/api/reconstruct")
+async def reconstruct(
+    file: UploadFile = File(...), elevation_band: int | None = Form(None)
+):
+    """Build a terrain-ready RGB, height, and class triple from one upload.
 
-    if suffix in {".tif", ".tiff"}:
-        try:
-            import rasterio
+    GeoTIFFs follow the direct, georeferenced path: retain their exact grid
+    and use an embedded elevation band or a reference DEM. PNG/JPEG files have
+    no spatial anchor, so they follow the image path: relative depth estimate
+    fused with semantic classes. The response is deliberately shaped like a
+    regular viewer scene, so the Three.js renderer does not have to know which
+    backend produced it.
+    """
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(
+            415,
+            f"unsupported type {suffix or '(none)'}; expected one of {sorted(ALLOWED_SUFFIXES)}",
+        )
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "empty upload")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            413,
+            f"file is {len(data) / 1e6:.0f} MB; limit is {MAX_UPLOAD_BYTES / 1e6:.0f} MB",
+        )
 
-            with rasterio.MemoryFile(data) as memfile, memfile.open() as src:
-                bands = min(3, src.count)
-                arr = np.transpose(src.read(list(range(1, bands + 1))), (1, 2, 0))
-            if arr.shape[2] == 1:
-                arr = np.repeat(arr, 3, axis=2)
-            if arr.dtype != np.uint8:
-                a = arr.astype(np.float64)
-                lo, hi = np.percentile(a, [2, 98])
-                arr = np.clip((a - lo) / max(hi - lo, 1e-9) * 255, 0, 255).astype(np.uint8)
-            return np.ascontiguousarray(arr[:, :, :3])
-        except Exception:
-            pass
-    return np.asarray(Image.open(io.BytesIO(data)).convert("RGB"), dtype=np.uint8)
+    from viewer.classify import (
+        CLASS_NAMES,
+        classes_to_rgb,
+        classes_to_static_height,
+        predict_classes,
+    )
+
+    started = time.perf_counter()
+    rgb_full, geo, source_profile, source_tags = _read_upload_rgb_and_geo(data, suffix)
+    direct_geo = bool(geo and geo.get("georeferenced"))
+    render_resolution = DIRECT_RECONSTRUCT_RES if direct_geo else RECONSTRUCT_RES
+    render_rgb = _resize_rgb(rgb_full, render_resolution, render_resolution)
+    class_model, class_device = _get_class_model()
+    class_map = predict_classes(render_rgb, class_model, class_device)
+    class_rgb = classes_to_rgb(class_map)
+    class_counts = {
+        name: int((class_map == index).sum()) for index, name in enumerate(CLASS_NAMES)
+    }
+
+    source_name = Path(file.filename or "upload").name
+    if direct_geo:
+        embedded_elevation, elevation_source, elevation_kind = _extract_embedded_elevation(
+            data, elevation_band
+        )
+        if embedded_elevation is None:
+            ground_full, dem_source = _reference_elevation(geo, rgb_full.shape[:2])
+            elevation_full, building_refinement = _refine_with_known_buildings(ground_full, geo)
+            elevation_source = (
+                f"{dem_source} terrain + Overture building heights"
+                if building_refinement["n_extruded"]
+                else f"{dem_source} terrain"
+            )
+        else:
+            elevation_full = embedded_elevation
+            if elevation_kind == "terrain":
+                elevation_full, building_refinement = _refine_with_known_buildings(elevation_full, geo)
+                if building_refinement["n_extruded"]:
+                    elevation_source = f"{elevation_source} + Overture building heights"
+            else:
+                building_refinement = {
+                    "source": "embedded surface model",
+                    "cache": None,
+                    "n_footprints": 0,
+                    "n_with_height": 0,
+                    "n_extruded": 0,
+                }
+        render_height = _resize_height(
+            elevation_full, render_resolution, render_resolution
+        )
+        height_preview, height_low, height_high = _height_preview(render_height)
+        class_map_full = np.asarray(
+            Image.fromarray(class_map).resize(
+                (rgb_full.shape[1], rgb_full.shape[0]), Image.Resampling.NEAREST
+            ),
+            dtype=np.uint8,
+        )
+        mask_geo_tiff_url = _write_georeferenced_class_mask(
+            class_map_full, source_profile, source_tags, source_name
+        )
+        elevation_geo_tiff_url = _write_georeferenced_elevation(
+            elevation_full, source_profile, source_tags, source_name, elevation_source
+        )
+        mode = "geotiff-direct"
+        height_mode = "absolute"
+        height_baseline = 0.0
+        height_world_scale = _true_scale_world_height(height_high - height_low, geo)
+    else:
+        # PNG/JPEG has no map position from which to obtain absolute terrain.
+        # DA3 supplies the structural ordering and the semantic map stabilizes
+        # buildings, roads, water, and vegetation into a usable relative DSM.
+        depth_model, _ = _get_model()
+        prediction = depth_model.inference([render_rgb], process_res=RECONSTRUCT_RES)
+        relative_depth = height_field(np.asarray(prediction.depth[0], dtype=np.float32))
+        relative_depth = _resize_height(relative_depth, RECONSTRUCT_RES, RECONSTRUCT_RES)
+        semantic_height = classes_to_static_height(class_map).astype(np.float32)
+        render_height = np.clip(0.68 * relative_depth + 0.32 * semantic_height, 0.0, 1.0)
+        height_preview, height_low, height_high = _height_preview(render_height)
+        elevation_source = "relative depth + semantic class priors"
+        mask_geo_tiff_url = None
+        elevation_geo_tiff_url = None
+        building_refinement = None
+        mode = "image-relative"
+        # This field is already fused and regularized by the RGB pipeline.
+        # Mark it separately so the viewer does not apply its catalog-scene
+        # class remapping a second time (which causes terraced, uneven roofs).
+        height_mode = "relative-final"
+        height_baseline = 0.32
+        height_world_scale = 0.62
+
+    export_resolution = (
+        min(1024, elevation_full.shape[0] - 1, elevation_full.shape[1] - 1)
+        if direct_geo
+        else 512
+    )
+    terrain_glb_url = _write_terrain_glb(
+        elevation_full if direct_geo else render_height,
+        rgb_full if direct_geo else render_rgb,
+        source_name,
+        height_world_scale,
+        max(64, export_resolution),
+    )
+    elapsed = time.perf_counter() - started
+    height_rgb = np.repeat(height_preview[:, :, None], 3, axis=2)
+    return JSONResponse(
+        {
+            "seconds": round(elapsed, 3),
+            "width": render_resolution,
+            "height_px": render_resolution,
+            "mesh_resolution": render_resolution,
+            "source_width": int(rgb_full.shape[1]),
+            "source_height": int(rgb_full.shape[0]),
+            "rgb": _png_data_uri(render_rgb),
+            "height": _png_data_uri(height_rgb),
+            "classes": _png_data_uri(class_rgb),
+            "class_pixel_counts": class_counts,
+            "class_names": CLASS_NAMES,
+            "geo": geo,
+            "mode": mode,
+            "height_mode": height_mode,
+            "height_baseline": height_baseline,
+            "height_world_scale": height_world_scale,
+            "height_range": {"min": height_low, "max": height_high, "unit": "m" if direct_geo else "relative"},
+            "elevation_source": elevation_source,
+            "building_refinement": building_refinement,
+            "mask_geo_tiff_url": mask_geo_tiff_url,
+            "elevation_geo_tiff_url": elevation_geo_tiff_url,
+            "terrain_glb_url": terrain_glb_url,
+        }
+    )
 
 
 @app.get("/api/uploads")

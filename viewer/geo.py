@@ -113,6 +113,32 @@ def ground_size_m(width: int, height: int, res: tuple[float, float]) -> tuple[fl
     return width * abs(res[0]), height * abs(res[1])
 
 
+def geodesic_ground_size_m(bounds, crs) -> tuple[float, float]:
+    """Ground footprint in metres for projected *or* geographic GeoTIFFs.
+
+    Rasterio's ``src.res`` is measured in native coordinate units. For an
+    EPSG:4326 image those units are degrees, so treating them as metres makes
+    a 3D terrain's vertical scale wildly wrong. Measure two centre lines on
+    WGS84 instead; this keeps the viewer's horizontal and vertical scale
+    coherent regardless of the input CRS.
+    """
+    from pyproj import Geod
+    from rasterio.warp import transform
+
+    left, bottom, right, top = bounds
+    middle_x, middle_y = (left + right) / 2, (bottom + top) / 2
+    lon, lat = transform(
+        crs,
+        "EPSG:4326",
+        [left, right, middle_x, middle_x],
+        [middle_y, middle_y, bottom, top],
+    )
+    geod = Geod(ellps="WGS84")
+    width = geod.inv(lon[0], lat[0], lon[1], lat[1])[2]
+    height = geod.inv(lon[2], lat[2], lon[3], lat[3])[2]
+    return float(abs(width)), float(abs(height))
+
+
 def read_geo_meta(path: Path) -> dict:
     """Georeferencing for one raster, or `georeferenced: False` if it has none.
 
@@ -152,12 +178,19 @@ def geo_meta_from_dataset(src) -> dict:
             "partial_hints": {"gcps": has_gcps, "rpcs": has_rpcs},
         }
 
-    res = (abs(src.res[0]), abs(src.res[1]))
+    try:
+        ground_m = geodesic_ground_size_m(src.bounds, src.crs)
+        res = (ground_m[0] / src.width, ground_m[1] / src.height)
+    except Exception:
+        # The affine-based estimate is still better than dropping a valid
+        # spatial reference if a custom CRS cannot be transformed locally.
+        res = (abs(src.res[0]), abs(src.res[1]))
+        ground_m = ground_size_m(src.width, src.height, res)
     return {
         **base,
         "georeferenced": True,
         "crs": str(src.crs),
         "bounds": list(src.bounds),
         "res_m": list(res),
-        "ground_m": list(ground_size_m(src.width, src.height, res)),
+        "ground_m": list(ground_m),
     }
