@@ -1,0 +1,21 @@
+# Installed with: uv pip install --python .venv/bin/python -r requirements.txt
+#
+# Unpinned, mirroring CLAUDE.md's .venv-da3 setup convention -- this venv now
+# plays that role for the scenes app, which imports viewer/ (DA3 inference +
+# geo/metrics/terrain pipeline) directly instead of the FastAPI service.
+django
+djangorestframework
+
+# viewer/ pipeline deps -- numpy/scipy/rasterio for geo+metrics, torch +
+# depth_anything_3 for DA3 inference, trimesh+pillow for the GLB terrain mesh.
+numpy
+scipy
+scikit-image
+rasterio
+pystac-client
+planetary-computer
+torch
+depth_anything_3
+trimesh
+pillow
+python-multipart
