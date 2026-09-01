@@ -7,6 +7,8 @@ frontend/dist/
 backend/db.sqlite3
 backend/media/
 .run/
+.okdev/
+runs/
 data/
 spikes/out/
 viewer/web/data/

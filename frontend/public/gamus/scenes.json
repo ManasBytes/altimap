@@ -1,0 +1,835 @@
+{
+  "version": 2,
+  "source": "earthflow/GAMUS",
+  "scope": "Mark-1 selected 18 scenes",
+  "notes": "Offline frozen DAV2 + RDAH prediction assets; metrics are computed against GAMUS AGL after inference.",
+  "scenes": [
+    {
+      "id": "DC_01_25",
+      "split": "train",
+      "label": "train scene DC_01_25",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        44.51300048828125
+      ],
+      "metrics": {
+        "mae": 10.972509461206467,
+        "mse": 263.42949382547835,
+        "rmse": 16.230511200374384,
+        "bias": -10.93247532145184,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 5.057680673406278,
+        "tree": 21.278003123557685
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/train/DC_01_25/rgb.jpg",
+        "depth": "/gamus/train/DC_01_25/dav2-depth.png",
+        "predictedHeight": "/gamus/train/DC_01_25/predicted-height.png",
+        "referenceHeight": "/gamus/train/DC_01_25/reference-height.png",
+        "errorHeatmap": "/gamus/train/DC_01_25/error-heatmap.png",
+        "classes": "/gamus/train/DC_01_25/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/train/DC_01_25/predicted-height.png",
+        "reference": "/gamus/train/DC_01_25/reference-height.png",
+        "error": "/gamus/train/DC_01_25/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_10_17",
+      "split": "train",
+      "label": "train scene DC_10_17",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        38.22200012207031
+      ],
+      "metrics": {
+        "mae": 11.766806523601415,
+        "mse": 235.0520789193365,
+        "rmse": 15.331408249711979,
+        "bias": -11.745188793463571,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 9.1037126878835,
+        "tree": 17.612406004755016
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/train/DC_10_17/rgb.jpg",
+        "depth": "/gamus/train/DC_10_17/dav2-depth.png",
+        "predictedHeight": "/gamus/train/DC_10_17/predicted-height.png",
+        "referenceHeight": "/gamus/train/DC_10_17/reference-height.png",
+        "errorHeatmap": "/gamus/train/DC_10_17/error-heatmap.png",
+        "classes": "/gamus/train/DC_10_17/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/train/DC_10_17/predicted-height.png",
+        "reference": "/gamus/train/DC_10_17/reference-height.png",
+        "error": "/gamus/train/DC_10_17/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_10_18",
+      "split": "train",
+      "label": "train scene DC_10_18",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        36.79399871826172
+      ],
+      "metrics": {
+        "mae": 7.4591580978500325,
+        "mse": 114.93820625413655,
+        "rmse": 10.720923759365913,
+        "bias": -7.423228613485673,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 6.899601468828807,
+        "tree": 13.354874883111698
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/train/DC_10_18/rgb.jpg",
+        "depth": "/gamus/train/DC_10_18/dav2-depth.png",
+        "predictedHeight": "/gamus/train/DC_10_18/predicted-height.png",
+        "referenceHeight": "/gamus/train/DC_10_18/reference-height.png",
+        "errorHeatmap": "/gamus/train/DC_10_18/error-heatmap.png",
+        "classes": "/gamus/train/DC_10_18/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/train/DC_10_18/predicted-height.png",
+        "reference": "/gamus/train/DC_10_18/reference-height.png",
+        "error": "/gamus/train/DC_10_18/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_10_19",
+      "split": "train",
+      "label": "train scene DC_10_19",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        33.02000045776367
+      ],
+      "metrics": {
+        "mae": 7.446777660553982,
+        "mse": 106.74600994606179,
+        "rmse": 10.331796065837818,
+        "bias": -7.417938995755169,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 7.03496042236803,
+        "tree": 12.79450508828706
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/train/DC_10_19/rgb.jpg",
+        "depth": "/gamus/train/DC_10_19/dav2-depth.png",
+        "predictedHeight": "/gamus/train/DC_10_19/predicted-height.png",
+        "referenceHeight": "/gamus/train/DC_10_19/reference-height.png",
+        "errorHeatmap": "/gamus/train/DC_10_19/error-heatmap.png",
+        "classes": "/gamus/train/DC_10_19/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/train/DC_10_19/predicted-height.png",
+        "reference": "/gamus/train/DC_10_19/reference-height.png",
+        "error": "/gamus/train/DC_10_19/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_10_21",
+      "split": "train",
+      "label": "train scene DC_10_21",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        45.80099868774414
+      ],
+      "metrics": {
+        "mae": 17.9096144429591,
+        "mse": 499.5146505878805,
+        "rmse": 22.34982439724931,
+        "bias": -17.882168108218444,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 8.933460845374134,
+        "tree": 25.81164683324438
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/train/DC_10_21/rgb.jpg",
+        "depth": "/gamus/train/DC_10_21/dav2-depth.png",
+        "predictedHeight": "/gamus/train/DC_10_21/predicted-height.png",
+        "referenceHeight": "/gamus/train/DC_10_21/reference-height.png",
+        "errorHeatmap": "/gamus/train/DC_10_21/error-heatmap.png",
+        "classes": "/gamus/train/DC_10_21/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/train/DC_10_21/predicted-height.png",
+        "reference": "/gamus/train/DC_10_21/reference-height.png",
+        "error": "/gamus/train/DC_10_21/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_10_27",
+      "split": "train",
+      "label": "train scene DC_10_27",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        46.763999938964844
+      ],
+      "metrics": {
+        "mae": 10.517920944745027,
+        "mse": 258.4482575992124,
+        "rmse": 16.076325998163025,
+        "bias": -10.465294390660759,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 8.394114848491714,
+        "tree": 20.771976401159083
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/train/DC_10_27/rgb.jpg",
+        "depth": "/gamus/train/DC_10_27/dav2-depth.png",
+        "predictedHeight": "/gamus/train/DC_10_27/predicted-height.png",
+        "referenceHeight": "/gamus/train/DC_10_27/reference-height.png",
+        "errorHeatmap": "/gamus/train/DC_10_27/error-heatmap.png",
+        "classes": "/gamus/train/DC_10_27/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/train/DC_10_27/predicted-height.png",
+        "reference": "/gamus/train/DC_10_27/reference-height.png",
+        "error": "/gamus/train/DC_10_27/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_02_26",
+      "split": "val",
+      "label": "val scene DC_02_26",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        41.516998291015625
+      ],
+      "metrics": {
+        "mae": 7.8119333787293215,
+        "mse": 156.06962428547186,
+        "rmse": 12.492782887950622,
+        "bias": -7.764333086440403,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 4.845755740095753,
+        "tree": 17.616316911200595
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/val/DC_02_26/rgb.jpg",
+        "depth": "/gamus/val/DC_02_26/dav2-depth.png",
+        "predictedHeight": "/gamus/val/DC_02_26/predicted-height.png",
+        "referenceHeight": "/gamus/val/DC_02_26/reference-height.png",
+        "errorHeatmap": "/gamus/val/DC_02_26/error-heatmap.png",
+        "classes": "/gamus/val/DC_02_26/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/val/DC_02_26/predicted-height.png",
+        "reference": "/gamus/val/DC_02_26/reference-height.png",
+        "error": "/gamus/val/DC_02_26/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_20_13",
+      "split": "val",
+      "label": "val scene DC_20_13",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        103.26300048828125
+      ],
+      "metrics": {
+        "mae": 5.881763912189556,
+        "mse": 79.36256895123356,
+        "rmse": 8.908567166005628,
+        "bias": -5.823671407263556,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 9.76808111980903,
+        "tree": 11.941087253473247
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/val/DC_20_13/rgb.jpg",
+        "depth": "/gamus/val/DC_20_13/dav2-depth.png",
+        "predictedHeight": "/gamus/val/DC_20_13/predicted-height.png",
+        "referenceHeight": "/gamus/val/DC_20_13/reference-height.png",
+        "errorHeatmap": "/gamus/val/DC_20_13/error-heatmap.png",
+        "classes": "/gamus/val/DC_20_13/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/val/DC_20_13/predicted-height.png",
+        "reference": "/gamus/val/DC_20_13/reference-height.png",
+        "error": "/gamus/val/DC_20_13/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_20_14",
+      "split": "val",
+      "label": "val scene DC_20_14",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        33.685001373291016
+      ],
+      "metrics": {
+        "mae": 6.237892803831211,
+        "mse": 83.70458114210453,
+        "rmse": 9.149020775039508,
+        "bias": -6.190532762885848,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 6.566688775219597,
+        "tree": 12.350083452193667
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/val/DC_20_14/rgb.jpg",
+        "depth": "/gamus/val/DC_20_14/dav2-depth.png",
+        "predictedHeight": "/gamus/val/DC_20_14/predicted-height.png",
+        "referenceHeight": "/gamus/val/DC_20_14/reference-height.png",
+        "errorHeatmap": "/gamus/val/DC_20_14/error-heatmap.png",
+        "classes": "/gamus/val/DC_20_14/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/val/DC_20_14/predicted-height.png",
+        "reference": "/gamus/val/DC_20_14/reference-height.png",
+        "error": "/gamus/val/DC_20_14/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_20_18",
+      "split": "val",
+      "label": "val scene DC_20_18",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        34.827999114990234
+      ],
+      "metrics": {
+        "mae": 8.920308789518067,
+        "mse": 145.3921927360799,
+        "rmse": 12.057868498871594,
+        "bias": -8.889326582833231,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 7.88077471560576,
+        "tree": 14.544996769218779
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/val/DC_20_18/rgb.jpg",
+        "depth": "/gamus/val/DC_20_18/dav2-depth.png",
+        "predictedHeight": "/gamus/val/DC_20_18/predicted-height.png",
+        "referenceHeight": "/gamus/val/DC_20_18/reference-height.png",
+        "errorHeatmap": "/gamus/val/DC_20_18/error-heatmap.png",
+        "classes": "/gamus/val/DC_20_18/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/val/DC_20_18/predicted-height.png",
+        "reference": "/gamus/val/DC_20_18/reference-height.png",
+        "error": "/gamus/val/DC_20_18/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_20_19",
+      "split": "val",
+      "label": "val scene DC_20_19",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        35.257999420166016
+      ],
+      "metrics": {
+        "mae": 9.194523425878167,
+        "mse": 142.41404201486483,
+        "rmse": 11.933735459396813,
+        "bias": -9.172805755355267,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 7.982633497521952,
+        "tree": 13.553510007350258
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/val/DC_20_19/rgb.jpg",
+        "depth": "/gamus/val/DC_20_19/dav2-depth.png",
+        "predictedHeight": "/gamus/val/DC_20_19/predicted-height.png",
+        "referenceHeight": "/gamus/val/DC_20_19/reference-height.png",
+        "errorHeatmap": "/gamus/val/DC_20_19/error-heatmap.png",
+        "classes": "/gamus/val/DC_20_19/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/val/DC_20_19/predicted-height.png",
+        "reference": "/gamus/val/DC_20_19/reference-height.png",
+        "error": "/gamus/val/DC_20_19/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_20_29",
+      "split": "val",
+      "label": "val scene DC_20_29",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        29.14900016784668
+      ],
+      "metrics": {
+        "mae": 4.9506450939645426,
+        "mse": 53.34211245192172,
+        "rmse": 7.30356847382988,
+        "bias": -4.900393963145181,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 6.5476413660088415,
+        "tree": 10.354028497020906
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/val/DC_20_29/rgb.jpg",
+        "depth": "/gamus/val/DC_20_29/dav2-depth.png",
+        "predictedHeight": "/gamus/val/DC_20_29/predicted-height.png",
+        "referenceHeight": "/gamus/val/DC_20_29/reference-height.png",
+        "errorHeatmap": "/gamus/val/DC_20_29/error-heatmap.png",
+        "classes": "/gamus/val/DC_20_29/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/val/DC_20_29/predicted-height.png",
+        "reference": "/gamus/val/DC_20_29/reference-height.png",
+        "error": "/gamus/val/DC_20_29/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_03_26",
+      "split": "test",
+      "label": "test scene DC_03_26",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        42.573001861572266
+      ],
+      "metrics": {
+        "mae": 11.121200444219495,
+        "mse": 240.8835086506215,
+        "rmse": 15.520422309029529,
+        "bias": -11.09101123935764,
+        "validPixels": 1043132
+      },
+      "classMetrics": {
+        "building": 7.4862845651707906,
+        "tree": 19.24037826372534
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/test/DC_03_26/rgb.jpg",
+        "depth": "/gamus/test/DC_03_26/dav2-depth.png",
+        "predictedHeight": "/gamus/test/DC_03_26/predicted-height.png",
+        "referenceHeight": "/gamus/test/DC_03_26/reference-height.png",
+        "errorHeatmap": "/gamus/test/DC_03_26/error-heatmap.png",
+        "classes": "/gamus/test/DC_03_26/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/test/DC_03_26/predicted-height.png",
+        "reference": "/gamus/test/DC_03_26/reference-height.png",
+        "error": "/gamus/test/DC_03_26/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_20_12",
+      "split": "test",
+      "label": "test scene DC_20_12",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        28.849000930786133
+      ],
+      "metrics": {
+        "mae": 6.648000706398487,
+        "mse": 96.15072147006089,
+        "rmse": 9.80564742737882,
+        "bias": -6.596398476894919,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 12.172856443285287,
+        "tree": 9.815853842740793
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/test/DC_20_12/rgb.jpg",
+        "depth": "/gamus/test/DC_20_12/dav2-depth.png",
+        "predictedHeight": "/gamus/test/DC_20_12/predicted-height.png",
+        "referenceHeight": "/gamus/test/DC_20_12/reference-height.png",
+        "errorHeatmap": "/gamus/test/DC_20_12/error-heatmap.png",
+        "classes": "/gamus/test/DC_20_12/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/test/DC_20_12/predicted-height.png",
+        "reference": "/gamus/test/DC_20_12/reference-height.png",
+        "error": "/gamus/test/DC_20_12/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_20_15",
+      "split": "test",
+      "label": "test scene DC_20_15",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        36.38800048828125
+      ],
+      "metrics": {
+        "mae": 8.730682592135773,
+        "mse": 134.38633805344386,
+        "rmse": 11.592512154552345,
+        "bias": -8.70832343892973,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 6.791687534986384,
+        "tree": 14.041175699962954
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/test/DC_20_15/rgb.jpg",
+        "depth": "/gamus/test/DC_20_15/dav2-depth.png",
+        "predictedHeight": "/gamus/test/DC_20_15/predicted-height.png",
+        "referenceHeight": "/gamus/test/DC_20_15/reference-height.png",
+        "errorHeatmap": "/gamus/test/DC_20_15/error-heatmap.png",
+        "classes": "/gamus/test/DC_20_15/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/test/DC_20_15/predicted-height.png",
+        "reference": "/gamus/test/DC_20_15/reference-height.png",
+        "error": "/gamus/test/DC_20_15/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_20_20",
+      "split": "test",
+      "label": "test scene DC_20_20",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        40.21099853515625
+      ],
+      "metrics": {
+        "mae": 11.319564587357554,
+        "mse": 221.5339226831189,
+        "rmse": 14.884015677333819,
+        "bias": -11.293701942397814,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 9.710536738885624,
+        "tree": 17.14978351911047
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/test/DC_20_20/rgb.jpg",
+        "depth": "/gamus/test/DC_20_20/dav2-depth.png",
+        "predictedHeight": "/gamus/test/DC_20_20/predicted-height.png",
+        "referenceHeight": "/gamus/test/DC_20_20/reference-height.png",
+        "errorHeatmap": "/gamus/test/DC_20_20/error-heatmap.png",
+        "classes": "/gamus/test/DC_20_20/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/test/DC_20_20/predicted-height.png",
+        "reference": "/gamus/test/DC_20_20/reference-height.png",
+        "error": "/gamus/test/DC_20_20/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_20_23",
+      "split": "test",
+      "label": "test scene DC_20_23",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        46.09000015258789
+      ],
+      "metrics": {
+        "mae": 24.81591238603225,
+        "mse": 755.7052478992047,
+        "rmse": 27.490093632055977,
+        "bias": -24.798080856186417,
+        "validPixels": 992524
+      },
+      "classMetrics": {
+        "tree": 28.72150453188379
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/test/DC_20_23/rgb.jpg",
+        "depth": "/gamus/test/DC_20_23/dav2-depth.png",
+        "predictedHeight": "/gamus/test/DC_20_23/predicted-height.png",
+        "referenceHeight": "/gamus/test/DC_20_23/reference-height.png",
+        "errorHeatmap": "/gamus/test/DC_20_23/error-heatmap.png",
+        "classes": "/gamus/test/DC_20_23/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/test/DC_20_23/predicted-height.png",
+        "reference": "/gamus/test/DC_20_23/reference-height.png",
+        "error": "/gamus/test/DC_20_23/predicted-height.png"
+      }
+    },
+    {
+      "id": "DC_20_25",
+      "split": "test",
+      "label": "test scene DC_20_25",
+      "previewOnly": false,
+      "localGrid": true,
+      "crs": null,
+      "pixelSpacingM": 0.33,
+      "model": "DAV2 + RDAH-Net (frozen)",
+      "calibration": {
+        "accepted": false,
+        "scale": 40.37230127734748,
+        "offset": 7.750947195380219,
+        "minimum_validation_improvement": 0.05,
+        "fit": "train (rejected on validation)"
+      },
+      "heightRangeM": [
+        0.0,
+        44.375999450683594
+      ],
+      "metrics": {
+        "mae": 19.369352627922908,
+        "mse": 505.84800804397247,
+        "rmse": 22.491065071356058,
+        "bias": -19.35388366951515,
+        "validPixels": 1048576
+      },
+      "classMetrics": {
+        "building": 6.797946798360025,
+        "tree": 24.270813395273382
+      },
+      "heightEncoding": "rg16-linear",
+      "layers": {
+        "rgb": "/gamus/test/DC_20_25/rgb.jpg",
+        "depth": "/gamus/test/DC_20_25/dav2-depth.png",
+        "predictedHeight": "/gamus/test/DC_20_25/predicted-height.png",
+        "referenceHeight": "/gamus/test/DC_20_25/reference-height.png",
+        "errorHeatmap": "/gamus/test/DC_20_25/error-heatmap.png",
+        "classes": "/gamus/test/DC_20_25/classes-preview.png"
+      },
+      "geometry": {
+        "predicted": "/gamus/test/DC_20_25/predicted-height.png",
+        "reference": "/gamus/test/DC_20_25/reference-height.png",
+        "error": "/gamus/test/DC_20_25/predicted-height.png"
+      }
+    }
+  ]
+}

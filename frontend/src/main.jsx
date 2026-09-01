@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -23,391 +23,157 @@ import {
   Settings2,
   SlidersHorizontal,
   Target,
-  Upload,
   X,
+  AlertTriangle,
+  BarChart3,
 } from "lucide-react";
 import "./styles.css";
 import "./light.css";
 import "./enhancements.css";
 import "./blender.css";
 
-const samples = {
-  train: {
-    id: "DC_01_25",
-    label: "Campus district",
-    coord: "12.9716° N, 77.5946° E",
-    rgb: "/train-DC_01_25-rgb.jpg",
-    height: "/train-DC_01_25-height.jpg",
-    max: "42.8 m",
-  },
-  val: {
-    id: "DC_02_26",
-    label: "Urban edge",
-    coord: "12.9352° N, 77.6245° E",
-    rgb: "/val-DC_02_26-rgb.jpg",
-    height: "/val-DC_02_26-height.jpg",
-    max: "31.4 m",
-  },
-  test: {
-    id: "DC_03_26",
-    label: "Dense blocks",
-    coord: "13.0068° N, 77.5813° E",
-    rgb: "/test-DC_03_26-rgb.jpg",
-    height: "/test-DC_03_26-height.jpg",
-    max: "56.2 m",
-  },
-};
-const sceneCatalog = [
-  { ...samples.train, split: "train", thumb: "/train-DC_01_25-rgb.jpg" },
-  {
-    id: "DC_02_24",
-    label: "Residential grid",
-    coord: "12.9821° N, 77.6012° E",
-    rgb: "/train-DC_02_24-rgb.jpg",
-    height: "/train-DC_02_24-height.jpg",
-    max: "38.6 m",
-    split: "train",
-    thumb: "/train-DC_02_24-rgb.jpg",
-  },
-  {
-    id: "DC_02_25",
-    label: "Green corridor",
-    coord: "12.9688° N, 77.5827° E",
-    rgb: "/train-DC_02_25-rgb.jpg",
-    height: "/train-DC_02_25-height.jpg",
-    max: "29.1 m",
-    split: "train",
-    thumb: "/train-DC_02_25-rgb.jpg",
-  },
-  {
-    id: "DC_02_27",
-    label: "Industrial pocket",
-    coord: "12.9534° N, 77.6123° E",
-    rgb: "/train-DC_02_27-rgb.jpg",
-    height: "/train-DC_02_27-height.jpg",
-    max: "34.7 m",
-    split: "train",
-    thumb: "/train-DC_02_27-rgb.jpg",
-  },
-  {
-    id: "DC_03_23",
-    label: "Transit district",
-    coord: "12.9442° N, 77.5881° E",
-    rgb: "/train-DC_03_23-rgb.jpg",
-    height: "/train-DC_03_23-height.jpg",
-    max: "46.2 m",
-    split: "train",
-    thumb: "/train-DC_03_23-rgb.jpg",
-  },
-  { ...samples.val, split: "val", thumb: "/val-DC_02_26-rgb.jpg" },
-  {
-    id: "DC_04_23",
-    label: "River approach",
-    coord: "12.9204° N, 77.6061° E",
-    rgb: "/val-DC_04_23-rgb.jpg",
-    height: "/val-DC_04_23-height.jpg",
-    max: "27.9 m",
-    split: "val",
-    thumb: "/val-DC_04_23-rgb.jpg",
-  },
-  {
-    id: "DC_04_27",
-    label: "Low-rise fabric",
-    coord: "12.9281° N, 77.6352° E",
-    rgb: "/val-DC_04_27-rgb.jpg",
-    height: "/val-DC_04_27-height.jpg",
-    max: "25.4 m",
-    split: "val",
-    thumb: "/val-DC_04_27-rgb.jpg",
-  },
-  {
-    id: "DC_08_31",
-    label: "Hillside fringe",
-    coord: "12.9017° N, 77.5748° E",
-    rgb: "/val-DC_08_31-rgb.jpg",
-    height: "/val-DC_08_31-height.jpg",
-    max: "51.7 m",
-    split: "val",
-    thumb: "/val-DC_08_31-rgb.jpg",
-  },
-  {
-    id: "DC_09_33",
-    label: "Canopy study",
-    coord: "12.8894° N, 77.6217° E",
-    rgb: "/val-DC_09_33-rgb.jpg",
-    height: "/val-DC_09_33-height.jpg",
-    max: "33.8 m",
-    split: "val",
-    thumb: "/val-DC_09_33-rgb.jpg",
-  },
-  { ...samples.test, split: "test", thumb: "/test-DC_03_26-rgb.jpg" },
-  {
-    id: "DC_05_28",
-    label: "Civic core",
-    coord: "13.0184° N, 77.6032° E",
-    rgb: "/test-DC_05_28-rgb.jpg",
-    height: "/test-DC_05_28-height.jpg",
-    max: "44.5 m",
-    split: "test",
-    thumb: "/test-DC_05_28-rgb.jpg",
-  },
-  {
-    id: "DC_05_30",
-    label: "Open blocks",
-    coord: "13.0272° N, 77.5722° E",
-    rgb: "/test-DC_05_30-rgb.jpg",
-    height: "/test-DC_05_30-height.jpg",
-    max: "22.3 m",
-    split: "test",
-    thumb: "/test-DC_05_30-rgb.jpg",
-  },
-  {
-    id: "DC_07_21",
-    label: "Dense campus",
-    coord: "13.0411° N, 77.5919° E",
-    rgb: "/test-DC_07_21-rgb.jpg",
-    height: "/test-DC_07_21-height.jpg",
-    max: "49.1 m",
-    split: "test",
-    thumb: "/test-DC_07_21-rgb.jpg",
-  },
-  {
-    id: "DC_07_29",
-    label: "North ridge",
-    coord: "13.0562° N, 77.6128° E",
-    rgb: "/test-DC_07_29-rgb.jpg",
-    height: "/test-DC_07_29-height.jpg",
-    max: "56.2 m",
-    split: "test",
-    thumb: "/test-DC_07_29-rgb.jpg",
-  },
+const N = 512,
+  S = N + 1;
+const EMPTY = { mae: null, mse: null, rmse: null, bias: null };
+const fallbackPairs = [
+  ["train", "DC_01_25"],
+  ["train", "DC_02_24"],
+  ["train", "DC_02_25"],
+  ["train", "DC_02_27"],
+  ["train", "DC_03_23"],
+  ["train", "DC_10_17"],
+  ["train", "DC_10_18"],
+  ["train", "DC_10_19"],
+  ["train", "DC_10_21"],
+  ["train", "DC_10_27"],
+  ["val", "DC_02_26"],
+  ["val", "DC_04_23"],
+  ["val", "DC_04_27"],
+  ["val", "DC_08_31"],
+  ["val", "DC_09_33"],
+  ["val", "DC_20_13"],
+  ["val", "DC_20_14"],
+  ["val", "DC_20_18"],
+  ["val", "DC_20_19"],
+  ["val", "DC_20_29"],
+  ["test", "DC_03_26"],
+  ["test", "DC_05_28"],
+  ["test", "DC_05_30"],
+  ["test", "DC_07_21"],
+  ["test", "DC_07_29"],
+  ["test", "DC_20_12"],
+  ["test", "DC_20_15"],
+  ["test", "DC_20_20"],
+  ["test", "DC_20_23"],
+  ["test", "DC_20_25"],
 ];
-const extraCatalog = [
-  {
-    id: "DC_10_17",
-    label: "Mixed-use edge",
-    coord: "13.0642° N, 77.5843° E",
-    rgb: "/train-DC_10_17-rgb.jpg",
-    height: "/train-DC_10_17-height.jpg",
-    max: "39.8 m",
-    split: "train",
-    thumb: "/train-DC_10_17-rgb.jpg",
+const fallback = fallbackPairs.map(([split, id]) => ({
+  id,
+  split,
+  label: `${split} scene ${id}`,
+  previewOnly: true,
+  localGrid: true,
+  crs: null,
+  metrics: EMPTY,
+  layers: {
+    rgb: `/${split}-${id}-rgb.jpg`,
+    depth: `/${split}-${id}-depth.jpg`,
+    predictedHeight: `/${split}-${id}-height.jpg`,
+    referenceHeight: `/${split}-${id}-height.jpg`,
+    errorHeatmap: null,
   },
-  {
-    id: "DC_10_18",
-    label: "Canal district",
-    coord: "13.0714° N, 77.6018° E",
-    rgb: "/train-DC_10_18-rgb.jpg",
-    height: "/train-DC_10_18-height.jpg",
-    max: "28.6 m",
-    split: "train",
-    thumb: "/train-DC_10_18-rgb.jpg",
+  geometry: {
+    predicted: `/${split}-${id}-height.jpg`,
+    reference: `/${split}-${id}-height.jpg`,
+    error: `/${split}-${id}-height.jpg`,
   },
-  {
-    id: "DC_10_19",
-    label: "Industrial north",
-    coord: "13.0831° N, 77.6195° E",
-    rgb: "/train-DC_10_19-rgb.jpg",
-    height: "/train-DC_10_19-height.jpg",
-    max: "45.1 m",
-    split: "train",
-    thumb: "/train-DC_10_19-rgb.jpg",
-  },
-  {
-    id: "DC_10_21",
-    label: "Civic expansion",
-    coord: "13.0942° N, 77.5726° E",
-    rgb: "/train-DC_10_21-rgb.jpg",
-    height: "/train-DC_10_21-height.jpg",
-    max: "32.7 m",
-    split: "train",
-    thumb: "/train-DC_10_21-rgb.jpg",
-  },
-  {
-    id: "DC_10_27",
-    label: "Open greenfield",
-    coord: "13.1021° N, 77.5942° E",
-    rgb: "/train-DC_10_27-rgb.jpg",
-    height: "/train-DC_10_27-height.jpg",
-    max: "21.9 m",
-    split: "train",
-    thumb: "/train-DC_10_27-rgb.jpg",
-  },
-  {
-    id: "DC_20_13",
-    label: "West hillside",
-    coord: "13.1127° N, 77.5532° E",
-    rgb: "/val-DC_20_13-rgb.jpg",
-    height: "/val-DC_20_13-height.jpg",
-    max: "48.3 m",
-    split: "val",
-    thumb: "/val-DC_20_13-rgb.jpg",
-  },
-  {
-    id: "DC_20_14",
-    label: "Low-density fringe",
-    coord: "13.1218° N, 77.5784° E",
-    rgb: "/val-DC_20_14-rgb.jpg",
-    height: "/val-DC_20_14-height.jpg",
-    max: "24.8 m",
-    split: "val",
-    thumb: "/val-DC_20_14-rgb.jpg",
-  },
-  {
-    id: "DC_20_18",
-    label: "Creek crossing",
-    coord: "13.1344° N, 77.6031° E",
-    rgb: "/val-DC_20_18-rgb.jpg",
-    height: "/val-DC_20_18-height.jpg",
-    max: "35.6 m",
-    split: "val",
-    thumb: "/val-DC_20_18-rgb.jpg",
-  },
-  {
-    id: "DC_20_19",
-    label: "New development",
-    coord: "13.1451° N, 77.6214° E",
-    rgb: "/val-DC_20_19-rgb.jpg",
-    height: "/val-DC_20_19-height.jpg",
-    max: "30.2 m",
-    split: "val",
-    thumb: "/val-DC_20_19-rgb.jpg",
-  },
-  {
-    id: "DC_20_29",
-    label: "Forest interface",
-    coord: "13.1532° N, 77.5926° E",
-    rgb: "/val-DC_20_29-rgb.jpg",
-    height: "/val-DC_20_29-height.jpg",
-    max: "52.6 m",
-    split: "val",
-    thumb: "/val-DC_20_29-rgb.jpg",
-  },
-  {
-    id: "DC_20_12",
-    label: "North campus",
-    coord: "13.1642° N, 77.5718° E",
-    rgb: "/test-DC_20_12-rgb.jpg",
-    height: "/test-DC_20_12-height.jpg",
-    max: "41.5 m",
-    split: "test",
-    thumb: "/test-DC_20_12-rgb.jpg",
-  },
-  {
-    id: "DC_20_15",
-    label: "Warehouse belt",
-    coord: "13.1728° N, 77.6061° E",
-    rgb: "/test-DC_20_15-rgb.jpg",
-    height: "/test-DC_20_15-height.jpg",
-    max: "36.9 m",
-    split: "test",
-    thumb: "/test-DC_20_15-rgb.jpg",
-  },
-  {
-    id: "DC_20_20",
-    label: "Eastern ridge",
-    coord: "13.1817° N, 77.6282° E",
-    rgb: "/test-DC_20_20-rgb.jpg",
-    height: "/test-DC_20_20-height.jpg",
-    max: "55.7 m",
-    split: "test",
-    thumb: "/test-DC_20_20-rgb.jpg",
-  },
-  {
-    id: "DC_20_23",
-    label: "Residential north",
-    coord: "13.1932° N, 77.5835° E",
-    rgb: "/test-DC_20_23-rgb.jpg",
-    height: "/test-DC_20_23-height.jpg",
-    max: "33.4 m",
-    split: "test",
-    thumb: "/test-DC_20_23-rgb.jpg",
-  },
-  {
-    id: "DC_20_25",
-    label: "Outer ring edge",
-    coord: "13.2041° N, 77.6147° E",
-    rgb: "/test-DC_20_25-rgb.jpg",
-    height: "/test-DC_20_25-height.jpg",
-    max: "46.8 m",
-    split: "test",
-    thumb: "/test-DC_20_25-rgb.jpg",
-  },
-];
-const displayedScenes = [...sceneCatalog.slice(0, 3), ...extraCatalog];
-
-// Terrain detail controls. Keep samples one larger than segments because a grid
-// with N segments contains N + 1 vertices along that axis.
-// 512 segments keeps more than half a million triangles while avoiding the
-// million-vertex CPU/GPU cost of the source grid during interactive flight.
-const MESH_SEGMENTS_X = 512;
-const MESH_SEGMENTS_Y = 512;
-const HEIGHT_SAMPLE_WIDTH = MESH_SEGMENTS_X + 1;
-const HEIGHT_SAMPLE_HEIGHT = MESH_SEGMENTS_Y + 1;
-
-// Raw height-map pixels are single-sample estimates, so buildings render as
-// bristling, knife-edge columns. A box/Gaussian blur would remove that noise
-// by averaging across edges too, melting flat rooftops and vertical walls
-// into rounded blobs. A median filter instead replaces each sample with the
-// middle value of its neighborhood — noise spikes get discarded (a spike is
-// never the median of a mostly-flat neighborhood) while flat planes and hard
-// edges pass through unchanged, so buildings keep crisp geometry.
-function medianFilter(src, width, height, radius) {
-  const out = new Float32Array(src.length);
-  const window = new Float32Array((radius * 2 + 1) * (radius * 2 + 1));
-  for (let y = 0; y < height; y++) {
-    const y0 = Math.max(0, y - radius);
-    const y1 = Math.min(height - 1, y + radius);
+}));
+function sceneOf(input) {
+  const l = input.layers || {},
+    g = input.geometry || {},
+    reference = g.reference || l.referenceHeight || input.height,
+    predicted = g.predicted || l.predictedHeight || reference;
+  return {
+    ...input,
+    label: input.label || input.id,
+    split: input.split || "unknown",
+    localGrid: input.localGrid !== false,
+    crs: input.crs || null,
+    previewOnly: Boolean(input.previewOnly || !g.predicted || !input.metrics),
+    layers: {
+      rgb: l.rgb || input.rgb,
+      depth: l.depth || input.depth,
+      predictedHeight: l.predictedHeight || predicted,
+      referenceHeight: l.referenceHeight || reference,
+      errorHeatmap: l.errorHeatmap || l.error || null,
+    },
+    geometry: { predicted, reference, error: g.error || predicted },
+    metrics: { ...EMPTY, ...(input.metrics || {}) },
+    classMetrics: input.classMetrics || {},
+  };
+}
+function metric(v, unit) {
+  return Number.isFinite(Number(v)) ? `${Number(v).toFixed(2)} ${unit}` : "—";
+}
+function median(values, width, height) {
+  const out = new Float32Array(values.length),
+    win = [];
+  for (let y = 0; y < height; y++)
     for (let x = 0; x < width; x++) {
-      const x0 = Math.max(0, x - radius);
-      const x1 = Math.min(width - 1, x + radius);
-      let n = 0;
-      for (let ny = y0; ny <= y1; ny++)
-        for (let nx = x0; nx <= x1; nx++) window[n++] = src[ny * width + nx];
-      out[y * width + x] = window.subarray(0, n).sort()[n >> 1];
+      win.length = 0;
+      for (let yy = Math.max(0, y - 2); yy <= Math.min(height - 1, y + 2); yy++)
+        for (
+          let xx = Math.max(0, x - 2);
+          xx <= Math.min(width - 1, x + 2);
+          xx++
+        )
+          win.push(values[yy * width + xx]);
+      win.sort((a, b) => a - b);
+      out[y * width + x] = win[Math.floor(win.length / 2)];
     }
-  }
   return out;
 }
-
-// Denoises spikes with an edge-preserving median filter, then clips the
-// tallest slice of the field so isolated outliers (trees, poles) too wide
-// for the filter to remove don't tower over the surrounding buildings.
-function buildHeightField(px, width, height) {
-  const size = width * height;
-  const raw = new Float32Array(size);
-  for (let i = 0; i < size; i++) raw[i] = px[i * 4] / 255;
-  const smoothed = medianFilter(raw, width, height, 3);
-  const cap = Float32Array.from(smoothed).sort()[Math.floor(size * 0.97)];
-  for (let i = 0; i < size; i++)
-    if (smoothed[i] > cap) smoothed[i] = cap;
-  return smoothed;
+function decode(image, encoding = "grayscale8") {
+  const canvas = document.createElement("canvas");
+  canvas.width = S;
+  canvas.height = S;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0, S, S);
+  const px = ctx.getImageData(0, 0, S, S).data,
+    values = new Float32Array(S * S);
+  for (let i = 0; i < values.length; i++) {
+    values[i] = encoding === "rg16-linear"
+      ? (px[i * 4] * 256 + px[i * 4 + 1]) / 65535
+      : px[i * 4] / 255;
+  }
+  return median(values, S, S);
 }
 
-function TerrainCanvas({
-  sample,
-  exaggeration,
+function Terrain({
+  data,
+  mode,
   layer,
-  resetToken,
-  onMeasure,
-  waypointMode,
-  pathCommand,
-  onWaypointChange,
+  exaggeration,
+  reset,
+  waypointsEnabled,
+  command,
+  onWaypoints,
   onPathEnd,
+  onMeasure,
 }) {
-  const ref = useRef(null);
-  const state = useRef({});
-  const waypointModeRef = useRef(waypointMode);
-  const pathEndRef = useRef(onPathEnd);
-  const keys = useRef({});
+  const host = useRef(null),
+    state = useRef({}),
+    keys = useRef({}),
+    enabled = useRef(waypointsEnabled),
+    ended = useRef(onPathEnd);
   useEffect(() => {
-    waypointModeRef.current = waypointMode;
-  }, [waypointMode]);
+    enabled.current = waypointsEnabled;
+  }, [waypointsEnabled]);
   useEffect(() => {
-    pathEndRef.current = onPathEnd;
+    ended.current = onPathEnd;
   }, [onPathEnd]);
   useEffect(() => {
-    const host = ref.current,
+    const root = host.current,
       scene = new THREE.Scene();
     scene.background = new THREE.Color("#07111e");
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
@@ -416,19 +182,18 @@ function TerrainCanvas({
       antialias: false,
       powerPreference: "high-performance",
     });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.25));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    host.appendChild(renderer.domElement);
+    root.appendChild(renderer.domElement);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.target.set(0, 0, 0);
     const transform = new TransformControls(camera, renderer.domElement);
     transform.setMode("translate");
     transform.setSize(0.72);
-    const transformHelper = transform.getHelper();
-    scene.add(transformHelper);
-    transform.addEventListener("dragging-changed", (event) => {
-      controls.enabled = !event.value;
+    scene.add(transform.getHelper());
+    transform.addEventListener("dragging-changed", (e) => {
+      controls.enabled = !e.value;
     });
     scene.add(new THREE.HemisphereLight(0x9bc9d0, 0x172333, 1.7));
     const sun = new THREE.DirectionalLight(0xf7e4ba, 2.5);
@@ -437,473 +202,427 @@ function TerrainCanvas({
     const grid = new THREE.GridHelper(9, 18, 0x315263, 0x1b3040);
     grid.position.y = -0.55;
     scene.add(grid);
-    const geo = new THREE.PlaneGeometry(8, 8, MESH_SEGMENTS_X, MESH_SEGMENTS_Y);
-    geo.rotateX(-Math.PI / 2);
-    const tex = new THREE.TextureLoader();
-    const height = tex.load(sample.height, (loaded) => {
-      const c = document.createElement("canvas");
-      c.width = HEIGHT_SAMPLE_WIDTH;
-      c.height = HEIGHT_SAMPLE_HEIGHT;
-      const x = c.getContext("2d");
-      x.drawImage(
-        loaded.image,
-        0,
-        0,
-        HEIGHT_SAMPLE_WIDTH,
-        HEIGHT_SAMPLE_HEIGHT,
-      );
-      const px = x.getImageData(
-        0,
-        0,
-        HEIGHT_SAMPLE_WIDTH,
-        HEIGHT_SAMPLE_HEIGHT,
-      ).data;
-      const heightField = buildHeightField(
-        px,
-        HEIGHT_SAMPLE_WIDTH,
-        HEIGHT_SAMPLE_HEIGHT,
-      );
-      const pos = geo.attributes.position;
-      for (let i = 0; i < pos.count; i++)
-        pos.setY(i, (heightField[i] - 0.32) * 1.5 * exaggeration);
-      state.current.heightField = heightField;
-      state.current.exaggeration = exaggeration;
-      pos.needsUpdate = true;
-      geo.computeVertexNormals();
-      state.current.renderDirty = true;
-    });
+    const geometry = new THREE.PlaneGeometry(8, 8, N, N);
+    geometry.rotateX(-Math.PI / 2);
     const material = new THREE.MeshStandardMaterial({
-      map: height,
       roughness: 0.86,
       metalness: 0.02,
       side: THREE.FrontSide,
-      wireframe: false,
     });
-    const mesh = new THREE.Mesh(geo, material);
+    const mesh = new THREE.Mesh(geometry, material);
     scene.add(mesh);
-    const waypointGroup = new THREE.Group();
-    scene.add(waypointGroup);
+    const loader = new THREE.TextureLoader();
+    const markerGroup = new THREE.Group();
+    scene.add(markerGroup);
     state.current = {
       scene,
       camera,
-      renderer,
       controls,
-      mesh,
-      tex,
-      height,
-      waypointGroup,
       transform,
+      geometry,
+      material,
+      mesh,
+      loader,
+      markerGroup,
       waypoints: [],
-      waypointLine: null,
-      pathPlaying: false,
+      line: null,
+      heights: null,
+      exaggeration,
+      dirty: true,
+      playing: false,
       routeYaw: 0,
       routePitch: 0,
-      renderDirty: true,
-      routePosition: new THREE.Vector3(),
-      routeLookAt: new THREE.Vector3(),
-      routeDirection: new THREE.Vector3(),
-      routePitchAxis: new THREE.Vector3(),
+      pos: new THREE.Vector3(),
+      look: new THREE.Vector3(),
+      direction: new THREE.Vector3(),
+      pitchAxis: new THREE.Vector3(),
     };
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const groundPoint = new THREE.Vector3();
-    const rebuildWaypointLine = () => {
-      if (state.current.waypointLine) {
-        scene.remove(state.current.waypointLine);
-        state.current.waypointLine.geometry.dispose();
-        state.current.waypointLine.material.dispose();
+    const ray = new THREE.Raycaster(),
+      pointer = new THREE.Vector2(),
+      point = new THREE.Vector3();
+    const heightAt = (p) =>
+      state.current.heights
+        ? state.current.heights[
+            Math.min(N, Math.max(0, Math.round(((4 - p.z) / 8) * N))) * S +
+              Math.min(N, Math.max(0, Math.round(((p.x + 4) / 8) * N)))
+          ]
+        : 0;
+    const redraw = () => {
+      if (state.current.line) {
+        scene.remove(state.current.line);
+        state.current.line.geometry.dispose();
+        state.current.line.material.dispose();
       }
-      const linePoints = state.current.waypoints.map((p) =>
-        p.clone().add(new THREE.Vector3(0, 0.085, 0)),
-      );
-      state.current.waypointLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(linePoints),
+      state.current.line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(
+          state.current.waypoints.map((p) =>
+            p.clone().add(new THREE.Vector3(0, 0.085, 0)),
+          ),
+        ),
         new THREE.LineBasicMaterial({ color: 0xffb55e }),
       );
-      scene.add(state.current.waypointLine);
-      state.current.renderDirty = true;
+      scene.add(state.current.line);
+      state.current.dirty = true;
     };
-    transform.addEventListener("objectChange", () => {
-      const marker = transform.object;
-      if (!marker || marker.userData.waypointIndex === undefined) return;
-      state.current.waypoints[marker.userData.waypointIndex]
-        .copy(marker.position)
-        .add(new THREE.Vector3(0, -0.08, 0));
-      rebuildWaypointLine();
-    });
-    const addWaypoint = (event) => {
-      if (state.current.pathPlaying || transform.dragging || transform.axis)
+    const click = (e) => {
+      if (state.current.playing || transform.dragging || !enabled.current)
         return;
       const rect = renderer.domElement.getBoundingClientRect();
-      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      raycaster.setFromCamera(pointer, camera);
-      const markerHit = raycaster.intersectObjects(
-        waypointGroup.children,
-        false,
-      )[0];
-      if (markerHit) {
-        transform.attach(markerHit.object);
+      pointer.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      ray.setFromCamera(pointer, camera);
+      if (
+        !ray.ray.intersectPlane(
+          new THREE.Plane(new THREE.Vector3(0, 1, 0), 0),
+          point,
+        ) ||
+        Math.abs(point.x) > 4 ||
+        Math.abs(point.z) > 4
+      )
         return;
-      }
-      if (!waypointModeRef.current) {
-        transform.detach();
-        return;
-      }
-      const point = raycaster.ray.intersectPlane(groundPlane, groundPoint);
-      if (!point || Math.abs(point.x) > 4 || Math.abs(point.z) > 4) return;
-      if (state.current.heightField) {
-        const column = Math.min(
-          HEIGHT_SAMPLE_WIDTH - 1,
-          Math.max(
-            0,
-            Math.round(((point.x + 4) / 8) * (HEIGHT_SAMPLE_WIDTH - 1)),
-          ),
-        );
-        const row = Math.min(
-          HEIGHT_SAMPLE_HEIGHT - 1,
-          Math.max(
-            0,
-            Math.round(((4 - point.z) / 8) * (HEIGHT_SAMPLE_HEIGHT - 1)),
-          ),
-        );
-        const heightValue =
-          state.current.heightField[row * HEIGHT_SAMPLE_WIDTH + column];
-        point.y = (heightValue - 0.32) * 1.5 * state.current.exaggeration;
-      }
-      state.current.waypoints.push(point);
+      point.y = heightAt(point);
+      state.current.waypoints.push(point.clone());
       const marker = new THREE.Mesh(
         new THREE.SphereGeometry(0.09, 18, 14),
         new THREE.MeshBasicMaterial({ color: 0xff9f43 }),
       );
       marker.position.copy(point).add(new THREE.Vector3(0, 0.08, 0));
-      marker.userData.waypointIndex = state.current.waypoints.length - 1;
-      waypointGroup.add(marker);
+      markerGroup.add(marker);
       transform.attach(marker);
-      rebuildWaypointLine();
-      state.current.renderDirty = true;
-      onWaypointChange(state.current.waypoints.length);
+      redraw();
+      onWaypoints(state.current.waypoints.length);
     };
-    renderer.domElement.addEventListener("click", addWaypoint);
-    let routeLookDrag = null;
-    const startRouteLook = (event) => {
-      if (!state.current.pathPlaying || event.button !== 0) return;
-      routeLookDrag = { x: event.clientX, y: event.clientY };
-      renderer.domElement.style.cursor = "grabbing";
-    };
-    const moveRouteLook = (event) => {
-      if (!routeLookDrag || !state.current.pathPlaying) return;
-      const dx = event.clientX - routeLookDrag.x;
-      const dy = event.clientY - routeLookDrag.y;
-      state.current.routeYaw -= dx * 0.004;
-      state.current.routePitch = THREE.MathUtils.clamp(
-        state.current.routePitch - dy * 0.003,
-        -0.9,
-        0.9,
-      );
-      routeLookDrag = { x: event.clientX, y: event.clientY };
-    };
-    const endRouteLook = () => {
-      routeLookDrag = null;
-      renderer.domElement.style.cursor = "";
-    };
-    renderer.domElement.addEventListener("pointerdown", startRouteLook);
-    window.addEventListener("pointermove", moveRouteLook);
-    window.addEventListener("pointerup", endRouteLook);
-    const onResize = () => {
-      const w = host.clientWidth,
-        h = host.clientHeight;
+    renderer.domElement.addEventListener("click", click);
+    const resize = () => {
+      const w = root.clientWidth,
+        h = root.clientHeight;
       renderer.setSize(w, h, false);
-      camera.aspect = w / h;
+      camera.aspect = w / Math.max(h, 1);
       camera.updateProjectionMatrix();
     };
-    onResize();
-    window.addEventListener("resize", onResize);
-    const keyDown = (e) => {
-      if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
-      if ("wasdqe".includes(e.key.toLowerCase())) {
-        keys.current[e.key.toLowerCase()] = true;
+    resize();
+    window.addEventListener("resize", resize);
+    const down = (e) => {
+      const k = e.key.toLowerCase();
+      if (
+        !["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName) &&
+        "wasdqe".includes(k)
+      ) {
+        keys.current[k] = true;
         e.preventDefault();
-        if (state.current.pathPlaying) {
-          state.current.pathPlaying = false;
-          pathEndRef.current?.();
-        }
         controls.enabled = false;
       }
     };
-    const keyUp = (e) => {
-      if (keys.current[e.key.toLowerCase()]) {
-        keys.current[e.key.toLowerCase()] = false;
-        if (!Object.values(keys.current).some(Boolean)) controls.enabled = true;
-      }
+    const up = (e) => {
+      delete keys.current[e.key.toLowerCase()];
+      if (!Object.keys(keys.current).length) controls.enabled = true;
     };
-    window.addEventListener("keydown", keyDown);
-    window.addEventListener("keyup", keyUp);
-    const clock = new THREE.Clock();
-    const velocity = new THREE.Vector3();
-    const move = new THREE.Vector3();
-    const forward = new THREE.Vector3();
-    const right = new THREE.Vector3();
-    const desired = new THREE.Vector3();
-    const step = new THREE.Vector3();
-    const worldUp = new THREE.Vector3(0, 1, 0);
-    let renderedOnce = false;
-    let raf;
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    const velocity = new THREE.Vector3(),
+      movement = new THREE.Vector3(),
+      forward = new THREE.Vector3(),
+      right = new THREE.Vector3(),
+      desired = new THREE.Vector3(),
+      step = new THREE.Vector3(),
+      upVector = new THREE.Vector3(0, 1, 0),
+      clock = new THREE.Clock();
+    let raf,
+      first = true;
     const loop = () => {
       const dt = Math.min(clock.getDelta(), 0.05);
-      move.set(0, 0, 0);
+      movement.set(0, 0, 0);
       camera.getWorldDirection(forward);
       forward.y = 0;
       forward.normalize();
       right.crossVectors(forward, camera.up).normalize();
-      if (keys.current.w) move.add(forward);
-      if (keys.current.s) move.sub(forward);
-      if (keys.current.d) move.add(right);
-      if (keys.current.a) move.sub(right);
-      if (keys.current.e) move.y += 1;
-      if (keys.current.q) move.y -= 1;
-      if (move.lengthSq()) desired.copy(move).normalize().multiplyScalar(1.35);
+      if (keys.current.w) movement.add(forward);
+      if (keys.current.s) movement.sub(forward);
+      if (keys.current.d) movement.add(right);
+      if (keys.current.a) movement.sub(right);
+      if (keys.current.e) movement.y += 1;
+      if (keys.current.q) movement.y -= 1;
+      desired.copy(movement);
+      if (desired.lengthSq()) desired.normalize().multiplyScalar(1.35);
       else desired.set(0, 0, 0);
       velocity.lerp(desired, 1 - Math.exp(-6 * dt));
-      const hasVelocity = velocity.lengthSq() > 0.000001;
-      if (hasVelocity) {
+      if (velocity.lengthSq() > 1e-6) {
         step.copy(velocity).multiplyScalar(dt);
         camera.position.add(step);
         controls.target.add(step);
       }
-      let routeActive = false;
-      if (state.current.pathPlaying && state.current.pathCurve) {
-        routeActive = true;
-        state.current.pathElapsed += dt;
-        const t = Math.min(
-          state.current.pathElapsed / state.current.pathDuration,
-          1,
+      let route = false;
+      if (state.current.playing && state.current.curve) {
+        route = true;
+        state.current.elapsed += dt;
+        const t = Math.min(state.current.elapsed / state.current.duration, 1);
+        state.current.curve.getPoint(t, state.current.pos);
+        state.current.curve.getPoint(
+          Math.min(t + 0.012, 1),
+          state.current.look,
         );
-        const position = state.current.routePosition;
-        const lookAt = state.current.routeLookAt;
-        state.current.pathCurve.getPoint(t, position);
-        state.current.pathCurve.getPoint(Math.min(t + 0.012, 1), lookAt);
-        position.y += 0.65;
-        lookAt.y += 0.42;
-        camera.position.copy(position);
-        const direction = state.current.routeDirection
-          .copy(lookAt)
-          .sub(position)
-          .normalize();
-        direction.applyAxisAngle(worldUp, state.current.routeYaw);
-        state.current.routePitchAxis
-          .crossVectors(direction, worldUp)
-          .normalize();
+        state.current.pos.y += 0.65;
+        state.current.look.y += 0.42;
+        camera.position.copy(state.current.pos);
+        const direction = state.current.direction
+          .copy(state.current.look)
+          .sub(camera.position)
+          .normalize()
+          .applyAxisAngle(upVector, state.current.routeYaw);
+        state.current.pitchAxis.crossVectors(direction, upVector).normalize();
         direction.applyAxisAngle(
-          state.current.routePitchAxis,
+          state.current.pitchAxis,
           state.current.routePitch,
         );
-        controls.target.copy(position).add(direction);
+        controls.target.copy(camera.position).add(direction);
         if (t >= 1) {
-          state.current.pathPlaying = false;
+          state.current.playing = false;
           controls.enabled = true;
-          pathEndRef.current?.();
+          ended.current?.();
         }
       }
-      const controlsChanged = controls.update();
+      const changed = controls.update();
       if (
-        !renderedOnce ||
-        state.current.renderDirty ||
-        controlsChanged ||
-        hasVelocity ||
-        routeActive
+        first ||
+        state.current.dirty ||
+        changed ||
+        route ||
+        velocity.lengthSq() > 1e-6
       ) {
         renderer.render(scene, camera);
-        renderedOnce = true;
-        state.current.renderDirty = false;
+        first = false;
+        state.current.dirty = false;
       }
       raf = requestAnimationFrame(loop);
     };
     loop();
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("keydown", keyDown);
-      window.removeEventListener("keyup", keyUp);
-      renderer.domElement.removeEventListener("click", addWaypoint);
-      renderer.domElement.removeEventListener("pointerdown", startRouteLook);
-      window.removeEventListener("pointermove", moveRouteLook);
-      window.removeEventListener("pointerup", endRouteLook);
+      renderer.domElement.removeEventListener("click", click);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
       controls.dispose();
       transform.dispose();
-      geo.dispose();
+      geometry.dispose();
+      material.map?.dispose();
       material.dispose();
-      if (material.map && material.map !== height) material.map.dispose();
-      height.dispose();
       renderer.dispose();
-      if (renderer.domElement.parentNode === host)
-        host.removeChild(renderer.domElement);
+      if (renderer.domElement.parentNode === root)
+        root.removeChild(renderer.domElement);
     };
-  }, [sample]);
+  }, [data.id]);
+  useEffect(() => {
+    const s = state.current,
+      url = data.geometry[mode] || data.geometry.predicted;
+    if (!s.mesh || !url) return;
+    const image = new Image();
+    image.onload = () => {
+      s.heights = decode(image, data.heightEncoding || "grayscale8");
+      const p = s.geometry.attributes.position;
+      for (let i = 0; i < p.count; i++)
+        p.setY(i, (s.heights[i] - 0.32) * 1.5 * s.exaggeration);
+      p.needsUpdate = true;
+      s.geometry.computeVertexNormals();
+      s.dirty = true;
+    };
+    image.onerror = () => {
+      s.heights = new Float32Array(S * S);
+      s.dirty = true;
+    };
+    image.src = url;
+  }, [data, mode]);
+  useEffect(() => {
+    const s = state.current,
+      url =
+        layer === "texture"
+          ? data.layers.rgb
+          : layer === "depth"
+            ? data.layers.depth
+            : layer === "error"
+              ? data.layers.errorHeatmap
+              : layer === "classes"
+                ? data.layers.classes
+              : mode === "reference"
+                ? data.layers.referenceHeight
+                : data.layers.predictedHeight;
+    if (!s.mesh) return;
+    if (!url) {
+      s.material.map = null;
+      s.material.color.set(mode === "error" ? "#db755e" : "#5f8f88");
+      s.material.needsUpdate = true;
+      s.dirty = true;
+      return;
+    }
+    const texture = s.loader.load(url, () => {
+      s.dirty = true;
+    });
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const previous = s.material.map;
+    s.material.map = texture;
+    s.material.color.set("#fff");
+    s.material.needsUpdate = true;
+    if (previous) previous.dispose();
+    s.dirty = true;
+  }, [data, mode, layer]);
   useEffect(() => {
     const s = state.current;
-    if (!s.scene || !pathCommand || pathCommand.type === "idle") return;
-    if (pathCommand.type === "clear") {
-      s.pathPlaying = false;
+    if (!s.heights) return;
+    const p = s.geometry.attributes.position;
+    for (let i = 0; i < p.count; i++)
+      p.setY(i, (s.heights[i] - 0.32) * 1.5 * exaggeration);
+    p.needsUpdate = true;
+    s.geometry.computeVertexNormals();
+    s.exaggeration = exaggeration;
+    s.dirty = true;
+  }, [exaggeration]);
+  useEffect(() => {
+    const s = state.current;
+    if (s.camera) {
+      s.camera.position.set(0, 3.4, 5.6);
+      s.controls.target.set(0, 0, 0);
+      s.controls.update();
+    }
+  }, [reset]);
+  useEffect(() => {
+    const s = state.current;
+    if (!s.mesh || !command) return;
+    if (command.type === "clear") {
       s.transform.detach();
       s.waypoints.length = 0;
-      while (s.waypointGroup.children.length) {
-        const marker = s.waypointGroup.children.pop();
-        marker.geometry.dispose();
-        marker.material.dispose();
+      while (s.markerGroup.children.length) {
+        const m = s.markerGroup.children.pop();
+        m.geometry.dispose();
+        m.material.dispose();
       }
-      if (s.waypointLine) {
-        s.scene.remove(s.waypointLine);
-        s.waypointLine.geometry.dispose();
-        s.waypointLine.material.dispose();
-        s.waypointLine = null;
+      if (s.line) {
+        s.scene.remove(s.line);
+        s.line.geometry.dispose();
+        s.line.material.dispose();
+        s.line = null;
       }
-      s.controls.enabled = true;
-      onWaypointChange(0);
-      return;
+      onWaypoints(0);
     }
-    if (pathCommand.type === "pause") {
-      s.pathPlaying = false;
+    if (command.type === "pause") {
+      s.playing = false;
       s.controls.enabled = true;
-      return;
     }
-    if (pathCommand.type === "play" && s.waypoints.length >= 2) {
-      s.pathCurve = new THREE.CatmullRomCurve3(
-        s.waypoints.map((point) => point.clone()),
+    if (command.type === "play" && s.waypoints.length >= 2) {
+      s.curve = new THREE.CatmullRomCurve3(
+        s.waypoints.map((p) => p.clone()),
         false,
         "catmullrom",
         0.45,
       );
-      s.pathElapsed = 0;
-      s.pathDuration = Math.max(7, s.waypoints.length * 2.8);
-      s.pathPlaying = true;
-      s.routeYaw = 0;
-      s.routePitch = 0;
+      s.elapsed = 0;
+      s.duration = Math.max(7, s.waypoints.length * 2.8);
+      s.playing = true;
       s.transform.detach();
       s.controls.enabled = false;
     }
-  }, [pathCommand, onWaypointChange]);
-  useEffect(() => {
-    const s = state.current;
-    if (!s.mesh) return;
-    const source =
-      layer === "texture"
-        ? sample.rgb
-        : layer === "depth"
-          ? sample.height.replace("-height.jpg", "-depth.jpg")
-          : sample.height;
-    const previousMap = s.mesh.material.map;
-    const nextMap = s.tex.load(source, () => {
-      s.renderDirty = true;
-    });
-    s.mesh.material.map = nextMap;
-    if (previousMap && previousMap !== s.height) previousMap.dispose();
-    s.mesh.material.needsUpdate = true;
-    s.renderDirty = true;
-  }, [layer, sample]);
-  useEffect(() => {
-    const m = state.current.mesh,
-      heightField = state.current.heightField;
-    if (!m || !heightField) return;
-    const p = m.geometry.attributes.position;
-    for (let i = 0; i < p.count; i++)
-      p.setY(i, (heightField[i] - 0.32) * 1.5 * exaggeration);
-    p.needsUpdate = true;
-    m.geometry.computeVertexNormals();
-    state.current.exaggeration = exaggeration;
-    state.current.renderDirty = true;
-  }, [exaggeration]);
-  useEffect(() => {
-    const s = state.current;
-    if (!s.camera || !s.controls) return;
-    s.camera.position.set(0, 3.4, 5.6);
-    s.controls.target.set(0, 0, 0);
-    s.controls.update();
-  }, [resetToken]);
+  }, [command]);
   return (
     <div
-      ref={ref}
+      ref={host}
       onDoubleClick={onMeasure}
-      className={`terrain-canvas ${waypointMode ? "waypoint-active" : ""}`}
+      className={`terrain-canvas ${waypointsEnabled ? "waypoint-active" : ""}`}
     />
   );
 }
 
 function App() {
-  const [split, setSplit] = useState("train");
-  const [sample, setSample] = useState(samples.train);
-  const [layer, setLayer] = useState("texture");
-  const [exaggeration, setExaggeration] = useState(0.5);
-  const [playing, setPlaying] = useState(false);
-  const [measure, setMeasure] = useState(false);
-  const [toast, setToast] = useState("");
-  const [theme, setTheme] = useState("dark");
-  const [resetToken, setResetToken] = useState(0);
-  const [profileCleared, setProfileCleared] = useState(false);
-  const [waypointMode, setWaypointMode] = useState(false);
-  const [waypointCount, setWaypointCount] = useState(0);
-  const [pathCommand, setPathCommand] = useState({ type: "idle", id: 0 });
-  const fileRef = useRef(null);
-  const notify = (msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 1800);
+  const [scenes, setScenes] = useState([]),
+    [manifest, setManifest] = useState("loading"),
+    [split, setSplit] = useState("all"),
+    [sample, setSample] = useState(null),
+    [mode, setMode] = useState("predicted"),
+    [layer, setLayer] = useState("texture"),
+    [exaggeration, setExaggeration] = useState(0.5),
+    [playing, setPlaying] = useState(false),
+    [measure, setMeasure] = useState(false),
+    [toast, setToast] = useState(""),
+    [theme, setTheme] = useState("dark"),
+    [reset, setReset] = useState(0),
+    [cleared, setCleared] = useState(false),
+    [waypoints, setWaypoints] = useState(false),
+    [count, setCount] = useState(0),
+    [command, setCommand] = useState(null);
+  const notify = (text) => {
+    setToast(text);
+    window.setTimeout(() => setToast(""), 1800);
   };
-  const selectScene = (s) => {
-    setSplit(s.split);
+  useEffect(() => {
+    fetch("/gamus/scenes.json")
+      .then((r) => {
+        if (!r.ok) throw Error();
+        return r.json();
+      })
+      .then((j) => {
+        const list = Array.isArray(j) ? j : j.scenes;
+        const ready = (list || []).map(sceneOf);
+        setScenes(ready);
+        setSample(ready[0] || null);
+        setManifest(ready.length ? "ready" : "empty");
+      })
+      .catch(() => {
+        setScenes(fallback);
+        setSample(fallback[0]);
+        setManifest("fallback");
+      });
+  }, []);
+  const filtered = useMemo(
+    () => (split === "all" ? scenes : scenes.filter((s) => s.split === split)),
+    [scenes, split],
+  );
+  useEffect(() => {
+    if (sample && !filtered.some((s) => s.id === sample.id))
+      setSample(filtered[0] || null);
+  }, [filtered, sample]);
+  const index = Math.max(
+    0,
+    filtered.findIndex((s) => s.id === sample?.id),
+  );
+  const choose = (s) => {
+    if (!s) return;
     setSample(s);
-    setProfileCleared(false);
-    setWaypointCount(0);
+    setCleared(false);
+    setCount(0);
     setPlaying(false);
+    setCommand({ type: "clear", id: Date.now() });
     notify(`Loaded ${s.id}`);
   };
-  const sceneIndex = Math.max(
-    0,
-    displayedScenes.findIndex((scene) => scene.id === sample.id),
-  );
-  const changeScene = (offset) => {
-    const next =
-      displayedScenes[
-        (sceneIndex + offset + displayedScenes.length) % displayedScenes.length
-      ];
-    selectScene(next);
-  };
-  const togglePathPlayback = () => {
+  const change = (n) =>
+    filtered.length &&
+    choose(filtered[(index + n + filtered.length) % filtered.length]);
+  const togglePath = () => {
     if (playing) {
-      setPathCommand({ type: "pause", id: Date.now() });
+      setCommand({ type: "pause", id: Date.now() });
       setPlaying(false);
-      return;
+    } else if (count < 2) notify("Set at least two waypoints first");
+    else {
+      setCommand({ type: "play", id: Date.now() });
+      setPlaying(true);
+      setWaypoints(false);
     }
-    if (waypointCount < 2) {
-      notify("Set at least two waypoints first");
-      return;
-    }
-    setPathCommand({ type: "play", id: Date.now() });
-    setPlaying(true);
-    setWaypointMode(false);
   };
   const clearPath = () => {
-    setPathCommand({ type: "clear", id: Date.now() });
-    setWaypointCount(0);
+    setCommand({ type: "clear", id: Date.now() });
+    setCount(0);
     setPlaying(false);
     notify("Waypoints cleared");
-  };
-  const importScene = (e) => {
-    const f = e.target.files?.[0];
-    if (f) notify(`Imported ${f.name} · preview ready`);
   };
   const exportScene = () => {
     const blob = new Blob(
       [
         JSON.stringify(
           {
-            format: "GAMUS Terrain Studio scene",
             scene: sample.id,
-            split,
+            split: sample.split,
+            mode,
             layer,
-            verticalExaggeration: exaggeration,
-            controls: "WASDQE",
-            source: "earthflow/GAMUS",
+            metrics: sample.metrics,
           },
           null,
           2,
@@ -911,23 +630,33 @@ function App() {
       ],
       { type: "application/json" },
     );
-    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
+    a.href = URL.createObjectURL(blob);
     a.download = `${sample.id}-terrain-scene.json`;
     a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
     notify("Scene manifest downloaded");
   };
+  if (manifest === "loading")
+    return (
+      <div className="app loading-state">Loading GAMUS scene manifest…</div>
+    );
+  if (!sample)
+    return (
+      <div className="app empty-state">
+        <AlertTriangle size={30} />
+        <h1>No GAMUS scenes available</h1>
+        <p>
+          Add <code>frontend/public/gamus/scenes.json</code> with browser-ready
+          assets.
+        </p>
+      </div>
+    );
+  const m = sample.metrics || EMPTY;
+  const classMetrics = Object.entries(sample.classMetrics || {});
   return (
-    <div className={`app theme-${theme}`}>
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".png,.jpg,.jpeg,.tif,.tiff,.geojson"
-        onChange={importScene}
-        hidden
-      />
+    <div
+      className={`app theme-${theme} ${mode === "error" ? "error-mode" : ""}`}
+    >
       <aside className="rail">
         <div className="brandmark">
           <Mountain size={18} />
@@ -939,10 +668,10 @@ function App() {
           >
             <Layers3 size={18} />
           </button>
-          <button onClick={() => notify("Map overview selected")}>
+          <button onClick={() => notify("Local-grid gallery")}>
             <Map size={18} />
           </button>
-          <button onClick={() => notify("Analytics panel selected")}>
+          <button onClick={() => notify("Metrics are read from the manifest")}>
             <Activity size={18} />
           </button>
         </div>
@@ -950,9 +679,8 @@ function App() {
           <button
             onClick={() => {
               setTheme(theme === "dark" ? "light" : "dark");
-              notify(`${theme === "dark" ? "Light" : "Dark"} mode enabled`);
+              notify("Theme changed");
             }}
-            title="Toggle light mode"
           >
             <Settings2 size={18} />
           </button>
@@ -961,9 +689,7 @@ function App() {
       </aside>
       <main>
         <section className="workspace">
-          <div
-            className={`viewport-card ${layer === "depth" ? "depth-mode" : ""}`}
-          >
+          <div className="viewport-card">
             <div className="viewport-top">
               <div className="scene-title">
                 <span className="scene-chip">
@@ -972,28 +698,22 @@ function App() {
                 <div>
                   <strong>{sample.label}</strong>
                   <small>
-                    {sample.id} · {sample.coord}
+                    {sample.id} ·{" "}
+                    {sample.localGrid ? "Local grid · no CRS" : sample.crs}
                   </small>
                 </div>
               </div>
               <div className="view-actions">
-                <button onClick={() => fileRef.current?.click()}>
-                  <Upload size={14} /> Import
-                </button>
                 <button onClick={exportScene}>
                   <Download size={14} /> Export
                 </button>
-                <button onClick={togglePathPlayback}>
+                <button onClick={togglePath}>
                   {playing ? <Pause size={15} /> : <Play size={15} />}{" "}
                   {playing ? "Pause path" : "Play route"}
                 </button>
                 <button
                   onClick={() =>
-                    Promise.resolve(
-                      document
-                        .querySelector(".workspace")
-                        ?.requestFullscreen?.(),
-                    ).catch(() => notify("Fullscreen unavailable"))
+                    document.querySelector(".workspace")?.requestFullscreen?.()
                   }
                 >
                   <Maximize2 size={15} />
@@ -1001,16 +721,20 @@ function App() {
               </div>
             </div>
             <div className="canvas-wrap">
-              <TerrainCanvas
-                sample={sample}
-                exaggeration={exaggeration}
+              <Terrain
+                data={sample}
+                mode={mode}
                 layer={layer}
-                resetToken={resetToken}
-                onMeasure={() => measure && notify("Point captured · 18.4 m")}
-                waypointMode={waypointMode}
-                pathCommand={pathCommand}
-                onWaypointChange={setWaypointCount}
+                exaggeration={exaggeration}
+                reset={reset}
+                waypointsEnabled={waypoints}
+                command={command}
+                onWaypoints={setCount}
                 onPathEnd={() => setPlaying(false)}
+                onMeasure={() =>
+                  measure &&
+                  notify("Numeric probe unavailable for preview assets")
+                }
               />
               <div className="flight-help">
                 <kbd>W</kbd>
@@ -1020,12 +744,14 @@ function App() {
                 <kbd>E</kbd> altitude · drag to look on route
               </div>
               <div className="canvas-badge">
-                <span className="pulse" /> LIVE PREVIEW <i />{" "}
-                {layer === "elevation"
-                  ? "rDSM surface"
-                  : layer === "depth"
-                    ? "Height estimate"
-                    : "RGB texture"}
+                <span className="pulse" />{" "}
+                {sample.previewOnly ? "PREVIEW ONLY" : "GAMUS RUN"}
+                <i />{" "}
+                {mode === "predicted"
+                  ? "Predicted 3D"
+                  : mode === "reference"
+                    ? "Reference 3D"
+                    : "Error 3D"}
               </div>
               <div className="compass">
                 <Compass size={23} />
@@ -1052,17 +778,20 @@ function App() {
             <div className="viewport-footer">
               <div className="legend">
                 <span>
-                  <b className="swatch low" /> Low · 0 m
+                  <b className="swatch low" /> Low
                 </span>
                 <span>
-                  <b className="swatch mid" /> Mid · 21 m
+                  <b className="swatch mid" /> Mid
                 </span>
                 <span>
-                  <b className="swatch high" /> High · {sample.max}
+                  <b className="swatch high" /> High
                 </span>
               </div>
               <div className="footer-note">
-                <Eye size={14} /> 2048 × 2048 texture · 1024 height grid
+                <Eye size={14} /> 512 × 512 interactive mesh ·{" "}
+                {sample.localGrid
+                  ? "local grid, no global coordinates"
+                  : sample.crs}
               </div>
             </div>
           </div>
@@ -1074,29 +803,87 @@ function App() {
               </div>
               <button
                 className="icon-btn"
-                onClick={() => notify("Inspector settings ready")}
+                onClick={() => notify("Manifest-driven scene metadata")}
               >
                 <SlidersHorizontal size={16} />
               </button>
             </div>
+            {sample.previewOnly && (
+              <div className="preview-notice">
+                <AlertTriangle size={14} />
+                <span>
+                  Preview-only assets. Prediction metrics are not available.
+                </span>
+              </div>
+            )}
             <div className="metric-grid">
               <div>
-                <small>Surface max</small>
-                <strong>{sample.max}</strong>
-                <em>+ 4.8%</em>
+                <small>MAE</small>
+                <strong>{metric(m.mae, "m")}</strong>
+                <em>{m.mae == null ? "not reported" : "manifest value"}</em>
               </div>
               <div>
-                <small>Coverage</small>
-                <strong>1.05 km²</strong>
-                <em className="neutral">stable</em>
+                <small>MSE</small>
+                <strong>{metric(m.mse, "m²")}</strong>
+                <em>{m.mse == null ? "not reported" : "manifest value"}</em>
               </div>
+              <div>
+                <small>RMSE</small>
+                <strong>{metric(m.rmse, "m")}</strong>
+                <em>{m.rmse == null ? "not reported" : "manifest value"}</em>
+              </div>
+              <div>
+                <small>Bias</small>
+                <strong>{metric(m.bias, "m")}</strong>
+                <em>{m.bias == null ? "not reported" : "manifest value"}</em>
+              </div>
+            </div>
+            {classMetrics.length > 0 && (
+              <div className="class-metrics">
+                {classMetrics.map(([name, values]) => (
+                  <div key={name}>
+                    <span>{name}</span>
+                    <strong>{metric(values?.mae ?? values, "m")}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="control-section">
+              <label>Geometry mode</label>
+              <div className="segmented mode-tabs">
+                <button
+                  className={mode === "predicted" ? "selected" : ""}
+                  onClick={() => setMode("predicted")}
+                >
+                  <BarChart3 size={13} /> Predicted
+                </button>
+                <button
+                  className={mode === "reference" ? "selected" : ""}
+                  onClick={() => setMode("reference")}
+                >
+                  <Mountain size={13} /> Reference
+                </button>
+                <button
+                  className={mode === "error" ? "selected" : ""}
+                  onClick={() => setMode("error")}
+                >
+                  <Activity size={13} /> Error
+                </button>
+              </div>
+              <small className="mode-description">
+                {mode === "error"
+                  ? "Predicted geometry coloured by absolute error."
+                  : mode === "reference"
+                    ? "GAMUS AGL reference surface."
+                    : "Prediction height surface."}
+              </small>
             </div>
             <div className="control-section">
               <label>Active layer</label>
               <div className="segmented layer-tabs">
                 <button
-                  className={layer === "elevation" ? "selected" : ""}
-                  onClick={() => setLayer("elevation")}
+                  className={layer === "surface" ? "selected" : ""}
+                  onClick={() => setLayer("surface")}
                 >
                   <Mountain size={14} /> Surface
                 </button>
@@ -1104,13 +891,25 @@ function App() {
                   className={layer === "depth" ? "selected" : ""}
                   onClick={() => setLayer("depth")}
                 >
-                  <Activity size={14} /> Height
+                  <Activity size={14} /> Depth
                 </button>
                 <button
                   className={layer === "texture" ? "selected" : ""}
                   onClick={() => setLayer("texture")}
                 >
                   <FileImage size={14} /> RGB
+                </button>
+                <button
+                  className={layer === "error" ? "selected" : ""}
+                  onClick={() => setLayer("error")}
+                >
+                  <AlertTriangle size={14} /> Error
+                </button>
+                <button
+                  className={layer === "classes" ? "selected" : ""}
+                  onClick={() => setLayer("classes")}
+                >
+                  <Layers3 size={14} /> Classes
                 </button>
               </div>
             </div>
@@ -1140,14 +939,14 @@ function App() {
                 <button
                   className="text-btn"
                   onClick={() => {
-                    setProfileCleared(true);
+                    setCleared(true);
                     notify("Profile cleared");
                   }}
                 >
                   Clear
                 </button>
               </div>
-              <div className={`sparkline ${profileCleared ? "cleared" : ""}`}>
+              <div className={`sparkline ${cleared ? "cleared" : ""}`}>
                 <svg viewBox="0 0 300 70" preserveAspectRatio="none">
                   <path
                     d="M0,60 C12,45 22,51 33,42 S54,50 66,38 S86,46 99,27 S119,36 133,30 S150,46 164,19 S184,32 199,23 S214,30 230,14 S248,29 263,19 S281,20 300,5"
@@ -1155,34 +954,25 @@ function App() {
                     stroke="#8bd2c4"
                     strokeWidth="2"
                   />
-                  <path
-                    d="M0,60 C12,45 22,51 33,42 S54,50 66,38 S86,46 99,27 S119,36 133,30 S150,46 164,19 S184,32 199,23 S214,30 230,14 S248,29 263,19 S281,20 300,5 V70 H0Z"
-                    fill="url(#fill)"
-                    opacity=".22"
-                  />
-                  <defs>
-                    <linearGradient id="fill" x1="0" x2="0" y1="0" y2="1">
-                      <stop stopColor="#8bd2c4" />
-                      <stop offset="1" stopColor="#8bd2c4" stopOpacity="0" />
-                    </linearGradient>
-                  </defs>
                 </svg>
               </div>
               <div className="profile-values">
                 <span>0 m</span>
-                <strong>24.6 m avg</strong>
-                <span>42.8 m</span>
+                <strong>
+                  {m.mae == null ? "profile unavailable" : metric(m.mae, "MAE")}
+                </strong>
+                <span>—</span>
               </div>
             </div>
             <div className="control-section scene-switcher">
               <div className="label-row">
-                <label>Scene</label>
+                <label>Scene gallery</label>
                 <span>
-                  {sceneIndex + 1} / {displayedScenes.length}
+                  {index + 1} / {filtered.length}
                 </span>
               </div>
               <div className="scene-preview">
-                <img src={sample.thumb || sample.rgb} alt={sample.label} />
+                <img src={sample.layers.rgb} alt={sample.label} />
                 <div>
                   <strong>{sample.id}</strong>
                   <small>{sample.label}</small>
@@ -1190,29 +980,61 @@ function App() {
               </div>
               <select
                 value={sample.id}
-                onChange={(event) =>
-                  selectScene(
-                    displayedScenes.find(
-                      (scene) => scene.id === event.target.value,
-                    ),
-                  )
+                onChange={(e) =>
+                  choose(filtered.find((s) => s.id === e.target.value))
                 }
               >
-                {displayedScenes.map((scene) => (
-                  <option key={`${scene.split}-${scene.id}`} value={scene.id}>
-                    {scene.id} — {scene.label}
+                {filtered.map((s) => (
+                  <option key={`${s.split}-${s.id}`} value={s.id}>
+                    {s.id} — {s.label}
                   </option>
                 ))}
               </select>
               <div className="photo-nav">
-                <button onClick={() => changeScene(-1)}>← Previous</button>
-                <button onClick={() => changeScene(1)}>Next →</button>
+                <button onClick={() => change(-1)}>← Previous</button>
+                <button onClick={() => change(1)}>Next →</button>
+              </div>
+            </div>
+            <div className="control-section split-filter">
+              <div className="label-row">
+                <label>Dataset split</label>
+                <span>
+                  {manifest === "fallback"
+                    ? "development fallback"
+                    : "manifest"}
+                </span>
+              </div>
+              <div className="segmented">
+                <button
+                  className={split === "all" ? "selected" : ""}
+                  onClick={() => setSplit("all")}
+                >
+                  All
+                </button>
+                <button
+                  className={split === "train" ? "selected" : ""}
+                  onClick={() => setSplit("train")}
+                >
+                  Train
+                </button>
+                <button
+                  className={split === "val" ? "selected" : ""}
+                  onClick={() => setSplit("val")}
+                >
+                  Val
+                </button>
+                <button
+                  className={split === "test" ? "selected" : ""}
+                  onClick={() => setSplit("test")}
+                >
+                  Test
+                </button>
               </div>
             </div>
             <div className="control-section waypoint-panel">
               <div className="label-row">
                 <label>Camera route</label>
-                <span>{waypointCount} points</span>
+                <span>{count} points</span>
               </div>
               <p>
                 Set points on the terrain. Click a marker to reveal its X/Y/Z
@@ -1220,27 +1042,24 @@ function App() {
               </p>
               <div className="waypoint-actions">
                 <button
-                  className={waypointMode ? "tool-active" : ""}
+                  className={waypoints ? "tool-active" : ""}
                   onClick={() => {
-                    setWaypointMode(!waypointMode);
+                    setWaypoints(!waypoints);
                     notify(
-                      waypointMode
+                      waypoints
                         ? "Point mode off"
                         : "Click terrain to add points",
                     );
                   }}
                 >
                   <Target size={14} />{" "}
-                  {waypointMode ? "Point mode on" : "Set points"}
+                  {waypoints ? "Point mode on" : "Set points"}
                 </button>
-                <button
-                  onClick={togglePathPlayback}
-                  disabled={waypointCount < 2}
-                >
-                  {playing ? <Pause size={14} /> : <Play size={14} />}
+                <button onClick={togglePath} disabled={count < 2}>
+                  {playing ? <Pause size={14} /> : <Play size={14} />}{" "}
                   {playing ? "Pause" : "Play"}
                 </button>
-                <button onClick={clearPath} disabled={!waypointCount}>
+                <button onClick={clearPath} disabled={!count}>
                   <X size={14} /> Clear
                 </button>
               </div>
@@ -1261,7 +1080,7 @@ function App() {
               </button>
               <button
                 onClick={() => {
-                  setResetToken((x) => x + 1);
+                  setReset((v) => v + 1);
                   notify("Camera reset");
                 }}
               >

@@ -2,6 +2,8 @@
   touch-action: none;
   position: relative;
 }
+.loading-state,.empty-state{min-height:100vh;display:grid;place-content:center;justify-items:center;gap:12px;color:#a9c2c8;background:#07111e;font:12px 'IBM Plex Mono';text-align:center;padding:24px}.empty-state h1{margin:0;color:#d9ece9;font:600 22px Inter,sans-serif}.empty-state p{max-width:520px;color:#7993a1;line-height:1.6}.empty-state code{color:#8bd2c4}.preview-notice{display:flex;gap:8px;align-items:flex-start;margin:-5px 0 16px;padding:9px;color:#f1c07e;background:#3a2c1c;border:1px solid #765434;border-radius:6px;font:10px/1.45 'IBM Plex Mono'}.mode-tabs{grid-template-columns:repeat(3,1fr)}.mode-tabs button{font-size:10px}.mode-description{display:block;margin-top:8px;color:#7792a1;font:9px/1.4 'IBM Plex Mono'}.error-mode .canvas-badge{border-color:#925357}.error-mode .swatch.low{background:#2345bc}.error-mode .swatch.mid{background:#e4ce4f}.error-mode .swatch.high{background:#cc3345}.theme-light .preview-notice{color:#6b4a25;background:#fff3de;border-color:#e4c78d}.theme-light .loading-state,.theme-light .empty-state{background:#edf3f4;color:#3e5964}.theme-light .empty-state h1{color:#19303d}
+.class-metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin:-8px 0 14px}.class-metrics div{display:flex;justify-content:space-between;gap:8px;padding:8px 9px;border:1px solid #1b3344;border-radius:6px;background:#0d1c2a;color:#7d92a6;font:10px 'IBM Plex Mono'}.class-metrics strong{color:#b8d0cb;font-weight:500}.theme-light .class-metrics div{background:#f1f7f6;border-color:#dce8e7;color:#58727e}
 .scene-browser {
   margin-top: 18px;
   padding: 17px 18px 16px;
