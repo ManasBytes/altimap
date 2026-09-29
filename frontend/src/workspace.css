@@ -1,0 +1,269 @@
+/* Workstation shell; legacy scene styling stays isolated in blender.css. */
+.app {
+  --panel: #18212c;
+  --line: #304050;
+  --ink: #dbe5ed;
+  --muted: #8c9eaf;
+  --accent: #91cabb;
+  color: var(--ink);
+}
+.app.theme-light {
+  --panel: #f1f5f8;
+  --line: #c3cfd9;
+  --ink: #182630;
+  --muted: #53697c;
+  --accent: #257d72;
+  --mint: #257d72;
+}
+.theme-light .workspace .inspector,
+.theme-light .workspace .viewport-top,
+.theme-light .workspace .viewport-footer,
+.theme-light .rail { background:var(--panel); }
+.theme-light .sparkline { background:#e5edf1; border-color:var(--line); }
+.theme-light .canvas-badge { background:var(--panel); color:var(--ink); }
+.workspace .label-row span { color:var(--accent); }
+.toast, .measure-hint { z-index:100; }
+.workspace {
+  min-height: 0;
+  height: 100dvh;
+}
+.workspace .inspector {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px #0003;
+  backdrop-filter: none;
+  width: 320px;
+}
+.workspace .viewport-top,
+.workspace .viewport-footer,
+.rail {
+  background: var(--panel);
+  border-color: var(--line);
+  backdrop-filter: none;
+  box-shadow: 0 4px 12px #0002;
+}
+.workspace .viewport-top {
+  right: 358px;
+}
+.panel-heading h2 {
+  font-size: 17px;
+  font-weight: 600;
+}
+.control-section {
+  border-color: var(--line);
+}
+.control-section label {
+  color: var(--ink);
+}
+.route-editor p,
+.model-report p,
+.profile small {
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+.route-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 8px 0;
+}
+.route-actions button {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.route-nodes {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  max-height: 160px;
+  overflow: auto;
+}
+.route-nodes li button {
+  display: flex;
+  width: 100%;
+  text-align: left;
+  padding: 7px;
+  gap: 12px;
+  font: 11px monospace;
+  border: 1px solid transparent;
+  background: transparent;
+}
+.route-nodes li.selected button {
+  background: #91cabb19;
+  border-color: var(--accent);
+}
+.node-index {
+  color: var(--accent);
+}
+.xyz-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.xyz-fields label {
+  font: 11px monospace;
+}
+.xyz-fields input {
+  width: 100%;
+  padding: 5px;
+  margin-top: 4px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+.route-editor progress {
+  width: 100%;
+  height: 4px;
+  accent-color: var(--accent);
+}
+.workspace-tools {
+  position: absolute;
+  top: 95px;
+  left: 88px;
+  z-index: 15;
+  display: flex;
+  gap: 4px;
+  background: var(--panel);
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.workspace-tools button {
+  font-size: 11px;
+  padding: 6px 10px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+.workspace-tools button:hover {
+  background: #91cabb19;
+  border-color: var(--line);
+}
+.route-actions button {
+  color: var(--ink);
+  background: #91cabb0c;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.route-actions button:hover:not(:disabled) {
+  background: #91cabb22;
+}
+.route-nodes li button {
+  color: var(--ink);
+  cursor: pointer;
+}
+.workspace-tools .active {
+  color: var(--accent);
+  background: #91cabb19;
+}
+.viewport-preferences {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+.viewport-preferences label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+.viewport-preferences input {
+  accent-color: var(--accent);
+}
+.sparkline {
+  color: var(--accent);
+}
+.model-score {
+  display: grid;
+  grid-template-columns: 90px 1fr 42px;
+  gap: 8px;
+  align-items: center;
+  font: 11px monospace;
+  padding: 5px 0;
+}
+.model-score meter {
+  width: 100%;
+}
+.inspector-hidden .workspace .inspector {
+  display: none;
+}
+.inspector-hidden .workspace .viewport-top {
+  right: 20px;
+}
+.inspector-hidden .canvas-controls {
+  right: 20px;
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (max-width: 900px) {
+  .workspace .inspector {
+    width: 285px;
+    right: 8px;
+    top: 76px;
+    bottom: 52px;
+  }
+  .workspace .viewport-top {
+    left: 74px;
+    right: 8px;
+  }
+  .workspace-tools {
+    left: 74px;
+    top: 90px;
+    flex-wrap: wrap;
+    max-width: 170px;
+  }
+  .view-actions button {
+    font-size: 10px;
+    padding: 7px;
+  }
+  .scene-title small {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .workspace .viewport-footer {
+    left: 74px;
+    right: 8px;
+  }
+  .flight-help {
+    display: none;
+  }
+}
+@media (max-width: 600px) {
+  .workspace-tools {
+    top: 82px;
+  }
+  .workspace .inspector {
+    top: 142px;
+    max-height: 60dvh;
+    width: 270px;
+  }
+  .view-actions button:nth-child(3) {
+    display: none;
+  }
+  .scene-title small {
+    display: none;
+  }
+  .viewport-footer .legend {
+    display: none;
+  }
+}

@@ -4,6 +4,10 @@ Single-view optical remote-sensing imagery to metric elevation models, with an i
 
 See `docs/superpowers/specs/` for the design.
 
+For the trained RGB surface model, measured validation results, refined workspace
+controls and single-process local launch, see [Surface workspace](docs/surface-workspace.md).
+Quick start on the prepared workstation: `bash scripts/run-local.sh` → http://localhost:8080.
+
 ## Repository layout
 
 - `viewer/` — FastAPI reconstruction service, direct GeoTIFF/DEM handling,
@@ -22,7 +26,7 @@ Use two terminals from the repository root:
 
 ```bash
 # Terminal 1: the reconstruction API
-.venv-da3/bin/python -m viewer.server --host 127.0.0.1 --port 8000
+.venv-da3/bin/python -m viewer.server --host 127.0.0.1 --port 8080
 
 # Terminal 2: the Three.js dashboard
 cd frontend
@@ -30,9 +34,30 @@ npm ci
 npm run dev -- --host 0.0.0.0
 ```
 
-The Vite development server proxies `/api` and `/data-uploads` to the local
-viewer service, so drag-and-drop PNG/JPEG/GeoTIFF reconstruction works from
-the dashboard without a separate URL configuration.
+The local single-process command in `docs/surface-workspace.md` builds the
+dashboard first and serves `/api`, `/data-uploads`, and the compiled UI on port
+8080. For Vite development, the Vite server proxies `/api` and `/data-uploads`
+to this service.
+
+## One-service DigitalOcean deployment
+
+The root `Dockerfile` builds the exact `frontend/` Three.js dashboard and
+serves its compiled files from the same FastAPI process. `/api` and generated
+`/data-uploads` URLs therefore remain same-origin and require no separate
+frontend deployment or CORS rewrite.
+
+Create an App Platform app from the `main` branch and select the repository
+Dockerfile, or use `doctl` with the included spec:
+
+```bash
+doctl apps create --spec .do/app.yaml
+```
+
+The service listens on `0.0.0.0:$PORT` (DigitalOcean supplies the port; the
+image defaults to 8080). `apps-s-1vcpu-2gb` is selected because depth and image
+classification models need more memory than the smallest container. Generated
+uploads are ephemeral on App Platform; use object storage for permanent
+exports.
 
 ## Upload reconstruction routes
 

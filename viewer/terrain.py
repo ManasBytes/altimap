@@ -69,6 +69,7 @@ def build_terrain(
     out_path: Path,
     res: int = 256,
     exaggeration: float = 0.15,
+    aspect_ratio: float = 1.0,
 ) -> None:
     """Write a textured, displaced grid as GLB.
 
@@ -83,9 +84,9 @@ def build_terrain(
     field = _resample(np.asarray(height01, dtype=np.float64), res)
     xx, zz, faces, uv = terrain_grid(res)
     vertices = np.column_stack([
-        xx.ravel(),
+        xx.ravel() * min(1.0, aspect_ratio),
         (field * exaggeration).ravel(),
-        zz.ravel(),
+        zz.ravel() / max(1.0, aspect_ratio),
     ]).astype(np.float32)
 
     material = trimesh.visual.material.SimpleMaterial(image=Image.open(texture_path))

@@ -1,27 +1,9 @@
-"""RGB -> 7-class land-cover map, and a static per-class height field.
+"""Seven-class RGB land cover: ResNet34 U-Net and palette utilities.
 
-For non-georeferenced imagery there is no DEM or Ground Control Point to
-calibrate a depth model against, so this path skips depth estimation
-entirely: a small U-Net predicts one of 7 land-cover classes per pixel, and
-each class maps to a *fixed* relative height. The result is deliberately a
-flat-topped "layer cake" relief, not a real surface -- it exists to give a
-non-georeferenced upload an immediate, structurally-plausible 3D preview
-before a depth model is wired in. Once DA3 (or similar) is added for this
-path, its per-pixel output can be calibrated against these same static
-values class-by-class (e.g. "DA3 says the median building pixel sits at
-relative depth X; static tables say buildings are ~0.62 of the scene's
-height range" -> that ratio becomes the exaggeration factor) rather than
-trusting DA3's absolute scale directly, which is exactly the domain-gap risk
-the project brief calls out for monocular depth on remote-sensing imagery.
-
-The class palette mirrors CLASS_PALETTE in gamus-terrain's src/main.jsx
-exactly, so a model trained here decodes the same *-classes.jpg labels the
-frontend already renders, and its predictions are visually interchangeable
-with them -- swap one for the other and nothing downstream needs to change.
-
-Heavy imports (torch, torchvision) are lazy so this module stays importable
--- and CLASS_PALETTE/rgb_to_classes/classes_to_static_height stay testable --
-without a GPU or ML deps installed.
+An optional log-AGL head shares the decoder for joint supervised training in
+viewer.train_surface. The main upload path uses viewer.surface, not fixed class
+heights. Static-height helpers remain for the legacy /api/classify-static API.
+Heavy torch/torchvision imports stay lazy for palette-only callers and tests.
 """
 
 from __future__ import annotations
@@ -101,7 +83,7 @@ def classes_to_static_height(class_map: np.ndarray) -> np.ndarray:
     return STATIC_HEIGHT_TABLE[class_map]
 
 
-def build_model():
+def build_model(pretrained: bool = True, with_height: bool = False):
     """ResNet34-encoder U-Net, 7-class output.
 
     Written by hand rather than pulling in segmentation-models-pytorch: the
@@ -139,7 +121,7 @@ def build_model():
     class ResNet34UNet(nn.Module):
         def __init__(self, num_classes: int):
             super().__init__()
-            backbone = resnet34(weights=ResNet34_Weights.IMAGENET1K_V1)
+            backbone = resnet34(weights=ResNet34_Weights.IMAGENET1K_V1 if pretrained else None)
             self.stem = nn.Sequential(backbone.conv1, backbone.bn1, backbone.relu)
             self.pool = backbone.maxpool
             self.layer1 = backbone.layer1  # 64ch,  /4
@@ -154,8 +136,13 @@ def build_model():
                 nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2),
                 nn.Conv2d(32, num_classes, 1),
             )
+            if with_height:
+                self.height_head = nn.Sequential(
+                    nn.Conv2d(32, 32, 3, padding=1), nn.ReLU(inplace=True),
+                    nn.Conv2d(32, 1, 1), nn.Softplus(),
+                )
 
-        def forward(self, x):
+        def features(self, x):
             s0 = self.stem(x)  # /2, 64ch
             p0 = self.pool(s0)  # /4
             s1 = self.layer1(p0)  # /4, 64ch
@@ -166,7 +153,16 @@ def build_model():
             d3 = self.dec3(d4, s2)
             d2 = self.dec2(d3, s1)
             d1 = self.dec1(d2, s0)
-            return self.head(d1)
+            return d1
+
+        def forward(self, x):
+            return self.head(self.features(x))
+
+        def surface(self, x):
+            features = self.features(x)
+            return self.head(features), nn.functional.interpolate(
+                self.height_head(features), size=x.shape[-2:], mode="bilinear", align_corners=False
+            )[:, 0]
 
     return ResNet34UNet(len(CLASS_NAMES))
 
@@ -175,7 +171,7 @@ def load_model(checkpoint: Path = DEFAULT_CHECKPOINT, device: str | None = None)
     import torch
 
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    model = build_model().to(device)
+    model = build_model(pretrained=False).to(device)
     state = torch.load(checkpoint, map_location=device)
     model.load_state_dict(state["model"])
     model.eval()

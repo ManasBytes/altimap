@@ -5,6 +5,8 @@ __pycache__/
 node_modules/
 frontend/dist/
 data/
+!frontend/src/data/
+!frontend/src/data/**
 spikes/out/
 viewer/web/data/
 viewer/web/data-offnadir/

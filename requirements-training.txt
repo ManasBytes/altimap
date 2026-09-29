@@ -1,0 +1,5 @@
+# Install from the repository root after choosing the appropriate torch build.
+-e .
+-r requirements-viewer.txt
+h5py>=3.11
+pytest>=8.3

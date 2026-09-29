@@ -1,12 +1,11 @@
-"""Local app server: serves the dashboards and runs DA3 on uploaded imagery.
+"""Local workspace/API for supervised RGB surfaces and direct GeoTIFF terrain.
 
-The static dashboards cannot do this themselves -- DA3 needs a GPU and a Python
-process -- so this wraps the same pipeline modules the batch exporters use. An
-uploaded file therefore gets byte-identical treatment to a batch-exported scene:
-same metrics, same rg16 encoding, same georeferencing and calibration rules.
+PNG/JPEG uses the locally trained joint land-cover/AGL model when installed;
+DA3 remains a fallback. GeoTIFF elevation values are kept separate from learned
+heights. The interactive workspace is served from frontend/dist.
 
     .venv-da3/bin/python -m viewer.server
-    -> http://localhost:8000/
+    -> http://localhost:8080/
 
 Bound to 127.0.0.1 by default. This accepts file uploads and runs inference on
 them; do not expose it to a network you do not trust.
@@ -15,7 +14,9 @@ them; do not expose it to a network you do not trust.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
+import os
 import re
 import time
 import uuid
@@ -26,6 +27,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from PIL import Image
 
 from viewer.geo import (
@@ -37,8 +39,12 @@ from viewer.geo import (
 from viewer.metrics import luminance, scene_metrics
 from viewer.terrain import build_terrain, height_field
 
-WEB_DIR = Path(__file__).resolve().parent / "web"
-UPLOAD_DIR = WEB_DIR / "data-uploads"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+WEB_DIR = Path(os.environ.get("ALTIMAP_WEB_DIR", str(REPO_ROOT / "frontend" / "dist")))
+if not WEB_DIR.is_dir():
+    WEB_DIR = Path(__file__).resolve().parent / "web"
+# Generated user artifacts must survive Vite rebuilding/emptying frontend/dist.
+UPLOAD_DIR = Path(os.environ.get("ALTIMAP_UPLOAD_DIR", str(REPO_ROOT / "viewer/web/data-uploads")))
 SCENES_DIR = UPLOAD_DIR / "scenes"
 CLASSIFICATIONS_DIR = UPLOAD_DIR / "classifications"
 RECONSTRUCTIONS_DIR = UPLOAD_DIR / "reconstructions"
@@ -56,8 +62,8 @@ DIRECT_RECONSTRUCT_RES = 1025  # 4× the 513² interactive-grid cell count
 
 app = FastAPI(title="AltiMap")
 
-# The gamus-terrain viewer (Vite dev server) runs on a different origin than
-# this API, and the classify-static response is consumed straight into a
+# A separate Vite dev server may run on a different origin than this API, and
+# classify-static responses are consumed straight into a
 # canvas for pixel readback -- an uncorsed image would taint that canvas and
 # make getImageData throw, so this has to be wide open on responses, not just
 # reachable.
@@ -75,6 +81,24 @@ _class_device = None
 _dem = None
 _global_dem = None
 _building_indexes: dict[str, object] = {}
+_surface_model = None
+
+
+def _get_surface_model():
+    global _surface_model
+    from viewer.surface import CHECKPOINT, load_surface
+    if not CHECKPOINT.exists():
+        return None
+    if _surface_model is None:
+        _surface_model = load_surface()
+    return _surface_model
+
+
+@app.get("/api/model-status")
+def model_status():
+    report = Path(__file__).resolve().parent / "cache/surface_report.json"
+    return {"surface_available": (report.parent / "surface_best.pt").exists(),
+            "report": json.loads(report.read_text()) if report.exists() else None}
 
 
 def _get_model():
@@ -423,11 +447,9 @@ def _extract_embedded_elevation(
             )
             if pattern.search(name):
                 candidates.append((band, "embedded GeoTIFF elevation band"))
-        if not candidates:
-            for band, dtype in enumerate(source.dtypes, start=1):
-                if np.dtype(dtype).kind == "f":
-                    candidates.append((band, "embedded floating-point GeoTIFF elevation band"))
-        if not candidates and source.count == 1 and source.crs is not None:
+        # A floating-point RGB/reflectance band is not evidence of elevation.
+        # Ambiguous multi-band rasters require an explicit elevation selection.
+        if not candidates and source.count == 1 and source.crs is not None and np.dtype(source.dtypes[0]).kind == "f":
             candidates.append((1, "single-band georeferenced elevation raster"))
         if not candidates:
             return None, None, None
@@ -565,6 +587,7 @@ def _write_terrain_glb(
     source_name: str,
     height_world_scale: float,
     resolution: int = 512,
+    aspect_ratio: float = 1.0,
 ) -> str:
     """Export the same textured terrain used by the Three.js viewer as GLB."""
     artifact_name = f"{_safe_stem(source_name)}__{uuid.uuid4().hex[:8]}"
@@ -588,6 +611,7 @@ def _write_terrain_glb(
         glb_path,
         res=resolution,
         exaggeration=height_world_scale / 8.0,
+        aspect_ratio=aspect_ratio,
     )
     return f"/data-uploads/reconstructions/{artifact_name}/terrain.glb"
 
@@ -597,7 +621,7 @@ def _true_scale_world_height(elevation_range_m: float, geo: dict | None) -> floa
     footprint = max((geo or {}).get("ground_m") or [0.0])
     if not np.isfinite(footprint) or footprint <= 0:
         return 0.62
-    return float(np.clip(8.0 * elevation_range_m / footprint, 0.03, 3.0))
+    return float(8.0 * max(0., elevation_range_m) / footprint)
 
 
 @app.post("/api/classify-static")
@@ -703,26 +727,49 @@ async def reconstruct(
             f"file is {len(data) / 1e6:.0f} MB; limit is {MAX_UPLOAD_BYTES / 1e6:.0f} MB",
         )
 
+    async with _reconstruction_lock:
+        return await run_in_threadpool(_reconstruct_bytes, data, file.filename, suffix, elevation_band)
+
+
+_reconstruction_lock = asyncio.Lock()
+
+
+def _reconstruct_bytes(data, file_name, suffix, elevation_band):
     from viewer.classify import (
         CLASS_NAMES,
         classes_to_rgb,
-        classes_to_static_height,
-        predict_classes,
     )
 
     started = time.perf_counter()
     rgb_full, geo, source_profile, source_tags = _read_upload_rgb_and_geo(data, suffix)
     direct_geo = bool(geo and geo.get("georeferenced"))
     render_resolution = DIRECT_RECONSTRUCT_RES if direct_geo else RECONSTRUCT_RES
-    render_rgb = _resize_rgb(rgb_full, render_resolution, render_resolution)
-    class_model, class_device = _get_class_model()
-    class_map = predict_classes(render_rgb, class_model, class_device)
+    # Keep native pixel detail for inference and preserve rectangular footprints.
+    from viewer.surface import infer_tiled, regularize_surface
+    working_scale = min(1., 2048 / max(rgb_full.shape[:2]))
+    working_rgb = _resize_rgb(rgb_full, max(1, round(rgb_full.shape[1]*working_scale)), max(1, round(rgb_full.shape[0]*working_scale)))
+    aspect = (geo['ground_m'][0] / geo['ground_m'][1]) if direct_geo else rgb_full.shape[1] / rgb_full.shape[0]
+    render_width = render_resolution if aspect >= 1 else max(2, round(render_resolution*aspect))
+    render_height_px = render_resolution if aspect <= 1 else max(2, round(render_resolution/aspect))
+    render_rgb = _resize_rgb(rgb_full, render_width, render_height_px)
+    surface = _get_surface_model() if not direct_geo else None
+    learned_height = None
+    if surface:
+        model, device, provenance = surface
+        native_classes, learned_height, confidence = infer_tiled(working_rgb, model, device)
+        if not provenance.get("promote_segmentation", False):
+            class_model, class_device = _get_class_model()
+            native_classes, _, confidence = infer_tiled(working_rgb, class_model, class_device, with_height=False)
+    else:
+        class_model, class_device = _get_class_model()
+        native_classes, _, confidence = infer_tiled(working_rgb, class_model, class_device, with_height=False)
+    class_map = np.asarray(Image.fromarray(native_classes).resize((render_width, render_height_px), Image.Resampling.NEAREST))
     class_rgb = classes_to_rgb(class_map)
     class_counts = {
         name: int((class_map == index).sum()) for index, name in enumerate(CLASS_NAMES)
     }
 
-    source_name = Path(file.filename or "upload").name
+    source_name = Path(file_name or "upload").name
     if direct_geo:
         embedded_elevation, elevation_source, elevation_kind = _extract_embedded_elevation(
             data, elevation_band
@@ -750,11 +797,11 @@ async def reconstruct(
                     "n_extruded": 0,
                 }
         render_height = _resize_height(
-            elevation_full, render_resolution, render_resolution
+            elevation_full, render_width, render_height_px
         )
         height_preview, height_low, height_high = _height_preview(render_height)
         class_map_full = np.asarray(
-            Image.fromarray(class_map).resize(
+            Image.fromarray(native_classes).resize(
                 (rgb_full.shape[1], rgb_full.shape[0]), Image.Resampling.NEAREST
             ),
             dtype=np.uint8,
@@ -771,16 +818,23 @@ async def reconstruct(
         height_world_scale = _true_scale_world_height(height_high - height_low, geo)
     else:
         # PNG/JPEG has no map position from which to obtain absolute terrain.
-        # DA3 supplies the structural ordering and the semantic map stabilizes
-        # buildings, roads, water, and vegetation into a usable relative DSM.
-        depth_model, _ = _get_model()
-        prediction = depth_model.inference([render_rgb], process_res=RECONSTRUCT_RES)
-        relative_depth = height_field(np.asarray(prediction.depth[0], dtype=np.float32))
-        relative_depth = _resize_height(relative_depth, RECONSTRUCT_RES, RECONSTRUCT_RES)
-        semantic_height = classes_to_static_height(class_map).astype(np.float32)
-        render_height = np.clip(0.68 * relative_depth + 0.32 * semantic_height, 0.0, 1.0)
+        # The supervised surface model learns height from aligned AGL targets.
+        # DA3 is only used if no supervised checkpoint is installed.
+        if learned_height is not None:
+            cleaned = regularize_surface(learned_height, native_classes)
+            render_height = _resize_height(cleaned, render_width, render_height_px)
+            # Relative visualization only. The learned AGL scale is not an
+            # absolute elevation or a measurement at an unknown image GSD.
+            render_height = render_height / max(1., float(np.percentile(render_height, 99.5)))
+            elevation_source = "GAMUS supervised RGB surface estimate (uncalibrated)"
+        else:
+            depth_model, _ = _get_model()
+            prediction = depth_model.inference([working_rgb], process_res=RECONSTRUCT_RES)
+            relative_depth = height_field(np.asarray(prediction.depth[0], dtype=np.float32))
+            relative_depth = _resize_height(relative_depth, render_width, render_height_px)
+            render_height = regularize_surface(relative_depth, class_map)
+            elevation_source = "relative depth estimate; supervised surface checkpoint unavailable"
         height_preview, height_low, height_high = _height_preview(render_height)
-        elevation_source = "relative depth + semantic class priors"
         mask_geo_tiff_url = None
         elevation_geo_tiff_url = None
         building_refinement = None
@@ -789,7 +843,7 @@ async def reconstruct(
         # Mark it separately so the viewer does not apply its catalog-scene
         # class remapping a second time (which causes terraced, uneven roofs).
         height_mode = "relative-final"
-        height_baseline = 0.32
+        height_baseline = 0.0
         height_world_scale = 0.62
 
     export_resolution = (
@@ -803,19 +857,39 @@ async def reconstruct(
         source_name,
         height_world_scale,
         max(64, export_resolution),
+        aspect_ratio=aspect,
     )
+    # Lossless semantic IDs and raw height predictions stay separate from the
+    # smoothed render grid. Their resolution is recorded explicitly in the API.
+    artifact_dir = RECONSTRUCTIONS_DIR / f"{_safe_stem(source_name)}__{uuid.uuid4().hex[:8]}_predictions"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(native_classes).save(artifact_dir / "classes.png")
+    Image.fromarray(np.round(confidence * 255).astype(np.uint8)).save(artifact_dir / "confidence.png")
+    if learned_height is not None:
+        np.save(artifact_dir / "estimated-agl.npy", learned_height.astype(np.float32))
+    artifact_url = f"/data-uploads/reconstructions/{artifact_dir.name}"
     elapsed = time.perf_counter() - started
     height_rgb = np.repeat(height_preview[:, :, None], 3, axis=2)
     return JSONResponse(
         {
             "seconds": round(elapsed, 3),
-            "width": render_resolution,
-            "height_px": render_resolution,
+            "width": render_width,
+            "height_px": render_height_px,
+            "aspect_ratio": aspect,
             "mesh_resolution": render_resolution,
             "source_width": int(rgb_full.shape[1]),
             "source_height": int(rgb_full.shape[0]),
             "rgb": _png_data_uri(render_rgb),
             "height": _png_data_uri(height_rgb),
+            "height_float32": __import__('base64').b64encode(
+                ((render_height-height_low)/max(height_high-height_low, 1e-9)).astype('<f4').tobytes()
+            ).decode(),
+            "classification_confidence": float(confidence.mean()),
+            "class_ids_url": f"{artifact_url}/classes.png",
+            "confidence_url": f"{artifact_url}/confidence.png",
+            "estimated_agl_url": f"{artifact_url}/estimated-agl.npy" if learned_height is not None else None,
+            "inference_width": working_rgb.shape[1],
+            "inference_height": working_rgb.shape[0],
             "classes": _png_data_uri(class_rgb),
             "class_pixel_counts": class_counts,
             "class_names": CLASS_NAMES,
@@ -891,6 +965,7 @@ def health():
 # Mounted last so /api/* wins over a same-named static path.
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _write_upload_index()
+app.mount("/data-uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="upload-artifacts")
 app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
 
 
@@ -899,7 +974,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
     print(f"AltiMap on http://{args.host}:{args.port}/  (upload at /upload.html)")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
