@@ -25,6 +25,21 @@ def test_sidecar_roundtrip(tmp_path: Path) -> None:
     assert Sidecar.from_json(path) == sidecar
 
 
+def test_sidecar_accepts_orthometric_datum() -> None:
+    # GLO-30 / SRTM heights are geoid-based, not ellipsoidal.
+    sidecar = Sidecar(
+        gsd_m=0.33,
+        source_gsd_m=0.33,
+        datum="orthometric",
+        vertical_unit="m",
+        model_version="test-v1",
+        height_range_m=(0.0, 1.0),
+        tile_overlap_px=0,
+        dtm_source="cop-dem-glo-30",
+    )
+    assert sidecar.datum == "orthometric"
+
+
 def test_sidecar_rejects_bad_datum() -> None:
     with pytest.raises(ValueError, match="datum"):
         Sidecar(

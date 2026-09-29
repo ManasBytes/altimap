@@ -46,8 +46,9 @@ def find_tiles(roots: tuple[Path, ...] = DEFAULT_ROOTS) -> list[Tile]:
             continue
         for split_dir in sorted(images_dir.iterdir()):
             split = split_dir.name
-            for rgb_path in sorted(split_dir.glob("*_RGB.h5")):
-                scene_id = rgb_path.name.removesuffix("_RGB.h5")
+            # The HF release names DC images *_RGB.h5 and the other four cities *_IMG.h5.
+            for rgb_path in sorted([*split_dir.glob("*_RGB.h5"), *split_dir.glob("*_IMG.h5")]):
+                scene_id = rgb_path.name.rsplit("_", 1)[0]
                 key = (split, scene_id)
                 if key in seen:
                     continue  # extra_15 and 50_each never overlap in practice, but don't double-count if they did
@@ -64,7 +65,8 @@ def load_h5(path: Path):
     import h5py
 
     with h5py.File(path, "r") as f:
-        return f["image"][()]
+        key = "image" if "image" in f else next(iter(f.keys()))
+        return f[key][()]
 
 
 def load_tile(tile: Tile):
@@ -72,6 +74,11 @@ def load_tile(tile: Tile):
     import numpy as np
 
     rgb = load_h5(tile.rgb)
-    classes = load_h5(tile.classes).astype(np.uint8)
-    height = load_h5(tile.height).astype(np.float32)
+    if rgb.ndim == 3 and rgb.shape[0] in (3, 4) and rgb.shape[-1] not in (3, 4):
+        rgb = np.transpose(rgb, (1, 2, 0))  # CHW -> HWC
+    rgb = np.ascontiguousarray(rgb[..., :3])
+    if rgb.dtype != np.uint8:
+        rgb = np.clip(rgb, 0, 255).astype(np.uint8)
+    classes = np.squeeze(load_h5(tile.classes)).astype(np.uint8)
+    height = np.squeeze(load_h5(tile.height)).astype(np.float32)
     return rgb, classes, height

@@ -17,7 +17,10 @@ import rasterio
 from rasterio.crs import CRS
 from rasterio.transform import Affine
 
-VALID_DATUMS = ("ellipsoidal", "relative")
+# "orthometric": heights above the geoid (EGM96/EGM2008), which is what SRTM and
+# Copernicus GLO-30 publish. Not interchangeable with ellipsoidal: the gap is
+# tens of metres over India.
+VALID_DATUMS = ("ellipsoidal", "orthometric", "relative")
 
 
 @dataclasses.dataclass(frozen=True)
