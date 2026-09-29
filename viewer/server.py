@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -59,7 +59,15 @@ _model = None
 _device = None
 _class_model = None
 _class_device = None
+_height_model = None
+_height_device = None
 _dem = None
+
+CACHE_DIR = Path(__file__).resolve().parent / "cache"
+SYNRS3D_DIR = CACHE_DIR / "SynRS3D"
+# Fine-tuned checkpoint when present, stock RS3DAda otherwise; override with ALTIMAP_HEIGHT_CKPT.
+HEIGHT_CKPTS = (CACHE_DIR / "best.pth", SYNRS3D_DIR / "pretrain" / "RS3DAda_vitl_DPT_height.pth")
+VIEW_MAX_SIDE = 1024  # texture/height previews sent to the browser; GeoTIFFs keep full resolution
 
 
 def _get_model():
@@ -82,6 +90,27 @@ def _get_dem():
 
         _dem = DemSource()
     return _dem
+
+
+def _height_ckpt() -> Path:
+    import os
+
+    if os.environ.get("ALTIMAP_HEIGHT_CKPT"):
+        return Path(os.environ["ALTIMAP_HEIGHT_CKPT"])
+    for ckpt in HEIGHT_CKPTS:
+        if ckpt.exists():
+            return ckpt
+    raise HTTPException(503, f"no height checkpoint; expected one of {[str(c) for c in HEIGHT_CKPTS]}")
+
+
+def _get_height_model():
+    """Loaded on first request, same reasoning as _get_model."""
+    global _height_model, _height_device
+    if _height_model is None:
+        from viewer.height_model import load_model
+
+        _height_model, _height_device = load_model(_height_ckpt(), SYNRS3D_DIR)
+    return _height_model, _height_device
 
 
 def _get_class_model():
@@ -283,6 +312,205 @@ async def classify_static(file: UploadFile = File(...)):
         "height": _png_data_uri(np.stack([height_u8] * 3, axis=-1)),
         "classes": _png_data_uri(classes_to_rgb(class_map)),
     })
+
+
+def _read_reference(path: Path) -> np.ndarray:
+    """A reference height map (metres): GeoTIFF/PNG via rasterio, or a GAMUS *_AGL.h5."""
+    if path.suffix.lower() == ".h5":
+        from viewer.gamus_dataset import load_h5
+
+        return np.squeeze(load_h5(path)).astype(np.float32)
+    import rasterio
+
+    with rasterio.open(path) as src:
+        ref = src.read(1).astype(np.float32)
+        if src.nodata is not None and not np.isnan(src.nodata):
+            ref[ref == src.nodata] = np.nan
+    return ref
+
+
+def _view_size(shape: tuple[int, int]) -> tuple[int, int]:
+    h, w = shape
+    s = min(1.0, VIEW_MAX_SIDE / max(h, w))
+    return max(1, round(w * s)), max(1, round(h * s))  # PIL (width, height)
+
+
+# In-flight /api/estimate jobs: job id -> {"stage": str, "progress": 0..1}, polled by the UI.
+JOBS: dict[str, dict] = {}
+JOB_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
+
+
+@app.get("/api/progress/{job}")
+def estimate_progress(job: str):
+    if not JOB_ID.fullmatch(job) or job not in JOBS:
+        raise HTTPException(404, "no such job")
+    return JOBS[job]
+
+
+@app.post("/api/estimate")
+async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Form(None),
+                            reference: UploadFile | None = File(None),
+                            job: str | None = Form(None), tta: bool = Form(True)):
+    """Height model on an upload: metric nDSM always, absolute DSM for GeoTIFFs.
+
+    Response keeps the classify-static shape (rgb/height/classes data URIs) so
+    the terrain viewer consumes it unchanged, plus metres, GeoTIFF download
+    paths, the 3D city model, ground relief for georeferenced input, and -- if a
+    reference height map is attached -- RMSE/MAE/r against it. With a `job` id,
+    progress is readable at /api/progress/<job> while this request runs.
+    """
+    from starlette.concurrency import run_in_threadpool
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(415, f"unsupported type {suffix or '(none)'}; "
+                                 f"expected one of {sorted(ALLOWED_SUFFIXES)}")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "empty upload")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"file is {len(data)/1e6:.0f} MB; limit is "
+                                 f"{MAX_UPLOAD_BYTES/1e6:.0f} MB")
+    if gsd is not None and not (0.01 <= gsd <= 100):
+        raise HTTPException(422, "gsd must be between 0.01 and 100 metres per pixel")
+    if job is not None and not JOB_ID.fullmatch(job):
+        raise HTTPException(422, "bad job id")
+
+    scene_id = f"{_safe_stem(file.filename or 'upload')}__{uuid.uuid4().hex[:8]}"
+    scene_dir = SCENES_DIR / scene_id
+    staged = scene_dir / f"source{suffix}"
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    staged.write_bytes(data)
+
+    ref_path = None
+    if reference is not None and reference.filename:
+        ref_suffix = Path(reference.filename).suffix.lower()
+        if ref_suffix not in {".tif", ".tiff", ".png", ".h5"}:
+            raise HTTPException(415, "reference must be .tif, .png or a GAMUS _AGL.h5")
+        ref_path = scene_dir / f"reference{ref_suffix}"
+        ref_path.write_bytes(await reference.read())
+
+    def report(stage: str, fraction: float) -> None:
+        if job:
+            JOBS[job] = {"stage": stage, "progress": round(float(fraction), 3)}
+
+    report("Queued", 0.0)
+    try:
+        # Model inference is blocking: run it off the event loop so the server keeps
+        # answering progress polls and static files meanwhile.
+        payload = await run_in_threadpool(_run_estimate, staged, scene_dir, scene_id, gsd,
+                                          ref_path, report, tta)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(422, f"could not process this image: {exc}") from exc
+    finally:
+        staged.unlink(missing_ok=True)
+        if ref_path is not None:
+            ref_path.unlink(missing_ok=True)
+        if job:
+            JOBS.pop(job, None)
+    return JSONResponse(payload)
+
+
+def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | None,
+                  ref_path: Path | None, report, tta: bool = True) -> dict:
+    from viewer.city_model import city_model
+    from viewer.classify import classes_to_rgb
+    from viewer.estimate import estimate
+    from viewer.height_metrics import height_scores
+    from viewer.height_model import GAMUS_GSD_M, clean_height
+
+    report("Loading height model", 0.01)
+    model, device = _get_height_model()
+    started = time.perf_counter()
+    out = estimate(staged, model, device, scene_dir, gsd_m=gsd, tta=tta, report=report)
+    validation = None
+    if ref_path is not None:
+        report("Scoring against reference", 0.88)
+        ref = clean_height(_read_reference(ref_path))
+        ndsm = out["ndsm"]
+        if ref.shape != ndsm.shape:
+            ref = np.asarray(Image.fromarray(ref, mode="F").resize(
+                (ndsm.shape[1], ndsm.shape[0]), Image.BILINEAR))
+        validation = height_scores(ndsm, ref, out["classes"])
+        validation = {k: _clean(v) if k != "n" else v for k, v in validation.items()}
+
+    report("Building 3D city model", 0.92)
+    record = out["record"]
+    max_m = max(record["ndsm_max_m"], 1e-3)
+    size = _view_size(out["ndsm"].shape)
+    rgb = np.asarray(Image.fromarray(out["rgb"]).resize(size, Image.BILINEAR))
+    height = np.asarray(Image.fromarray(out["ndsm"], mode="F").resize(size, Image.BILINEAR))
+    height_u8 = np.clip(height / max_m * 255.0, 0, 255).astype(np.uint8)
+    classes = np.asarray(Image.fromarray(out["classes"]).resize(size, Image.NEAREST))
+    def to_view(a: np.ndarray) -> np.ndarray:
+        return np.asarray(Image.fromarray(a.astype(np.float32), mode="F").resize(size, Image.BILINEAR))
+
+    def relief_png(a: np.ndarray) -> dict:
+        """Linear 8-bit relief: elevation = min_m + pixel / 255 * relief_m."""
+        lo = float(np.nanmin(a))
+        span = max(float(np.nanmax(a)) - lo, 1e-3)
+        u8 = np.clip((a - lo) / span * 255.0, 0, 255).astype(np.uint8)
+        return {"png": _png_data_uri(np.stack([u8] * 3, axis=-1)), "min_m": lo, "relief_m": span}
+
+    # Terrain for georeferenced input: bare earth under the city model, and the exported
+    # DSM for "Exact surface" view. Both relative to their own minimum.
+    terrain, ground_rel = None, None
+    if out["ground"] is not None and out["dsm"] is not None:
+        ground_view = to_view(out["ground"])
+        ground_rel = ground_view - float(np.nanmin(ground_view))
+        terrain = {"ground": relief_png(ground_view), "dsm": relief_png(to_view(out["dsm"]))}
+
+    # 3D city model for the viewer, built on the preview grid (display only; GeoTIFFs stay raw).
+    view_gsd = (record["gsd_m"] or GAMUS_GSD_M) * out["ndsm"].shape[1] / size[0]
+    city = city_model(height, classes, rgb, view_gsd, ground=ground_rel)
+    _write_buildings_geojson(scene_dir, city["buildings"], out["ndsm"].shape)
+    record["files"].append("buildings.geojson")
+
+    names = ["background", "ground", "low_vegetation", "buildings", "water", "roads", "trees"]
+    counts = np.bincount(classes.ravel(), minlength=len(names))
+    record.update(id=scene_id, seconds=round(time.perf_counter() - started, 2),
+                  checkpoint=_height_ckpt().name, validation=validation,
+                  class_pixel_counts={n: int(counts[i]) for i, n in enumerate(names)})
+    (scene_dir / "meta.json").write_text(json.dumps(record))
+    report("Done", 1.0)
+    return {
+        **record,
+        "max_m": round(max_m, 2),
+        "width": size[0],
+        "height_px": size[1],
+        "downloads": {f: f"/data-uploads/scenes/{scene_id}/{f}" for f in record["files"]},
+        "rgb": _png_data_uri(rgb),
+        "height": _png_data_uri(np.stack([height_u8] * 3, axis=-1)),
+        "classes": _png_data_uri(classes_to_rgb(classes)),
+        "city": city,
+        "terrain": terrain,
+    }
+
+
+def _write_buildings_geojson(scene_dir: Path, buildings: list[dict], shape: tuple[int, int]) -> None:
+    """Footprints + heights as GeoJSON: WGS84 lon/lat for georeferenced input
+    (via the nDSM's transform), pixel coordinates otherwise."""
+    import rasterio
+    from rasterio.warp import transform_geom
+
+    rows, cols = shape
+    with rasterio.open(scene_dir / "ndsm.tif") as src:
+        transform, crs = src.transform, src.crs
+    features = []
+    for b in buildings:
+        rings = [[[u * cols, v * rows] for u, v in ring] for ring in b["rings"]]
+        if crs is not None:
+            rings = [[list(transform * (x, y)) for x, y in ring] for ring in rings]
+        geom = {"type": "Polygon", "coordinates": [ring + ring[:1] for ring in rings]}
+        if crs is not None:
+            geom = transform_geom(crs, "EPSG:4326", geom)
+        features.append({"type": "Feature", "geometry": geom, "properties": {"height_m": b["h"]}})
+    doc = {"type": "FeatureCollection", "features": features}
+    if crs is None:
+        doc["note"] = "no georeferencing: coordinates are image pixels (x = column, y = row)"
+    (scene_dir / "buildings.geojson").write_text(json.dumps(doc))
 
 
 def _read_rgb_bytes(data: bytes, suffix: str) -> np.ndarray:

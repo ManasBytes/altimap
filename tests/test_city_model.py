@@ -1,0 +1,136 @@
+import numpy as np
+from shapely.geometry import Polygon
+
+from viewer.city_model import BUILDING, TREE, building_parts, city_model, footprints, trees
+
+GSD = 0.5
+
+
+def _scene(shape=(120, 120)):
+    return np.zeros(shape, np.float32), np.ones(shape, np.uint8)  # ndsm, classes (1 = ground)
+
+
+def _add(ndsm, classes, rows, cols, height, cls=BUILDING):
+    ndsm[rows, cols] = height
+    classes[rows, cols] = cls
+
+
+def _area(rings):
+    return Polygon(rings[0], rings[1:]).area
+
+
+def test_separate_buildings_become_separate_blocks_with_their_heights():
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(10, 40), slice(10, 40), 10.0)
+    _add(ndsm, classes, slice(60, 100), slice(60, 90), 25.0)
+    parts = footprints(*building_parts(ndsm, classes, GSD), shape=ndsm.shape, gsd_m=GSD)
+    assert sorted(round(p["h"]) for p in parts) == [10, 25]
+    assert all(p["c"] == [200, 195, 185] for p in parts)  # no photo -> neutral facade
+    rgb = np.zeros(ndsm.shape + (3,), np.uint8)
+    rgb[60:100, 60:90] = (180, 60, 40)  # red-brick roof
+    coloured = footprints(*building_parts(ndsm, classes, GSD), shape=ndsm.shape, gsd_m=GSD, rgb=rgb)
+    assert next(p for p in coloured if p["h"] > 20)["c"] == [180, 60, 40]
+    tall = next(p for p in parts if p["h"] > 20)
+    assert abs(_area(tall["rings"]) - (40 * 30) / 120**2) < 0.02  # normalized footprint area
+
+
+def test_tower_on_podium_splits_into_two_heights():
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(20, 100), slice(20, 100), 8.0)
+    _add(ndsm, classes, slice(45, 75), slice(45, 75), 30.0)
+    parts = footprints(*building_parts(ndsm, classes, GSD), shape=ndsm.shape, gsd_m=GSD)
+    heights = sorted(round(p["h"]) for p in parts)
+    assert heights[0] == 8 and heights[-1] == 30
+
+
+def test_speckle_and_low_misclassified_regions_are_dropped():
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(5, 7), slice(5, 7), 12.0)  # 1 m^2 speckle
+    _add(ndsm, classes, slice(50, 90), slice(50, 90), 0.8)  # "building" at pavement height
+    parts = footprints(*building_parts(ndsm, classes, GSD), shape=ndsm.shape, gsd_m=GSD)
+    assert parts == []
+
+
+def test_courtyard_is_kept_as_a_hole():
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(20, 100), slice(20, 100), 15.0)
+    _add(ndsm, classes, slice(45, 75), slice(45, 75), 0.0, cls=1)  # open courtyard
+    parts = footprints(*building_parts(ndsm, classes, GSD), shape=ndsm.shape, gsd_m=GSD)
+    assert len(parts) == 1 and len(parts[0]["rings"]) == 2
+
+
+def test_rings_are_normalized_to_unit_square():
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(0, 30), slice(90, 120), 12.0)  # touches the image edge
+    parts = footprints(*building_parts(ndsm, classes, GSD), shape=ndsm.shape, gsd_m=GSD)
+    pts = np.array([p for ring in parts[0]["rings"] for p in ring])
+    assert pts.min() >= 0.0 and pts.max() <= 1.0
+
+
+def test_soft_edge_ramps_do_not_become_terraces():
+    # The model's heights ramp up over a few pixels at walls; that must stay one block.
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(20, 100), slice(20, 100), 1.0)
+    yy, xx = np.mgrid[20:100, 20:100]
+    edge = np.minimum.reduce([yy - 20, 99 - yy, xx - 20, 99 - xx]).astype(np.float32)
+    ndsm[20:100, 20:100] = np.minimum(24.0, 2.0 + edge * 4.0)  # 2 m at the wall -> 24 m in ~6 px
+    parts = footprints(*building_parts(ndsm, classes, GSD), shape=ndsm.shape, gsd_m=GSD)
+    assert len(parts) == 1 and 22 <= parts[0]["h"] <= 24
+
+
+def _dome(ndsm, classes, cy, cx, radius, height):
+    yy, xx = np.mgrid[: ndsm.shape[0], : ndsm.shape[1]]
+    d = np.hypot(yy - cy, xx - cx)
+    crown = d < radius
+    ndsm[crown] = np.maximum(ndsm[crown], height * np.sqrt(1 - (d[crown] / radius) ** 2))
+    classes[crown] = TREE
+
+
+def test_trees_become_individual_crowns_with_photo_colour():
+    ndsm, classes = _scene()
+    rgb = np.zeros(ndsm.shape + (3,), np.uint8)
+    rgb[...] = (40, 110, 50)
+    _dome(ndsm, classes, 30, 30, 10, 12.0)
+    _dome(ndsm, classes, 30, 80, 12, 18.0)
+    _add(ndsm, classes, slice(80, 110), slice(80, 110), 20.0)  # a building is not a tree
+    found = sorted(trees(ndsm, classes, rgb, GSD), key=lambda t: t["h"])
+    assert len(found) == 2
+    small, big = found
+    assert abs(small["h"] - 12.0) < 1.0 and abs(big["h"] - 18.0) < 1.0
+    assert abs(big["u"] - 80 / 120) < 0.03 and abs(big["v"] - 30 / 120) < 0.03
+    assert 2.0 <= small["r"] <= 6.0 and big["r"] > small["r"]
+    assert small["c"] == [40, 110, 50]
+
+
+def test_low_shrubs_are_not_trees():
+    ndsm, classes = _scene()
+    _dome(ndsm, classes, 60, 60, 8, 1.5)
+    assert trees(ndsm, classes, np.zeros(ndsm.shape + (3,), np.uint8), GSD) == []
+
+
+def test_empty_scene_gives_no_buildings_and_no_trees():
+    ndsm, classes = _scene()
+    model = city_model(ndsm, classes, np.zeros(ndsm.shape + (3,), np.uint8), GSD)
+    assert model == {"buildings": [], "trees": []}
+
+
+def test_buildings_and_trees_stand_on_sloping_ground():
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(40, 80), slice(40, 80), 12.0)
+    _dome(ndsm, classes, 20, 100, 8, 10.0)
+    yy, xx = np.mgrid[:120, :120]
+    ground = (0.5 * xx).astype(np.float32)  # rises 60 m across the tile
+    rgb = np.zeros(ndsm.shape + (3,), np.uint8)
+    model = city_model(ndsm, classes, rgb, GSD, ground=ground)
+    (b,) = model["buildings"]
+    assert abs(b["b"] - 20.0) < 1.0  # lowest ground under the footprint (column 40)
+    assert abs(b["t"] - (30.0 + 12.0)) < 1.5  # median ground (~column 60) + height
+    (t,) = model["trees"]
+    assert abs(t["b"] - 50.0) < 1.0  # ground at the trunk (column 100)
+
+
+def test_without_ground_blocks_start_at_zero():
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(40, 80), slice(40, 80), 12.0)
+    (b,) = city_model(ndsm, classes, np.zeros(ndsm.shape + (3,), np.uint8), GSD)["buildings"]
+    assert b["b"] == 0.0 and b["t"] == b["h"]
