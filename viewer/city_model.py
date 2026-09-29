@@ -5,13 +5,18 @@ on 40 GAMUS val tiles, regularizing heights like this raised RMSE from 2.66 m to
 2.86-3.38 m (real roofs are not single flat blocks, and mislabelled edge pixels
 get flattened), so accuracy-graded outputs never go through here.
 
-Buildings: each connected building component is split only into genuinely
-distinct height levels (a tower on a podium), found from its *interior* pixels:
-the model's heights ramp up softly over the first metres inside a wall, and
-banding those ramps would stack every roof into terraces. Parts too small or too
-thin to be a building on their own merge into their neighbours; each part is
-extruded to the median of its interior heights. Footprints come back as polygons
-in normalized image coordinates (u = column / width, v = row / height).
+Buildings: each connected building blob is first cut into roofs, one per roof
+plateau, along the height step or dip between neighbours, so touching row houses
+become separate blocks. Each roof is then split into distinct height levels (a
+tower on a podium, >= 2.5 m apart), found from its *interior* pixels: the model's
+heights ramp up softly over the first metres inside a wall, and banding those
+ramps would stack every roof into terraces. Parts too small or too thin to be a
+building on their own merge into their neighbours; each part is extruded to the
+median of its interior heights. Outlines follow the traced shape and are squared
+off only where that barely moves them. On 40 GAMUS val tiles (viewer/city_eval.py)
+this took footprint IoU 0.787 -> 0.841, edge F1 0.564 -> 0.655, height RMSE on
+buildings 3.15 -> 2.99 m, separate buildings 1281 -> 2372. Footprints come back as
+polygons in normalized image coordinates (u = column / width, v = row / height).
 
 Trees: one crown per local height peak inside the tree class, sized from the
 tree's height and the canopy extent, coloured from the photo.
@@ -51,6 +56,39 @@ def _split_levels(h: np.ndarray, min_px: int, min_gap_m: float, depth: int = 2) 
                   + _split_levels(h[h > best_t], min_px, min_gap_m, depth - 1))
 
 
+def _roof_segments(cm: np.ndarray, smooth: np.ndarray, gsd_m: float, min_px: int,
+                   drop_m: float = 1.0, window_m: float = 6.0) -> np.ndarray:
+    """Split one building blob into roofs (labels 1..n, 0 outside): one seed per roof
+    plateau (pixels within `drop_m` of their local maximum over `window_m`), flooded over
+    the height gradient, so each cut lands on the step or dip between neighbouring roofs.
+    Touching row houses of similar height become separate blocks this way."""
+    win = int(round(window_m / gsd_m)) | 1
+    local_max = ndimage.maximum_filter(np.where(cm, smooth, -1e9), size=win)
+    seeds = cm & (smooth >= local_max - drop_m)
+    lab, n = ndimage.label(seeds)
+    if n > 1:
+        sizes = ndimage.sum(seeds, lab, np.arange(1, n + 1))
+        keep = np.flatnonzero(sizes >= max(1, round(4.0 / gsd_m**2))) + 1  # >= 4 m^2 plateaus
+        lab = np.where(np.isin(lab, keep), np.searchsorted(keep, lab) + 1, 0)
+        n = len(keep)
+    if n <= 1:
+        return cm.astype(np.int32)
+    grad = np.hypot(ndimage.sobel(smooth, 0), ndimage.sobel(smooth, 1))
+    cost = np.full(cm.shape, 65535, np.uint16)  # outside the blob: impassable
+    cost[cm] = np.clip(grad[cm] / max(float(grad[cm].max()), 1e-6) * 60000, 0, 60000)
+    segs = np.where(cm, ndimage.watershed_ift(cost, lab.astype(np.int32)), 0)
+    # Ties along the blob's edge can hand a roof stray pixels far from it: keep each roof's
+    # main piece only, and only roofs big enough to be a building; the rest joins a neighbour.
+    good = np.zeros(cm.shape, bool)
+    for i in range(1, n + 1):
+        pieces, k = ndimage.label(segs == i)
+        if k:
+            main = pieces == np.argmax(np.bincount(pieces.ravel())[1:]) + 1
+            if main.sum() >= min_px:
+                good |= main
+    return np.where(cm, _nearest_fill(segs, good), 0) if good.any() else cm.astype(np.int32)
+
+
 def _component_parts(cm: np.ndarray, smooth: np.ndarray, min_px: int, edge_px: int,
                      thin_px: int, vote_px: int, min_gap_m: float) -> np.ndarray:
     """Local part labels (1..n) for one building component, 0 outside it."""
@@ -83,7 +121,7 @@ def _component_parts(cm: np.ndarray, smooth: np.ndarray, min_px: int, edge_px: i
     return np.where(cm, _nearest_fill(parts, good), 0).astype(np.int32)
 
 
-def building_parts(ndsm: np.ndarray, classes: np.ndarray, gsd_m: float, min_gap_m: float = 5.0,
+def building_parts(ndsm: np.ndarray, classes: np.ndarray, gsd_m: float, min_gap_m: float = 2.5,
                    min_area_m2: float = 20.0, min_height_m: float = 2.0):
     """-> (parts: int32 HxW, 0 = no building; heights: {part_id: metres})."""
     min_px = max(4, int(round(min_area_m2 / gsd_m**2)))
@@ -105,22 +143,26 @@ def building_parts(ndsm: np.ndarray, classes: np.ndarray, gsd_m: float, min_gap_
     if not mask.any():
         return parts, heights
     smooth = ndimage.median_filter(raw, size=5)
+    roof_smooth = ndimage.gaussian_filter(smooth, sigma=max(0.5, 0.66 / gsd_m))
     comps, _ = ndimage.label(mask)
     next_id = 1
     for cid, sl in enumerate(ndimage.find_objects(comps), start=1):
         cm = comps[sl] == cid
         if cm.sum() < min_px:
             continue
-        local = _component_parts(cm, smooth[sl], min_px, edge_px, thin_px, vote_px, min_gap_m)
-        for lid in np.unique(local[local > 0]):
-            m = local == lid
-            inner = ndimage.binary_erosion(m, iterations=edge_px)
-            h = float(np.median(raw[sl][inner if inner.sum() >= 4 else m]))
-            if m.sum() < min_px or h < min_height_m:  # speckle, or pavement labelled as roof
-                continue
-            parts[sl][m] = next_id
-            heights[next_id] = h
-            next_id += 1
+        roofs = _roof_segments(cm, roof_smooth[sl], gsd_m, min_px)
+        for rid in np.unique(roofs[roofs > 0]):
+            rm = roofs == rid
+            local = _component_parts(rm, smooth[sl], min_px, edge_px, thin_px, vote_px, min_gap_m)
+            for lid in np.unique(local[local > 0]):
+                m = local == lid
+                inner = ndimage.binary_erosion(m, iterations=edge_px)
+                h = float(np.median(raw[sl][inner if inner.sum() >= 4 else m]))
+                if m.sum() < min_px or h < min_height_m:  # speckle, or pavement labelled as roof
+                    continue
+                parts[sl][m] = next_id
+                heights[next_id] = h
+                next_id += 1
     return parts, heights
 
 
@@ -156,11 +198,13 @@ def _orthogonal_ring(coords: list) -> list | None:
     return pts
 
 
-def regularize(poly, grid_px: float, rect_fill: float = 0.8):
+def regularize(poly, grid_px: float, rect_fill: float = 0.8, max_shift: float = 0.10):
     """Footprint -> clean LoD1 outline. Near-rectangular footprints (>= `rect_fill` of their
     minimum rotated rectangle) become that rectangle at equal area; others get right-angled
-    edges along the building's main axis. Falls back to `poly` if the result is invalid or
-    changes the area by more than 35 %."""
+    edges along the building's main axis. The traced `poly` is kept instead whenever the clean
+    version would move more than `max_shift` of the footprint's area (symmetric difference):
+    squaring off every outline cost footprint IoU 0.843 -> 0.793 and edge F1 0.661 -> 0.569
+    on 40 GAMUS val tiles; with this cap it is 0.841 / 0.655 (viewer/city_eval.py)."""
     import math
 
     from shapely import affinity
@@ -177,7 +221,7 @@ def regularize(poly, grid_px: float, rect_fill: float = 0.8):
         out = affinity.scale(mrr, k, k, origin=mrr.centroid)
         for ring in poly.interiors:  # keep courtyards, cleaned up the same way
             out = out.difference(regularize(Polygon(ring), grid_px, rect_fill))
-        return out if out.geom_type == "Polygon" and out.is_valid else poly
+        return out if _close(out, poly, max_shift) else poly
 
     corners = list(mrr.exterior.coords)
     (x1, y1), (x2, y2) = max(zip(corners[:-1], corners[1:]), key=lambda e: math.dist(*e))
@@ -191,9 +235,13 @@ def regularize(poly, grid_px: float, rect_fill: float = 0.8):
         return poly
     holes = [h for h in (_orthogonal_ring(list(r.coords)[:-1]) for r in rotated.interiors) if h]
     out = affinity.rotate(Polygon(shell, holes), angle, origin=origin)
-    if not out.is_valid or out.is_empty or abs(out.area - poly.area) / poly.area > 0.35:
-        return poly
-    return out
+    return out if _close(out, poly, max_shift) else poly
+
+
+def _close(out, poly, max_shift: float) -> bool:
+    """A valid single polygon that moves at most `max_shift` of `poly`'s area."""
+    return (out.geom_type == "Polygon" and out.is_valid and not out.is_empty
+            and poly.symmetric_difference(out).area <= max_shift * poly.area)
 
 
 def footprints(parts: np.ndarray, heights: dict, shape: tuple[int, int], gsd_m: float,

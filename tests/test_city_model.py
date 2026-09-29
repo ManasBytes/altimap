@@ -78,6 +78,22 @@ def test_soft_edge_ramps_do_not_become_terraces():
     assert len(parts) == 1 and 22 <= parts[0]["h"] <= 24
 
 
+def test_touching_houses_of_different_height_become_separate_blocks():
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(20, 60), slice(20, 50), 6.0)  # row houses sharing a wall,
+    _add(ndsm, classes, slice(20, 60), slice(50, 80), 9.0)  # only 3 m apart in height
+    parts = footprints(*building_parts(ndsm, classes, GSD), shape=ndsm.shape, gsd_m=GSD)
+    assert sorted(round(p["h"]) for p in parts) == [6, 9]
+
+
+def test_equal_roofs_split_along_the_dip_between_them():
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(20, 60), slice(20, 80), 8.0)
+    ndsm[20:60, 48:52] = 4.0  # the lower seam between two neighbouring roofs
+    parts = footprints(*building_parts(ndsm, classes, GSD), shape=ndsm.shape, gsd_m=GSD)
+    assert len(parts) == 2 and all(7 <= p["h"] <= 8.5 for p in parts)
+
+
 def _dome(ndsm, classes, cy, cx, radius, height):
     yy, xx = np.mgrid[: ndsm.shape[0], : ndsm.shape[1]]
     d = np.hypot(yy - cy, xx - cx)
@@ -189,3 +205,14 @@ def test_regularize_follows_a_rotated_building():
     edge = ring[1] - ring[0]
     angle = np.degrees(np.arctan2(edge[1], edge[0])) % 90
     assert min(abs(angle - 30), abs(angle - 60)) < 2  # edges stay at the building's own angle
+
+
+def test_regularize_keeps_the_traced_shape_of_a_building_that_is_not_boxy():
+    from shapely.geometry import Point
+
+    from viewer.city_model import regularize
+
+    rotunda = Point(0, 0).buffer(20)  # squaring this off would move far more than 10 % of it
+    out = regularize(rotunda, grid_px=2.0)
+    assert rotunda.symmetric_difference(out).area <= 0.10 * rotunda.area
+    assert len(out.exterior.coords) > 8  # still round, not a box

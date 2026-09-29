@@ -33,8 +33,12 @@ All elevation outputs are float32 Cloud-Optimized GeoTIFFs in metres, NaN nodata
    LiDAR on four scenes): a 300 m morphological opening of GLO-30 for dense cities, 150 m for towns
    (keeps hills), model subtraction for forest and farmland. Display only.
 5. **3D city model (display).** From the same prediction, `viewer/city_model.py` builds an LoD1
-   city: each building complex split into its distinct height levels (a tower on a podium becomes
-   two blocks) and extruded with the photo on the roof, trees detected as individual crowns
+   city: each building complex cut into roofs where the roof height steps or dips (touching row
+   houses become separate blocks) and into distinct height levels (a tower on a podium becomes two
+   blocks), outlines kept as traced unless squaring them off barely moves them, extruded with the
+   photo on the roof. On 40 GAMUS val tiles (`viewer/city_eval.py`) this scores footprint IoU 0.841
+   and edge F1 0.655 against the true outlines, 2372 separate buildings (was 0.787 / 0.564 / 1281);
+   SAM 3 masks scored lower (0.72–0.78 IoU) and aren't used. Trees are detected as individual crowns
    (height, width and colour from the image), and flat ground. It is also exported as
    `buildings.geojson` (footprint + height, WGS84 for GeoTIFF input). This is for the 3D view only:
    regularizing heights this way raised RMSE from 2.66 m to 2.86–3.38 m on validation tiles, so the
@@ -88,6 +92,9 @@ RMSE (10.0 m) against MAE (1.4 m) shows a small number of very tall pixels being
 split used for checkpoint selection covered DC and Philadelphia only.
 
 ## Run it
+
+Teammates setting up from scratch: follow **[SETUP.md](SETUP.md)** (every step, model
+downloads, troubleshooting). The short version:
 
 Needs Python 3.12, Node 18+, an NVIDIA GPU (6 GB is enough for inference; CPU works, slowly), and
 internet on first run (DINOv2 model code from GitHub, then cached; GLO-30 ground from Microsoft

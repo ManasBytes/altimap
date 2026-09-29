@@ -39,17 +39,17 @@ Separate Python environments by design — do not merge them:
 
 - **`.venv`** (Python 3.12, pinned via `.python-version`) — numpy, scipy, rasterio, pytest. No
   torch. Runs `src/altimap` and all tests.
-- **`.venv-da3`** — adds PyTorch + `depth_anything_3` (+ trimesh, Pillow). Only for scripts that
-  run model inference or build glTF meshes. Heavy (~4.5 GB), so it's deliberately kept out of the
-  test loop.
+- **`.venv-da3`** — adds PyTorch (cu128) and runs the app (`viewer.server`) and every model
+  script. Heavy (~6 GB), so it's deliberately kept out of the test loop. `altimap` is installed
+  into it with `-e . --no-deps`. `depth_anything_3` is only needed for the old DA3 `/api/upload`
+  path, which the React viewer no longer calls.
 - **`backend/.venv`** — plays the `.venv-da3` role for the Django app (Django + DRF + the full
   `viewer/` pipeline deps incl. torch), installed from `backend/requirements.txt` by `make install`.
 
-None of these venvs exist in this checkout yet; create with `uv`:
-```
-uv pip install -e ".[dev]"                     # main .venv
-uv pip install --python .venv-da3/bin/python torch depth_anything_3 trimesh pillow rasterio fastapi uvicorn python-multipart
-```
+**`SETUP.md` is the from-scratch guide** (envs, model code + weights, frontend build, run,
+troubleshooting); keep it in step when setup changes. If ROS (or anything else) is on
+`PYTHONPATH`, prefix Python commands with `env -u PYTHONPATH` — ROS's pytest plugins break the
+test run otherwise.
 
 Tests (main venv only, no network, no torch):
 ```
@@ -66,7 +66,16 @@ Inference / export scripts (`.venv-da3` only):
 .venv-da3/bin/python -m viewer.refine_scenes                             # footprint-constrained refinement
 .venv-da3/bin/python -m viewer.train_classifier                          # 7-class land-cover U-Net → viewer/cache/classifier_resnet34unet.pt
 .venv-da3/bin/python -m viewer.server                                    # FastAPI upload/classify server + dashboards, http://localhost:8000
+.venv-da3/bin/python -m viewer.estimate scene.tif photo.png --out results/   # batch: images -> ndsm.tif / dsm.tif
+.venv-da3/bin/python -m viewer.city_eval [--fetch]                       # 3D city model buildings vs GAMUS truth (40 val tiles)
+.venv-da3/bin/python -m viewer.height_eval --split test --ckpt viewer/cache/best.pth --synrs3d viewer/cache/SynRS3D --tta
+.venv-da3/bin/python -m viewer.height_train --hours 8 --out runs/ft      # fine-tune (24 GB GPU); see scripts/overnight_v2.sh
 ```
+
+The React viewer (what users see) is `cd frontend && npm run build && npm run preview -- --host
+127.0.0.1 --port 5173`, talking to `viewer.server` on :8000. `npm run dev` works too but can hit
+the inotify watcher limit (ENOSPC) on machines with many watched files. On a 6 GB GPU, stop the
+server before running an eval: its model and the eval's model don't both fit.
 
 Static dashboards alone (no inference, once assets are exported) can be served with
 `python -m http.server` from `viewer/web/`.
@@ -133,7 +142,8 @@ Module map:
 | `viewer/export_dem_direct.py` | No model | Drapes a georeferenced orthophoto over the real DEM — no depth model. Encodes `fake_depth = elev_max - elevation` so it round-trips through the unchanged rg16/shader "depth" math (proved in `tests/test_viewer_dem_direct.py`). |
 | `viewer/classify.py` / `train_classifier.py` / `gamus_dataset.py` | torch lazily | **Non-georeferenced path**: ResNet34-UNet predicts 7 land-cover classes, each mapped to a fixed relative height (`STATIC_CLASS_HEIGHT`, normalized units, *not* metres) — a "layer cake" placeholder preview, no depth model. Trained on raw GAMUS `.h5` tiles (exact labels), not the lossy frontend JPEGs. GAMUS roots are hardcoded to `/home/biplab-dev/...`; the checkpoint lives in gitignored `viewer/cache/`, so it must be trained before `/api/classify-static` works. |
 | `viewer/height_model.py` / `height_eval.py` / `height_train.py` | torch lazily | **Metric height path** (spec `docs/superpowers/specs/2026-09-29-24h-metric-height-design.md`). RS3DAda (DINOv2 ViT-L + DPT, from the cloned SynRS3D repo in `viewer/cache/SynRS3D`) predicts nDSM in metres plus 8 OpenEarthMap classes; `height_train` fine-tunes it on GAMUS (BitFit encoder), `height_eval` scores per city against `zero`/`train-mean` baselines. Inputs must be multiples of 14 px (518 windows). GAMUS GSD is 0.33 m; the HF release names DC images `*_RGB.h5` and PHL/NYC `*_IMG.h5`. |
-| `viewer/city_model.py` | No | LoD1 city model **for display only**: building parts (distinct height levels from interior pixels, ramp rings/slivers merged), footprint polygons in normalized u,v with roof colour, individual tree crowns. Never feeds the GeoTIFFs (regularizing costs RMSE). `/api/estimate` returns it as `city` and writes `buildings.geojson`; the frontend extrudes it (`buildCityGroup`). |
+| `viewer/city_model.py` | No | LoD1 city model **for display only**. Buildings: each blob of building-class pixels is cut into roofs (`_roof_segments`: one seed per roof plateau, watershed over the height gradient, so touching row houses split at the step/dip between them), then each roof into height levels ≥ 2.5 m apart (`_component_parts`, interior pixels so wall ramps don't terrace). Outlines keep the traced shape; `regularize` squares one off (rectangle or right angles) **only if that moves ≤ 10 % of its area** (`max_shift`). Plus roof colour, base/top on terrain, individual tree crowns. Never feeds the GeoTIFFs (regularizing heights costs RMSE). `/api/estimate` returns it as `city` and writes `buildings.geojson`; the frontend extrudes it (`buildCityGroup`). |
+| `viewer/city_eval.py` | model only if cache is cold | Scores the city model against GAMUS truth on 40 pinned val tiles (`EVAL_TILES`, `--fetch` downloads them): footprint IoU, edge F1 within 1 m, height RMSE on buildings, building count. Height predictions are cached in `viewer/cache/city_eval/`, so re-scoring a `city_model.py` change is CPU-only. Run it before and after any change to building extraction. |
 | `viewer/height_metrics.py` | No | RMSE/MAE/Pearson/building-RMSE, pooled over tiles via running sums (`ScoreAccumulator`), NaN-excluding. |
 | `viewer/estimate.py` | torch via model | Image → `ndsm.tif` (always) and `dsm.tif` (GeoTIFF input, DEM-consistent: `GLO-30 − mean₃₀ₘ(nDSM) + nDSM`, orthometric, so 30 m block means match the DEM as the FAQ scores it), resampled to/from 0.33 m. The *viewer's* ground is chosen separately by building share (`display_ground_method`: ≥0.4 → 300 m opening, ≥0.1 → 150 m, else subtract), measured against 3DEP LiDAR. `read_image` follows band colour tags, masks nodata, and rejects single-band float rasters (height maps) with `NotImageryError`. Post-filtering the nDSM (guided/median) was measured on 40 val tiles and gives no gain, so exports stay raw. |
 | `viewer/server.py` | Yes | FastAPI app: `POST /api/estimate` (what `frontend/` calls) runs the height model via `viewer/estimate.py`, returns preview data URIs + GeoTIFF download paths, and scores against an optional uploaded reference height map; checkpoint is `viewer/cache/best.pth` if present, else stock RS3DAda, overridable with `ALTIMAP_HEIGHT_CKPT`. `POST /api/upload` runs DA3 on an uploaded image through the *same* pipeline (`metrics.py`, `geo.py`, `terrain.py`) the batch exporters use, so uploads and pre-exported scenes are treated identically; `POST /api/classify-static` runs the older static-classifier path (no longer called by `frontend/`). Models load lazily on first request, not at import. Serves `viewer/web/` as static files, mounted after the API routes. |
@@ -160,6 +170,47 @@ encoded, so for those the UI shows relative values, never metres. The upload tab
 viewer tool works on both. `CLASS_PALETTE` in `main.jsx` and in `viewer/classify.py` must stay
 identical (same order and RGB values) — the classifier's output is decoded/rendered as if it were a
 `*-classes.jpg`.
+
+The catalog scenes are **GAMUS reference layers (LiDAR heights, annotated classes), not model
+output**, restyled for looks (`buildHeightField` / `applyClassHeightScale`: median + blur,
+per-scene building stretch, trees squashed). They are labelled "LiDAR reference heights, not
+model output" in the UI; keep that label, and never present them as results. Uploads take the
+faithful path (`metricDisplayField`: metres at true scale, 3x3 median only). Clicking a building
+opens `.building-card` (height, ~floors, footprint m², roof elevation); it sits at `right: 370px`
+so it clears the inspector panel (it was hidden under it once). Known display gaps: the legend
+swatches don't match the Height layer's jet ramp, and for GeoTIFFs the legend shows the nDSM range
+while the mesh is coloured by ground/DSM elevation; the slope readout is quantised (~13° steps on
+flat ground) because heights reach the browser as 8-bit PNGs.
+
+### Models, weights and data (all under gitignored `viewer/cache/` unless noted)
+
+| What | Where it comes from |
+|---|---|
+| `viewer/cache/best.pth` — our fine-tuned RS3DAda (v1: test RMSE 5.02 m vs 7.25 m zero-shot) | HF **private** `Dilavesh/altimap-height` (`best.pth`; v2 results go to `v2/` when the overnight run uploads) |
+| `viewer/cache/SynRS3D/` — RS3DAda model code | `git clone https://github.com/JTRNEO/SynRS3D`, commit `ab5a485` |
+| `SynRS3D/pretrain/RS3DAda_vitl_DPT_height.pth` — stock weights, the server's fallback | HF `JTRNEO/RS3DAda` |
+| DINOv2 encoder code | `torch.hub` (`facebookresearch/dinov2`), fetched on first model load, cached in `~/.cache/torch/hub` |
+| GAMUS tiles (`images/`, `heights/`, `classes/` `.h5`) | HF dataset `earthflow/GAMUS`; `city_eval --fetch` pulls the 40 eval tiles into `viewer/cache/gamus` |
+| Copernicus GLO-30 ground for GeoTIFF inputs | Microsoft Planetary Computer, read live per upload (`viewer/dem.py`) |
+| `demo/` test images (not in git, 57 MB) | 3 GAMUS tiles as PNG + LiDAR `reference_heights/`, 4 NAIP GeoTIFFs (city, suburb, hills, forest) |
+
+### Measured findings (don't re-run these without a reason)
+
+- **UI numbers are computed correctly** (checked 2026-09-30 against an independent recalculation
+  and USGS 3DEP LiDAR): validation RMSE/MAE/r, coverage and surface max all match. The weak part
+  is the model, not the display: it reads **low on 0.6 m imagery** (NAIP nDSM bias −4 to −16 m;
+  building card MAE ~4.2 m vs 2.2 m on 0.33 m GAMUS) and **under-reads tall objects** (tallest
+  object 72 m vs 167 m at Philadelphia City Hall, 28 vs 38 m on a GAMUS tile). Exported DSM vs
+  LiDAR DSM RMSE: suburb 4.1 m, hills 5.1 m, forest 9.5 m, dense downtown 34.7 m. v2 training
+  (height-weighted loss + blur augmentation) targets exactly this; its results weren't in yet.
+- **SAM 3 does not beat our model's building masks** (40 GAMUS val tiles): raw pixels IoU 0.757 /
+  edge F1 0.529 vs ours 0.854 / 0.688; as 3D footprints 0.720–0.781 vs 0.787–0.841, and it
+  separates fewer buildings. It's heavy (860M params, gated) and not a dependency; don't re-add
+  it without beating `city_eval`.
+- **Squaring off every outline costs accuracy** (IoU 0.843 → 0.793, edge F1 0.661 → 0.569); hence
+  the 10 % `max_shift` cap. Splitting blobs at roof-height steps (`_roof_segments`, 2.5 m levels)
+  is what took separate buildings 1281 → 2372 and building height RMSE 3.15 → 2.99 m.
+- Post-filtering the nDSM (guided/median filter) gives no gain; exports stay raw (see estimate row).
 
 ### Load-bearing invariants (violating these produces silently-wrong output, not a crash)
 
