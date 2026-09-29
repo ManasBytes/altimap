@@ -383,7 +383,8 @@ const displayedScenes = [...curatedScenes, ...gamusScenes].map((scene) => {
   return {
     ...scene,
     // Provenance, not invented coordinates: these are GAMUS aerial tiles.
-    coord: `GAMUS · ${city} · ${scene.split} tile · ${GAMUS_GSD_M} m/px`,
+    // These heights and classes are the dataset's LiDAR/label layers, not model output.
+    coord: `GAMUS · ${city} · ${scene.split} tile · ${GAMUS_GSD_M} m/px · LiDAR reference heights, not model output`,
     groundWidthM: 1024 * GAMUS_GSD_M,
     // Preview JPEGs are non-linearly encoded, so pixel -> metres is not
     // recoverable; the probe reports metres only for uploads (linear encoding).
@@ -959,7 +960,8 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM) {
     trees.forEach((tree, i) => {
       const x = -4 + 8 * tree.u;
       const z = -4 + 8 * tree.v;
-      const rv = Math.min(tree.r, tree.h * 0.38); // crown half-height: crown fills the top ~3/4
+      // crown half-height: the crown fills the top ~2/3 of the tree, trunk the rest
+      const rv = Math.min(Math.max(tree.r * 0.85, tree.h * 0.33), tree.h * 0.45);
       const rw = tree.r * toWorld; // crown radius, world units
       const base = tree.b ?? 0; // ground at the trunk, metres
       m4.compose(new THREE.Vector3(x, base + tree.h - rv, z), q, new THREE.Vector3(rw, rv, rw));
@@ -2433,7 +2435,7 @@ function App() {
                 <small>Surface max</small>
                 <strong>{shown.max}</strong>
                 <em className="neutral">
-                  {shown.metricHeights ? "model estimate" : "scene max"}
+                  {shown.metricHeights ? "model estimate" : sample ? "LiDAR reference" : "scene max"}
                 </em>
               </div>
               <div>

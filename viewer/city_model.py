@@ -124,6 +124,78 @@ def building_parts(ndsm: np.ndarray, classes: np.ndarray, gsd_m: float, min_gap_
     return parts, heights
 
 
+def _orthogonal_ring(coords: list) -> list | None:
+    """Snap a ring (already rotated to the building's main axis) to horizontal/vertical
+    edges; corners are recomputed where consecutive snapped edges meet."""
+    n = len(coords)
+    edges = []  # [is_horizontal, position, length]
+    for i in range(n):
+        (x1, y1), (x2, y2) = coords[i], coords[(i + 1) % n]
+        horizontal = abs(x2 - x1) >= abs(y2 - y1)
+        edges.append([horizontal, (y1 + y2) / 2 if horizontal else (x1 + x2) / 2,
+                      float(np.hypot(x2 - x1, y2 - y1))])
+    merged: list = []
+    for e in edges:  # consecutive edges of one orientation are one wall
+        if merged and merged[-1][0] == e[0]:
+            m, total = merged[-1], merged[-1][2] + e[2]
+            m[1] = (m[1] * m[2] + e[1] * e[2]) / total if total > 0 else m[1]
+            m[2] = total
+        else:
+            merged.append(list(e))
+    if len(merged) > 1 and merged[0][0] == merged[-1][0]:
+        last = merged.pop()
+        total = merged[0][2] + last[2]
+        merged[0][1] = (merged[0][1] * merged[0][2] + last[1] * last[2]) / total if total > 0 else merged[0][1]
+        merged[0][2] = total
+    if len(merged) < 4 or len(merged) % 2:
+        return None
+    pts = []
+    for i, a in enumerate(merged):
+        b = merged[(i + 1) % len(merged)]
+        pts.append((b[1], a[1]) if a[0] else (a[1], b[1]))
+    return pts
+
+
+def regularize(poly, grid_px: float, rect_fill: float = 0.8):
+    """Footprint -> clean LoD1 outline. Near-rectangular footprints (>= `rect_fill` of their
+    minimum rotated rectangle) become that rectangle at equal area; others get right-angled
+    edges along the building's main axis. Falls back to `poly` if the result is invalid or
+    changes the area by more than 35 %."""
+    import math
+
+    from shapely import affinity
+    from shapely.geometry import Polygon
+
+    if poly.is_empty or poly.area <= 0:
+        return poly
+    shell_only = Polygon(poly.exterior)  # courtyards must not stop a block being a rectangle
+    mrr = shell_only.minimum_rotated_rectangle
+    if mrr.area <= 0:
+        return poly
+    if shell_only.area / mrr.area >= rect_fill:
+        k = math.sqrt(shell_only.area / mrr.area)
+        out = affinity.scale(mrr, k, k, origin=mrr.centroid)
+        for ring in poly.interiors:  # keep courtyards, cleaned up the same way
+            out = out.difference(regularize(Polygon(ring), grid_px, rect_fill))
+        return out if out.geom_type == "Polygon" and out.is_valid else poly
+
+    corners = list(mrr.exterior.coords)
+    (x1, y1), (x2, y2) = max(zip(corners[:-1], corners[1:]), key=lambda e: math.dist(*e))
+    angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
+    origin = poly.centroid
+    rotated = affinity.rotate(poly, -angle, origin=origin).simplify(grid_px, preserve_topology=True)
+    if rotated.is_empty or rotated.geom_type != "Polygon":
+        return poly
+    shell = _orthogonal_ring(list(rotated.exterior.coords)[:-1])
+    if shell is None:
+        return poly
+    holes = [h for h in (_orthogonal_ring(list(r.coords)[:-1]) for r in rotated.interiors) if h]
+    out = affinity.rotate(Polygon(shell, holes), angle, origin=origin)
+    if not out.is_valid or out.is_empty or abs(out.area - poly.area) / poly.area > 0.35:
+        return poly
+    return out
+
+
 def footprints(parts: np.ndarray, heights: dict, shape: tuple[int, int], gsd_m: float,
                rgb: np.ndarray | None = None, simplify_m: float = 0.75,
                ground: np.ndarray | None = None) -> list[dict]:
@@ -163,6 +235,7 @@ def footprints(parts: np.ndarray, heights: dict, shape: tuple[int, int], gsd_m: 
         for p in poly.geoms if isinstance(poly, MultiPolygon) else [poly]:
             if p.is_empty or p.area < 1.0:
                 continue
+            p = regularize(p, grid_px=max(1.0, 1.5 / gsd_m))  # clean LoD1 walls
             rings = [p.exterior, *p.interiors]
             out.append({
                 "h": round(heights[pid], 2),
@@ -199,8 +272,8 @@ def trees(ndsm: np.ndarray, classes: np.ndarray, rgb: np.ndarray, gsd_m: float,
         if h < min_height_m:
             continue
         # Crown radius: canopy extent around the peak, but never narrower than a real
-        # tree of this height (~0.22 h), so dense groves don't become lollipops.
-        r = float(np.clip(max(to_edge_m[y, x], 0.22 * h), 1.5, min(8.0, 0.5 * h + 1.0)))
+        # tree of this height (~0.3 h), so dense groves don't become lollipops.
+        r = float(np.clip(max(to_edge_m[y, x], 0.3 * h), 1.5, min(9.0, 0.5 * h + 1.0)))
         k = max(1, int(round(r / gsd_m / 2)))
         colour = rgb[max(0, y - k):y + k + 1, max(0, x - k):x + k + 1].reshape(-1, 3).mean(axis=0)
         out.append({"u": round((x + 0.5) / cols, 5), "v": round((y + 0.5) / rows, 5),

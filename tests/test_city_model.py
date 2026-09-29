@@ -134,3 +134,58 @@ def test_without_ground_blocks_start_at_zero():
     _add(ndsm, classes, slice(40, 80), slice(40, 80), 12.0)
     (b,) = city_model(ndsm, classes, np.zeros(ndsm.shape + (3,), np.uint8), GSD)["buildings"]
     assert b["b"] == 0.0 and b["t"] == b["h"]
+
+
+def _angles_deg(ring):
+    pts = np.array(ring)
+    out = []
+    for i in range(len(pts)):
+        a, b, c = pts[i - 1], pts[i], pts[(i + 1) % len(pts)]
+        v1, v2 = a - b, c - b
+        cos = v1 @ v2 / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        out.append(np.degrees(np.arccos(np.clip(cos, -1, 1))))
+    return np.array(out)
+
+
+def test_regularize_turns_a_ragged_rectangle_into_a_clean_one():
+    from shapely.geometry import Polygon
+
+    from viewer.city_model import regularize
+
+    rng = np.random.default_rng(0)
+    xs = np.r_[np.linspace(0, 40, 30), np.full(20, 40.0), np.linspace(40, 0, 30), np.zeros(20)]
+    ys = np.r_[np.zeros(30), np.linspace(0, 24, 20), np.full(30, 24.0), np.linspace(24, 0, 20)]
+    ragged = Polygon(np.c_[xs, ys] + rng.normal(0, 0.6, (100, 2))).buffer(0)
+    clean = regularize(ragged, grid_px=2.0)
+    assert len(clean.exterior.coords) - 1 == 4
+    assert abs(clean.area - ragged.area) / ragged.area < 0.05
+    assert np.allclose(_angles_deg(clean.exterior.coords[:-1]), 90, atol=1)
+
+
+def test_regularize_keeps_an_l_shape_right_angled():
+    from shapely.geometry import Polygon
+
+    from viewer.city_model import regularize
+
+    l_shape = Polygon([(0, 0), (40, 0), (40, 15), (15, 15), (15, 40), (0, 40)])
+    wobbly = Polygon(np.array(l_shape.exterior.coords) + np.random.default_rng(1).normal(0, 0.4, (7, 2)))
+    clean = regularize(wobbly.buffer(0), grid_px=2.0)
+    ring = clean.exterior.coords[:-1]
+    assert len(ring) == 6
+    assert np.all(np.abs(_angles_deg(ring) - 90) < 2)  # inner and outer corners are both 90 degrees
+    assert abs(clean.area - l_shape.area) / l_shape.area < 0.08
+
+
+def test_regularize_follows_a_rotated_building():
+    from shapely import affinity
+    from shapely.geometry import box
+
+    from viewer.city_model import regularize
+
+    rotated = affinity.rotate(box(0, 0, 50, 20), 30, origin=(0, 0))
+    clean = regularize(rotated.buffer(0.3).buffer(-0.3), grid_px=2.0)
+    ring = np.array(clean.exterior.coords[:-1])
+    assert len(ring) == 4
+    edge = ring[1] - ring[0]
+    angle = np.degrees(np.arctan2(edge[1], edge[0])) % 90
+    assert min(abs(angle - 30), abs(angle - 60)) < 2  # edges stay at the building's own angle

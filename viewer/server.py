@@ -68,6 +68,7 @@ SYNRS3D_DIR = CACHE_DIR / "SynRS3D"
 # Fine-tuned checkpoint when present, stock RS3DAda otherwise; override with ALTIMAP_HEIGHT_CKPT.
 HEIGHT_CKPTS = (CACHE_DIR / "best.pth", SYNRS3D_DIR / "pretrain" / "RS3DAda_vitl_DPT_height.pth")
 VIEW_MAX_SIDE = 1024  # texture/height previews sent to the browser; GeoTIFFs keep full resolution
+CITY_MAX_SIDE = 2048  # grid the 3D city model (footprints, trees) is extracted on
 
 
 def _get_model():
@@ -329,9 +330,9 @@ def _read_reference(path: Path) -> np.ndarray:
     return ref
 
 
-def _view_size(shape: tuple[int, int]) -> tuple[int, int]:
+def _view_size(shape: tuple[int, int], max_side: int = 0) -> tuple[int, int]:
     h, w = shape
-    s = min(1.0, VIEW_MAX_SIDE / max(h, w))
+    s = min(1.0, (max_side or VIEW_MAX_SIDE) / max(h, w))
     return max(1, round(w * s)), max(1, round(h * s))  # PIL (width, height)
 
 
@@ -441,7 +442,9 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
     max_m = max(record["ndsm_max_m"], 1e-3)
     size = _view_size(out["ndsm"].shape)
     rgb = np.asarray(Image.fromarray(out["rgb"]).resize(size, Image.BILINEAR))
-    height = np.asarray(Image.fromarray(out["ndsm"], mode="F").resize(size, Image.BILINEAR))
+    # nodata (NaN) shows as flat ground in previews and the city model; the GeoTIFFs keep NaN
+    ndsm_filled = np.nan_to_num(out["ndsm"])
+    height = np.asarray(Image.fromarray(ndsm_filled, mode="F").resize(size, Image.BILINEAR))
     height_u8 = np.clip(height / max_m * 255.0, 0, 255).astype(np.uint8)
     classes = np.asarray(Image.fromarray(out["classes"]).resize(size, Image.NEAREST))
     def to_view(a: np.ndarray) -> np.ndarray:
@@ -451,20 +454,32 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
         """Linear 8-bit relief: elevation = min_m + pixel / 255 * relief_m."""
         lo = float(np.nanmin(a))
         span = max(float(np.nanmax(a)) - lo, 1e-3)
-        u8 = np.clip((a - lo) / span * 255.0, 0, 255).astype(np.uint8)
+        u8 = np.clip((np.nan_to_num(a, nan=lo) - lo) / span * 255.0, 0, 255).astype(np.uint8)
         return {"png": _png_data_uri(np.stack([u8] * 3, axis=-1)), "min_m": lo, "relief_m": span}
 
     # Terrain for georeferenced input: bare earth under the city model, and the exported
     # DSM for "Exact surface" view. Both relative to their own minimum.
-    terrain, ground_rel = None, None
+    terrain, ground_zero = None, None
     if out["ground"] is not None and out["dsm"] is not None:
         ground_view = to_view(out["ground"])
-        ground_rel = ground_view - float(np.nanmin(ground_view))
+        ground_zero = float(np.nanmin(ground_view))
         terrain = {"ground": relief_png(ground_view), "dsm": relief_png(to_view(out["dsm"]))}
 
-    # 3D city model for the viewer, built on the preview grid (display only; GeoTIFFs stay raw).
-    view_gsd = (record["gsd_m"] or GAMUS_GSD_M) * out["ndsm"].shape[1] / size[0]
-    city = city_model(height, classes, rgb, view_gsd, ground=ground_rel)
+    # 3D city model for the viewer (display only; GeoTIFFs stay raw), built on a grid up to
+    # 2x finer than the previews so footprints follow the buildings closely.
+    csize = _view_size(out["ndsm"].shape, CITY_MAX_SIDE)
+
+    def to_city(a: np.ndarray, nearest: bool = False) -> np.ndarray:
+        if a.ndim == 3 or a.dtype == np.uint8:
+            return np.asarray(Image.fromarray(a).resize(csize, Image.NEAREST if nearest else Image.BILINEAR))
+        return np.asarray(Image.fromarray(a.astype(np.float32), mode="F").resize(csize, Image.BILINEAR))
+
+    city_gsd = (record["gsd_m"] or GAMUS_GSD_M) * out["ndsm"].shape[1] / csize[0]
+    city_ground = None
+    if ground_zero is not None:
+        city_ground = to_city(out["ground"]) - ground_zero  # same zero as the terrain relief PNG
+    city = city_model(to_city(ndsm_filled), to_city(out["classes"], nearest=True),
+                      to_city(out["rgb"]), city_gsd, ground=city_ground)
     _write_buildings_geojson(scene_dir, city["buildings"], out["ndsm"].shape)
     record["files"].append("buildings.geojson")
 

@@ -21,11 +21,12 @@ def _syn_folder(root, name, n=2, size=512):
     for i in range(n):
         stem = f"{i:04d}.tif"
         _write(root / name / "opt" / stem, rng.integers(0, 255, (3, size, size), dtype=np.uint8))
+        # The building covers most of the tile, so every random scale + crop contains it.
         nd = np.zeros((size, size), np.float32)
-        nd[100:200, 100:200] = 40.0
+        nd[20:492, 20:492] = 40.0
         _write(root / name / "gt_nDSM" / stem, nd)
         ss = np.full((size, size), 3, np.uint8)
-        ss[100:200, 100:200] = 8  # building
+        ss[20:492, 20:492] = 8  # building
         ss[0:10, 0:10] = 0  # unlabelled
         _write(root / name / "gt_ss_mask" / stem, ss)
 

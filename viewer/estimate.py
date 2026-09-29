@@ -38,7 +38,13 @@ def gsd_metres(geo: dict) -> float | None:
         return None
     res = float(geo["res_m"][0])
     crs = str(geo["crs"])
-    if "4326" in crs or "4269" in crs:  # geographic: degrees -> metres at the tile's latitude
+    try:
+        from rasterio.crs import CRS
+
+        geographic = CRS.from_user_input(crs).is_geographic
+    except Exception:
+        geographic = "4326" in crs or "4269" in crs
+    if geographic:  # degrees -> metres at the tile's latitude
         lat = 0.5 * (geo["bounds"][1] + geo["bounds"][3])
         return res * 111_320.0 * math.cos(math.radians(lat))
     return res
@@ -71,7 +77,8 @@ def dem_consistent_ground(dem: np.ndarray, ndsm: np.ndarray, gsd_m: float,
     from scipy import ndimage
 
     size = max(1, int(round(cell_m / gsd_m)))
-    smooth = ndimage.uniform_filter(np.asarray(ndsm, np.float64), size=size, mode="reflect")
+    # nodata pixels count as ground in the cell mean, so they don't spread NaN over 30 m
+    smooth = ndimage.uniform_filter(np.nan_to_num(np.asarray(ndsm, np.float64)), size=size, mode="reflect")
     return (np.asarray(dem, np.float64) - smooth).astype(np.float32)
 
 
@@ -89,22 +96,51 @@ def display_ground_method(building_share: float) -> str:
 
 
 def read_rgb(path: Path) -> np.ndarray:
-    """Imagery as HxWx3 uint8; >8-bit rasters are 2-98 % stretched."""
-    try:
-        import rasterio
+    """Imagery as HxWx3 uint8 (see read_image, which also returns the valid-pixel mask)."""
+    return read_image(path)[0]
 
-        with rasterio.open(path) as src:
-            bands = min(3, src.count)
-            arr = np.transpose(src.read(list(range(1, bands + 1))), (1, 2, 0))
-        if arr.shape[2] == 1:
-            arr = np.repeat(arr, 3, axis=2)
-        if arr.dtype != np.uint8:
-            a = arr.astype(np.float64)
-            lo, hi = np.percentile(a, [2, 98])
-            arr = np.clip((a - lo) / max(hi - lo, 1e-9) * 255, 0, 255).astype(np.uint8)
-        return np.ascontiguousarray(arr[:, :, :3])
-    except Exception:
-        return np.asarray(Image.open(path).convert("RGB"), dtype=np.uint8)
+
+class NotImageryError(ValueError):
+    """The upload is a raster of measured values (e.g. a height map), not a photo."""
+
+
+def rgb_band_indexes(colorinterp, count: int) -> list[int]:
+    """1-based band indexes for red, green, blue: from the file's colour tags when it has
+    them (a BGR or BGRN GeoTIFF), else 1, 2, 3; a single-band image repeats band 1."""
+    names = [getattr(c, "name", str(c)).lower() for c in colorinterp]
+    if all(n in names for n in ("red", "green", "blue")):
+        return [names.index("red") + 1, names.index("green") + 1, names.index("blue") + 1]
+    return [1, 2, 3] if count >= 3 else [1, 1, 1]
+
+
+def read_image(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """-> (HxWx3 uint8 RGB, HxW bool valid-pixel mask).
+
+    Bands follow the file's colour tags; >8-bit data is 2-98 % stretched over valid
+    pixels only (a nodata border must not flatten the contrast). Single-band floating-
+    point rasters are refused: they are height/elevation maps, not imagery.
+    """
+    import rasterio
+
+    try:
+        src = rasterio.open(path)
+    except rasterio.errors.RasterioIOError:  # formats GDAL can't open: let PIL try
+        rgb = np.asarray(Image.open(path).convert("RGB"), dtype=np.uint8)
+        return rgb, np.ones(rgb.shape[:2], bool)
+    with src:
+        if src.count < 3 and np.dtype(src.dtypes[0]).kind == "f":
+            raise NotImageryError(
+                "this file is a single-band floating-point raster, which looks like a height or "
+                "elevation map, not an image. Upload the RGB image instead (a height map can be "
+                "added as the reference heights to score against).")
+        arr = np.transpose(src.read(rgb_band_indexes(src.colorinterp, src.count)), (1, 2, 0))
+        valid = src.dataset_mask() > 0
+    if arr.dtype != np.uint8:
+        a = arr.astype(np.float64)
+        sample = a[valid] if valid.any() else a.reshape(-1, 3)
+        lo, hi = np.percentile(sample, [2, 98])
+        arr = np.clip((a - lo) / max(hi - lo, 1e-9) * 255, 0, 255).astype(np.uint8)
+    return np.ascontiguousarray(arr), valid
 
 
 def _resize(arr: np.ndarray, shape: tuple[int, int], nearest: bool = False) -> np.ndarray:
@@ -152,7 +188,12 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
 
     out_dir.mkdir(parents=True, exist_ok=True)
     report("Reading image", 0.02)
-    rgb = read_rgb(path)
+    rgb, valid = read_image(path)
+    if not valid.any():
+        raise NotImageryError("the image has no valid pixels (everything is nodata)")
+    if not valid.all():  # nodata borders: show the model a neutral fill, not black
+        rgb = rgb.copy()
+        rgb[~valid] = rgb[valid].mean(axis=0).astype(np.uint8)
     try:
         geo = read_geo_meta(path)
     except Exception:
@@ -164,7 +205,9 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
     ndsm_work, oem_work = predict(model, work, device, tta=tta,
                                   progress=lambda f: report("Estimating heights", 0.05 + 0.7 * f))
     ndsm = np.maximum(_resize(ndsm_work, shape), 0).astype(np.float32)
+    ndsm[~valid] = np.nan  # NaN is the project-wide nodata value
     classes = OEM_TO_GAMUS[_resize(oem_work, shape, nearest=True)]
+    classes[~valid] = 0
 
     transform, crs = Affine.identity(), None
     if geo.get("georeferenced"):

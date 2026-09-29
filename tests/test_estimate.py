@@ -80,3 +80,64 @@ def test_display_ground_method_by_building_share():
     assert display_ground_method(0.52) == "open300"  # dense downtown
     assert display_ground_method(0.30) == "open150"  # hilly or suburban town
     assert display_ground_method(0.02) == "subtract"  # forest, farmland
+
+
+def _tif(path, arr, **kw):
+    import rasterio
+
+    arr = arr if arr.ndim == 3 else arr[None]
+    with rasterio.open(path, "w", driver="GTiff", height=arr.shape[1], width=arr.shape[2],
+                       count=arr.shape[0], dtype=arr.dtype, **kw) as dst:
+        dst.write(arr)
+    return path
+
+
+def test_height_map_upload_is_rejected_with_a_clear_message(tmp_path):
+    import pytest
+
+    from viewer.estimate import NotImageryError, read_image
+
+    path = _tif(tmp_path / "agl.tif", np.random.default_rng(0).random((32, 32)).astype(np.float32) * 30)
+    with pytest.raises(NotImageryError, match="height"):
+        read_image(path)
+
+
+def test_band_order_follows_the_files_colour_tags(tmp_path):
+    import rasterio
+    from rasterio.enums import ColorInterp
+
+    from viewer.estimate import read_image
+
+    bgr = np.stack([np.full((8, 8), v, np.uint8) for v in (10, 20, 30)])  # stored blue, green, red
+    path = tmp_path / "bgr.tif"
+    with rasterio.open(path, "w", driver="GTiff", height=8, width=8, count=3, dtype="uint8") as dst:
+        dst.write(bgr)
+        dst.colorinterp = [ColorInterp.blue, ColorInterp.green, ColorInterp.red]
+    rgb, _ = read_image(path)
+    assert rgb[0, 0].tolist() == [30, 20, 10]
+
+
+def test_untagged_bands_default_to_1_2_3_and_single_band_to_grey(tmp_path):
+    from viewer.estimate import read_image
+
+    three = np.stack([np.full((8, 8), v, np.uint8) for v in (10, 20, 30)])
+    assert read_image(_tif(tmp_path / "rgb.tif", three))[0][0, 0].tolist() == [10, 20, 30]
+    pan = np.full((8, 8), 77, np.uint8)  # e.g. a panchromatic band: allowed, as grey
+    assert read_image(_tif(tmp_path / "pan.tif", pan))[0][0, 0].tolist() == [77, 77, 77]
+
+
+def test_nodata_border_is_masked_and_ignored_by_the_stretch(tmp_path):
+    from viewer.estimate import read_image
+
+    img = np.full((3, 20, 20), 1000, np.uint16)
+    img[:, 5:15, 5:15] = 3000
+    img[:, :, :2] = 0  # nodata strip
+    rgb, valid = read_image(_tif(tmp_path / "scene.tif", img, nodata=0))
+    assert not valid[:, :2].any() and valid[:, 2:].all()
+    assert rgb[10, 10, 0] > rgb[3, 3, 0]  # stretch spans the real data, not the zeros
+
+
+def test_gsd_metres_for_any_geographic_crs():
+    g = gsd_metres({"georeferenced": True, "crs": "EPSG:4674", "res_m": [1e-5, 1e-5],
+                    "bounds": [-47.0, -0.01, -46.99, 0.01]})  # SIRGAS 2000, geographic
+    assert 1.0 < g < 1.2
