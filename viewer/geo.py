@@ -45,6 +45,26 @@ def encode_rg16(depth: np.ndarray) -> tuple[np.ndarray, float, float]:
     return out, lo, hi
 
 
+def encode_grid16(a: np.ndarray, side: int) -> dict:
+    """Heights (metres) resampled to a side x side grid (pixel centres aligned, bilinear) as
+    16-bit little-endian base64: value = lo + u16 / 65535 * span. NaN (nodata) takes the lowest
+    valid value. The viewer decodes this for its mesh, probe and slope, since its 8-bit preview
+    PNGs step 0.1-0.3 m, which quantised the slope readout to ~13 degree steps."""
+    import base64
+
+    a = np.asarray(a, np.float64)
+    finite = np.isfinite(a)
+    a = np.where(finite, a, a[finite].min() if finite.any() else 0.0)
+    rows = (np.arange(side) + 0.5) * a.shape[0] / side - 0.5
+    cols = (np.arange(side) + 0.5) * a.shape[1] / side - 0.5
+    rr, cc = np.meshgrid(rows, cols, indexing="ij")
+    g = ndimage.map_coordinates(a, [rr, cc], order=1, mode="nearest")
+    lo = float(g.min())
+    span = max(float(g.max()) - lo, 1e-3)
+    u16 = np.rint((g - lo) / span * 65535).astype("<u2")
+    return {"b64": base64.b64encode(u16.tobytes()).decode(), "lo": lo, "span": span}
+
+
 def decode_rg16(rgb: np.ndarray, lo: float, hi: float) -> np.ndarray:
     """Inverse of encode_rg16. Mirrors the GLSL decode in shaders.js."""
     codes = rgb[..., 0].astype(np.float64) * 256.0 + rgb[..., 1].astype(np.float64)

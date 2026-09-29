@@ -179,14 +179,14 @@ header {
 .class-dot.vegetation {
   background: #8bcd5b;
 }
-.depth-mode .swatch.low {
-  background: #1439bd;
+.legend .height-ramp {
+  display: inline-block;
+  width: 150px;
+  height: 7px;
+  border-radius: 4px;
 }
-.depth-mode .swatch.mid {
-  background: #f0d344;
-}
-.depth-mode .swatch.high {
-  background: #c32336;
+.legend .legend-note {
+  color: #6f879b;
 }
 .depth-mode .viewport-footer {
   border-color: #68404b;

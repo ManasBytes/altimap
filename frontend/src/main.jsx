@@ -526,14 +526,30 @@ function buildHeightField(px, width, height) {
 // against single-pixel speckle; no blur, cap or discontinuity limiting, since
 // those erode walls into mounds and break projection accuracy. Scaled so world
 // y = metres * (8 / ground width): at exaggeration 1x the relief is true scale.
-function metricDisplayField(px, width, height, maxM, groundWidthM) {
-  const metres = new Float32Array(width * height);
-  for (let i = 0; i < metres.length; i++) metres[i] = (px[i * 4] / 255) * maxM;
+function metricDisplayField(metres, width, height, groundWidthM) {
   const clean = medianFilter(metres, width, height, 1);
   const toField = 8 / groundWidthM / HEIGHT_WORLD_SCALE;
   for (let i = 0; i < clean.length; i++)
     clean[i] = TERRAIN_BASELINE + clean[i] * toField;
   return clean;
+}
+
+// Linear 8-bit preview pixels -> metres (pixel / 255 * maxM).
+function pxToMetres(px, maxM) {
+  const out = new Float32Array(px.length / 4);
+  for (let i = 0; i < out.length; i++) out[i] = (px[i * 4] / 255) * maxM;
+  return out;
+}
+
+// 16-bit heights from /api/estimate `grids` (metres = lo + u16 / 65535 * span), on the
+// mesh grid. The 8-bit preview PNGs step 0.1-0.3 m, which made slopes jump ~13 degrees.
+function decodeGrid(g) {
+  if (!g) return null;
+  const bin = atob(g.b64);
+  const out = new Float32Array(bin.length / 2);
+  for (let i = 0; i < out.length; i++)
+    out[i] = g.lo + ((bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8)) / 65535) * g.span;
+  return out;
 }
 
 // Steep faces (building walls) get darker vertex colours. A single overhead
@@ -680,6 +696,11 @@ const JET_STOPS = [
   [0.85, [0.98, 0.55, 0.05]],
   [1.0, [0.75, 0.05, 0.05]],
 ];
+// The legend's gradient, built from the same stops. Vertex colours are linear, and the
+// renderer outputs sRGB, so each stop is converted the same way before it reaches CSS.
+const JET_CSS = `linear-gradient(90deg, ${JET_STOPS.map(
+  ([t, c]) => `${new THREE.Color(c[0], c[1], c[2]).getStyle()} ${t * 100}%`,
+).join(", ")})`;
 function heightToColor(t, out) {
   t = Math.min(1, Math.max(0, t));
   let i = 0;
@@ -696,13 +717,16 @@ function heightToColor(t, out) {
 // Stretches color mapping across the scene's own min/max (rather than an
 // assumed fixed band) so the full dark-blue-to-dark-red range is always used,
 // even for scenes with a narrower height spread.
-function buildHeightColors(heightField) {
+// With `lo`/`hi` given (uploads: 0 .. nDSM max, metres) the colours mean fixed heights,
+// which is what the legend prints.
+function buildHeightColors(heightField, lo, hi) {
   let min = Infinity;
   let max = -Infinity;
   for (let i = 0; i < heightField.length; i++) {
     if (heightField[i] < min) min = heightField[i];
     if (heightField[i] > max) max = heightField[i];
   }
+  if (lo != null && hi != null) [min, max] = [lo, hi];
   const range = Math.max(max - min, 1e-4);
   const colors = new Float32Array(heightField.length * 3);
   const rgb = [0, 0, 0];
@@ -855,9 +879,12 @@ const FACADE_COLOR = 0xd6cfc0;
 const TRUNK_COLOR = 0x5b4636;
 // 1x1 black height map: flat ground under the city model.
 const FLAT_HEIGHT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC";
-function buildCityGroup(buildings, trees, roofTexture, groundWidthM) {
-  const roof = { pos: [], nrm: [], uv: [], ranges: [] }; // ranges: [firstTri, endTri, building]
-  const wall = { pos: [], nrm: [], col: [], ranges: [] };
+function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
+  // hcol: the Height layer's colours (jet over 0..maxM metres), swapped in by setHeightMode
+  const roof = { pos: [], nrm: [], uv: [], hcol: [], ranges: [] }; // ranges: [firstTri, endTri, building]
+  const wall = { pos: [], nrm: [], col: [], hcol: [], ranges: [] };
+  const jet = [0, 0, 0];
+  const top = Math.max(maxM || 0, 1e-3);
   const facade = new THREE.Color(FACADE_COLOR);
   const wallColour = new THREE.Color();
   const toVec = ([u, v]) => new THREE.Vector2(-4 + 8 * u, 4 - 8 * v);
@@ -897,6 +924,7 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM) {
     const pos = g.attributes.position.array;
     const nrm = g.attributes.normal.array;
     const uv = g.attributes.uv.array;
+    heightToColor(b.h / top, jet);
     const roofStart = roof.pos.length / 9;
     const wallStart = wall.pos.length / 9;
     for (const group of g.groups) {
@@ -909,6 +937,7 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM) {
           target.nrm.push(nrm[k * 3], nrm[k * 3 + 1], nrm[k * 3 + 2]);
           if (isCap) target.uv.push(uv[k * 2], uv[k * 2 + 1]);
           else target.col.push(wallColour.r, wallColour.g, wallColour.b);
+          target.hcol.push(jet[0], jet[1], jet[2]);
         }
       }
     }
@@ -921,13 +950,12 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM) {
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(parts.pos, 3));
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(parts.nrm, 3));
     if (parts.uv) geometry.setAttribute("uv", new THREE.Float32BufferAttribute(parts.uv, 2));
-    if (parts.col) geometry.setAttribute("color", new THREE.Float32BufferAttribute(parts.col, 3));
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(parts.col ?? parts.hcol, 3));
     return geometry;
   };
-  const roofs = new THREE.Mesh(
-    makeGeometry(roof),
-    new THREE.MeshStandardMaterial({ map: roofTexture, roughness: 0.9, metalness: 0.02 }),
-  );
+  const photoRoof = new THREE.MeshStandardMaterial({ map: roofTexture, roughness: 0.9, metalness: 0.02 });
+  const heightRoof = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.02 });
+  const roofs = new THREE.Mesh(makeGeometry(roof), photoRoof);
   const walls = new THREE.Mesh(
     makeGeometry(wall),
     new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }),
@@ -957,6 +985,7 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM) {
     const m4 = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const colour = new THREE.Color();
+    const crownHeightColours = new Float32Array(trees.length * 3);
     trees.forEach((tree, i) => {
       const x = -4 + 8 * tree.u;
       const z = -4 + 8 * tree.v;
@@ -968,17 +997,31 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM) {
       crowns.setMatrixAt(i, m4);
       colour.setRGB(tree.c[0] / 255, tree.c[1] / 255, tree.c[2] / 255, THREE.SRGBColorSpace);
       crowns.setColorAt(i, colour);
+      heightToColor(tree.h / top, jet);
+      crownHeightColours.set(jet, i * 3);
       const tw = Math.max(0.15, tree.r * 0.1) * toWorld;
       m4.compose(new THREE.Vector3(x, base, z), q, new THREE.Vector3(tw, tree.h - rv, tw));
       trunks.setMatrixAt(i, m4);
     });
     meshes.push(crowns, trunks);
+    crowns.userData.colours = [Float32Array.from(crowns.instanceColor.array), crownHeightColours];
   }
   for (const m of meshes) {
     m.castShadow = true;
     m.receiveShadow = true;
     group.add(m);
   }
+  // Height layer: roofs, walls and crowns take the jet colour of their height; photo otherwise.
+  group.userData.setHeightMode = (on) => {
+    roofs.material = on ? heightRoof : photoRoof;
+    walls.geometry.attributes.color.array.set(on ? wall.hcol : wall.col);
+    walls.geometry.attributes.color.needsUpdate = true;
+    const crowns = meshes[2];
+    if (crowns?.userData.colours) {
+      crowns.instanceColor.array.set(crowns.userData.colours[on ? 1 : 0]);
+      crowns.instanceColor.needsUpdate = true;
+    }
+  };
   return group;
 }
 
@@ -1151,7 +1194,16 @@ function TerrainCanvas({
             exaggeration,
         );
       current.heightField = heightField;
-      current.heightColors = buildHeightColors(heightField);
+      // Uploads: colour = height above ground (nDSM metres, 0..max) in every mode, matching
+      // the legend and the city model; catalog previews keep the relative stretch.
+      // In the city model the ground is bare earth (0 m above itself): buildings and trees
+      // carry the colour, not a halo of their heights painted on the ground.
+      const ndsmMax = sample.ndsmMaxM ?? sample.maxM;
+      current.heightColors = sample.metricHeights && sample.buildings
+        ? buildHeightColors(new Float32Array(heightField.length), 0, ndsmMax)
+        : sample.metricHeights && current.probeField
+          ? buildHeightColors(current.probeField, 0, ndsmMax)
+          : buildHeightColors(heightField);
       current.shadeColors = buildWallShade(
         heightField,
         HEIGHT_SAMPLE_WIDTH,
@@ -1173,9 +1225,13 @@ function TerrainCanvas({
       const probeMax = sample.exactHeight ? sample.exactMaxM : sample.maxM;
       const scale = sample.metricHeights ? probeMax / 255 : 1 / 255;
       for (let i = 0; i < probe.length; i++) probe[i] = px[i * 4] * scale;
+      setProbeField(probe);
+    };
+    const setProbeField = (probe) => {
       state.current.probeField = probe;
       state.current.probeMetric = Boolean(sample.metricHeights);
       state.current.groundWidthM = sample.groundWidthM ?? 1024 * GAMUS_GSD_M;
+      state.current.groundHeightM = sample.groundHeightM ?? state.current.groundWidthM;
       const mid = Math.floor(HEIGHT_SAMPLE_HEIGHT / 2) * HEIGHT_SAMPLE_WIDTH;
       onProfile?.({
         values: Array.from(probe.subarray(mid, mid + HEIGHT_SAMPLE_WIDTH)),
@@ -1212,23 +1268,24 @@ function TerrainCanvas({
         HEIGHT_SAMPLE_WIDTH,
         HEIGHT_SAMPLE_HEIGHT,
       ).data;
+      // Uploads carry 16-bit grids (meshGrid/probeGrid/elevGrid); the 8-bit PNG is the fallback.
       const heightField = sample.metricHeights
         ? metricDisplayField(
-            px,
+            sample.meshGrid ?? pxToMetres(px, sample.maxM),
             HEIGHT_SAMPLE_WIDTH,
             HEIGHT_SAMPLE_HEIGHT,
-            sample.maxM,
             sample.groundWidthM,
           )
         : buildHeightField(px, HEIGHT_SAMPLE_WIDTH, HEIGHT_SAMPLE_HEIGHT);
       state.current.rawHeightField = heightField;
       // In city-model mode the mesh shows canopy only; the probe and profile
-      // still read the exact DSM, which is what the GeoTIFF export contains.
-      if (sample.exactHeight) loadPixels(sample.exactHeight, setProbe);
+      // still read the exact nDSM, which is what the GeoTIFF export contains.
+      if (sample.probeGrid) setProbeField(sample.probeGrid);
+      else if (sample.exactHeight) loadPixels(sample.exactHeight, setProbe);
       else setProbe(px);
       // Absolute elevation (exported DSM, metres above the geoid) for the probe.
-      state.current.elevField = null;
-      if (sample.elevation)
+      state.current.elevField = sample.elevGrid ?? null;
+      if (!sample.elevGrid && sample.elevation)
         loadPixels(sample.elevation.png, (dpx) => {
           const f = new Float32Array(HEIGHT_SAMPLE_WIDTH * HEIGHT_SAMPLE_HEIGHT);
           const { min_m: lo, relief_m: span } = sample.elevation;
@@ -1284,6 +1341,7 @@ function TerrainCanvas({
         sample.trees,
         roofTexture,
         sample.groundWidthM ?? 1024 * GAMUS_GSD_M,
+        sample.ndsmMaxM ?? sample.maxM,
       );
       city.scale.y =
         (exaggeration * 8) / (sample.groundWidthM ?? 1024 * GAMUS_GSD_M);
@@ -1474,9 +1532,11 @@ function TerrainCanvas({
       const row = Math.min(H - 2, Math.max(1, Math.round(((hit.point.z + 4) / 8) * (H - 1))));
       const f = s.probeField;
       const i = row * W + col;
-      const step = s.groundWidthM / (W - 1); // metres between samples
-      const dzdx = (f[i + 1] - f[i - 1]) / (2 * step);
-      const dzdy = (f[i + W] - f[i - W]) / (2 * step);
+      // Slope of the surface itself: the absolute DSM when georeferenced (terrain + objects),
+      // else the nDSM over flat ground. Sample spacing in metres along each axis.
+      const z = s.elevField ?? f;
+      const dzdx = (z[i + 1] - z[i - 1]) / ((2 * s.groundWidthM) / (W - 1));
+      const dzdy = (z[i + W] - z[i - W]) / ((2 * s.groundHeightM) / (H - 1));
       return {
         height: f[i],
         elevation: s.elevField ? s.elevField[i] : null,
@@ -1821,6 +1881,7 @@ function TerrainCanvas({
   useEffect(() => {
     const s = state.current;
     if (!s.mesh) return;
+    s.city?.userData.setHeightMode?.(layer === "depth");
     const colorAttr = s.mesh.geometry.attributes.color;
     if (layer === "depth") {
       // Dark blue-to-red heat map driven by the same smoothed height data
@@ -1946,9 +2007,15 @@ function App() {
   const viewSample = useMemo(() => {
     if (!sample) return sample;
     const terrain = sample.terrain; // georeferenced uploads only
+    // 16-bit grids (uploads): mesh relative to the same zero as its relief PNG, probe = nDSM,
+    // elevation = absolute DSM. Catalog scenes have none and use their PNGs.
+    const relative = (grid, lo) => grid && Float32Array.from(grid, (v) => v - lo);
+    const grids = { probeGrid: sample.ndsmGrid, elevGrid: terrain ? sample.dsmGrid : null };
     if (cityMode && sample.city)
       return {
         ...sample,
+        ...grids,
+        meshGrid: terrain ? relative(sample.groundGrid, terrain.ground.min_m) : null,
         // bare-earth terrain (or flat ground) under extruded buildings and trees
         height: terrain ? terrain.ground.png : FLAT_HEIGHT,
         maxM: terrain ? terrain.ground.relief_m : sample.maxM,
@@ -1963,13 +2030,15 @@ function App() {
       // exact surface of a GeoTIFF upload: the exported absolute DSM itself
       return {
         ...sample,
+        ...grids,
+        meshGrid: relative(sample.dsmGrid, terrain.dsm.min_m),
         height: terrain.dsm.png,
         maxM: terrain.dsm.relief_m,
         exactHeight: sample.height,
         exactMaxM: sample.maxM,
         elevation: terrain.dsm,
       };
-    return sample;
+    return sample.ndsmGrid ? { ...sample, ...grids, meshGrid: sample.ndsmGrid } : sample;
   }, [sample, cityMode]);
   const [waypointMode, setWaypointMode] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
@@ -2052,6 +2121,15 @@ function App() {
         // /api/estimate encodes height linearly: pixel/255 * max_m.
         metricHeights: true,
         maxM: data.max_m,
+        ndsmMaxM: data.max_m, // viewSample overrides maxM per mode; this stays the nDSM's
+        // 16-bit heights on the mesh grid, when the server sends a grid of the right size
+        ...(data.grids?.side === HEIGHT_SAMPLE_WIDTH && data.grids?.side === HEIGHT_SAMPLE_HEIGHT
+          ? {
+              ndsmGrid: decodeGrid(data.grids.ndsm),
+              groundGrid: decodeGrid(data.grids.ground),
+              dsmGrid: decodeGrid(data.grids.dsm),
+            }
+          : {}),
         groundWidthM: data.shape[1] * (data.gsd_m || GAMUS_GSD_M),
         groundHeightM: data.shape[0] * (data.gsd_m || GAMUS_GSD_M),
         areaKm2:
@@ -2398,18 +2476,25 @@ function App() {
             </div>
             <div className="viewport-footer">
               <div className="legend">
-                <span>
-                  <b className="swatch low" /> Low · 0 m
-                </span>
-                <span>
-                  <b className="swatch mid" /> Mid
-                  {shown.metricHeights
-                    ? ` · ${(shown.maxM / 2).toFixed(1)} m`
-                    : ""}
-                </span>
-                <span>
-                  <b className="swatch high" /> High · {shown.max}
-                </span>
+                {!sample ? null : layer === "depth" ? (
+                  // Same stops as the Height layer's colours (JET_STOPS), so they can't drift.
+                  <>
+                    <span>{shown.metricHeights ? "0 m" : "low"}</span>
+                    <b className="height-ramp" style={{ background: JET_CSS }} />
+                    <span>
+                      {shown.metricHeights ? `${(shown.ndsmMaxM ?? shown.maxM).toFixed(1)} m` : "high"}
+                    </span>
+                    <span className="legend-note">
+                      {shown.metricHeights ? "height above ground" : "relative height (LiDAR reference)"}
+                    </span>
+                  </>
+                ) : shown.metricHeights ? (
+                  <span>
+                    Height above ground 0–{(shown.ndsmMaxM ?? shown.maxM).toFixed(1)} m · Height layer shows it in colour
+                  </span>
+                ) : (
+                  <span>LiDAR reference heights, relative · Height layer shows them in colour</span>
+                )}
               </div>
               <div className="footer-note">
                 <Eye size={14} /> {shown.sourceLabel ?? "1024 × 1024 source"}{" "}

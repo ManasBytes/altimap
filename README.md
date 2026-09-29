@@ -112,7 +112,7 @@ uv pip install --python .venv-da3/bin/python -e . --no-deps
 #    absent, the stock RS3DAda weights are used)
 git clone https://github.com/JTRNEO/SynRS3D.git viewer/cache/SynRS3D
 .venv-da3/bin/python -c "from huggingface_hub import hf_hub_download; hf_hub_download('JTRNEO/RS3DAda', 'RS3DAda_vitl_DPT_height.pth', local_dir='viewer/cache/SynRS3D/pretrain')"
-# fine-tuned weights (private repo: `hf auth login` with an account that has access first)
+# fine-tuned weights, public: https://huggingface.co/Dilavesh/altimap-height
 .venv-da3/bin/python -c "from huggingface_hub import hf_hub_download; hf_hub_download('Dilavesh/altimap-height', 'best.pth', local_dir='viewer/cache')"
 
 # 3a. Batch CLI: images in, GeoTIFFs out

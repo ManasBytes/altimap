@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from viewer.geo import encode_rg16, fit_absolute_elevation, read_geo_meta
+from viewer.geo import encode_grid16, encode_rg16, fit_absolute_elevation, read_geo_meta
 from viewer.metrics import luminance, scene_metrics
 from viewer.terrain import build_terrain, height_field
 
@@ -252,6 +252,9 @@ async def upload(file: UploadFile = File(...), glb: bool = True):
     return JSONResponse(record)
 
 
+GRID_SIDE = 513  # the viewer's mesh vertices per side (HEIGHT_SAMPLE_WIDTH/HEIGHT in main.jsx)
+
+
 def _png_data_uri(arr: np.ndarray) -> str:
     import base64
     import io
@@ -464,6 +467,9 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
         ground_view = to_view(out["ground"])
         ground_zero = float(np.nanmin(ground_view))
         terrain = {"ground": relief_png(ground_view), "dsm": relief_png(to_view(out["dsm"]))}
+    grids = {"side": GRID_SIDE, "ndsm": encode_grid16(ndsm_filled, GRID_SIDE)}
+    if terrain is not None:
+        grids.update(ground=encode_grid16(out["ground"], GRID_SIDE), dsm=encode_grid16(out["dsm"], GRID_SIDE))
 
     # 3D city model for the viewer (display only; GeoTIFFs stay raw), built on a grid up to
     # 2x finer than the previews so footprints follow the buildings closely.
@@ -501,6 +507,7 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
         "classes": _png_data_uri(classes_to_rgb(classes)),
         "city": city,
         "terrain": terrain,
+        "grids": grids,
     }
 
 

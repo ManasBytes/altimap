@@ -103,3 +103,23 @@ def test_bboxes_intersect_detects_overlap_and_disjoint():
     assert bboxes_intersect(austin, overlapping) is True
     assert bboxes_intersect(austin, vienna) is False
     assert bboxes_intersect(austin, austin) is True
+
+
+def test_encode_grid16_keeps_millimetre_heights_on_the_mesh_grid():
+    import base64
+
+    from viewer.geo import encode_grid16
+
+    yy, xx = np.mgrid[0:1024, 0:768]
+    heights = (0.01 * xx + 0.02 * yy).astype(np.float32)  # a gentle slope, 0 to ~28 m
+    heights[:5, :5] = np.nan  # nodata corner
+    g = encode_grid16(heights, 513)
+    u16 = np.frombuffer(base64.b64decode(g["b64"]), "<u2").reshape(513, 513)
+    decoded = g["lo"] + u16 / 65535 * g["span"]  # what the viewer does
+    assert np.isfinite(decoded).all()
+    # centre sample of the grid vs the true slope there (pixel-centre aligned resampling)
+    r, c = (256 + 0.5) * 1024 / 513 - 0.5, (256 + 0.5) * 768 / 513 - 0.5
+    assert abs(decoded[256, 256] - (0.01 * c + 0.02 * r)) < 0.005
+    # neighbours differ by the real slope, not by an 8-bit step
+    step = np.diff(decoded[256, 250:260])
+    assert np.allclose(step, 0.01 * 768 / 513, atol=0.002)

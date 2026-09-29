@@ -177,16 +177,21 @@ per-scene building stretch, trees squashed). They are labelled "LiDAR reference 
 model output" in the UI; keep that label, and never present them as results. Uploads take the
 faithful path (`metricDisplayField`: metres at true scale, 3x3 median only). Clicking a building
 opens `.building-card` (height, ~floors, footprint m², roof elevation); it sits at `right: 370px`
-so it clears the inspector panel (it was hidden under it once). Known display gaps: the legend
-swatches don't match the Height layer's jet ramp, and for GeoTIFFs the legend shows the nDSM range
-while the mesh is coloured by ground/DSM elevation; the slope readout is quantised (~13° steps on
-flat ground) because heights reach the browser as 8-bit PNGs.
+so it clears the inspector panel (it was hidden under it once). For uploads the **Height layer
+always means height above ground** (jet over 0..nDSM max, `buildHeightColors(probeField, 0, max)`):
+the city model's roofs, walls and crowns switch to it (`setHeightMode`), and the city ground is
+uniform 0 m. The legend's gradient is built from the same `JET_STOPS` (`JET_CSS`), so it can't
+drift from the map. Heights for the mesh, probe, profile and slope come from `/api/estimate`'s
+`grids` (16-bit, `viewer/geo.py:encode_grid16`, 513x513 = `GRID_SIDE` = `HEIGHT_SAMPLE_*`; the
+8-bit PNGs stepped 0.1-0.3 m and quantised slope to ~13°); the PNGs remain the fallback and the
+layer textures. Slope is taken from the absolute DSM when georeferenced (terrain counts), else the
+nDSM.
 
 ### Models, weights and data (all under gitignored `viewer/cache/` unless noted)
 
 | What | Where it comes from |
 |---|---|
-| `viewer/cache/best.pth` — our fine-tuned RS3DAda (v1: test RMSE 5.02 m vs 7.25 m zero-shot) | HF **private** `Dilavesh/altimap-height` (`best.pth`; v2 results go to `v2/` when the overnight run uploads) |
+| `viewer/cache/best.pth` — our fine-tuned RS3DAda (v1: test RMSE 5.02 m vs 7.25 m zero-shot) | HF **public** [`Dilavesh/altimap-height`](https://huggingface.co/Dilavesh/altimap-height) (`best.pth`; v2 results go to `v2/` when the overnight run uploads). Its README is `docs/model-card.md`: edit there, re-upload as `README.md` |
 | `viewer/cache/SynRS3D/` — RS3DAda model code | `git clone https://github.com/JTRNEO/SynRS3D`, commit `ab5a485` |
 | `SynRS3D/pretrain/RS3DAda_vitl_DPT_height.pth` — stock weights, the server's fallback | HF `JTRNEO/RS3DAda` |
 | DINOv2 encoder code | `torch.hub` (`facebookresearch/dinov2`), fetched on first model load, cached in `~/.cache/torch/hub` |

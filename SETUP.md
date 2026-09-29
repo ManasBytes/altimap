@@ -58,16 +58,18 @@ git -C viewer/cache/SynRS3D checkout ab5a485
 .venv-da3/bin/python -c "from huggingface_hub import hf_hub_download; \
 hf_hub_download('JTRNEO/RS3DAda', 'RS3DAda_vitl_DPT_height.pth', local_dir='viewer/cache/SynRS3D/pretrain')"
 
-# Our fine-tuned weights (1.5 GB). The repo is PRIVATE: ask Dilavesh to add your Hugging Face
-# account, then log in once (paste a read token from https://huggingface.co/settings/tokens)
-.venv-da3/bin/hf auth login
+# Our fine-tuned weights (public, 1.5 GB, no login needed):
+# https://huggingface.co/Dilavesh/altimap-height
 .venv-da3/bin/python -c "from huggingface_hub import hf_hub_download; \
 hf_hub_download('Dilavesh/altimap-height', 'best.pth', local_dir='viewer/cache')"
 ```
 
 The server uses `viewer/cache/best.pth` if it exists, else the stock weights. It also honours
 `ALTIMAP_HEIGHT_CKPT=/path/to/ckpt.pth`. The fine-tuned model is much better (test RMSE 5.02 m
-vs 7.25 m zero-shot, see README), so get access rather than running on the fallback.
+vs 7.25 m zero-shot, see README), so don't run on the fallback. The model card at
+https://huggingface.co/Dilavesh/altimap-height has the architecture, results, known limitations
+and licence (MIT, crediting RS3DAda and GAMUS); its source is `docs/model-card.md`. When the v2
+training run finishes, its weights appear under `v2/` in the same repo.
 
 The DINOv2 encoder code is fetched by `torch.hub` from GitHub the first time a model loads, then
 cached in `~/.cache/torch/hub`. After that the app runs offline, except for GeoTIFF uploads,
