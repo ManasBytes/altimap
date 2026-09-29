@@ -469,6 +469,8 @@ footer {
   font: 11px/1.5 "IBM Plex Mono";
 }
 .upload-dropzone {
+  width: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -489,6 +491,60 @@ footer {
 .upload-dropzone:disabled {
   opacity: 0.6;
   cursor: wait;
+}
+.upload-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.upload-options label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #8ea5b5;
+  font: 10px "IBM Plex Mono";
+}
+.upload-options input[type="number"] {
+  padding: 7px 9px;
+  border: 1px solid #2b4a5f;
+  border-radius: 7px;
+  background: #0a1825;
+  color: #cfe3ee;
+  font: 11px "IBM Plex Mono";
+}
+.upload-reference {
+  padding: 8px 10px;
+  border: 1px dashed #2b4a5f;
+  border-radius: 7px;
+  background: transparent;
+  color: #8ea5b5;
+  font: 10px "IBM Plex Mono";
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.upload-reference:hover {
+  border-color: #3f7a9a;
+  color: #cfe3ee;
+}
+.download-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.download-row a {
+  padding: 7px 10px;
+  border: 1px solid #2b4a5f;
+  border-radius: 7px;
+  background: #0d1f30;
+  color: #cfe3ee;
+  font: 10px "IBM Plex Mono";
+  text-decoration: none;
+}
+.download-row a:hover {
+  border-color: #3f7a9a;
 }
 .upload-error {
   padding: 10px 12px;
@@ -514,4 +570,163 @@ footer {
   flex: 1;
   text-transform: capitalize;
   color: #8ea5b5;
+}
+.empty-viewport {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: #8ea5b5;
+  font: 11px/1.5 "IBM Plex Mono";
+  text-align: center;
+}
+.empty-viewport strong {
+  color: #cfe3ee;
+  font-size: 14px;
+}
+.empty-viewport span {
+  max-width: 320px;
+}
+.empty-viewport button {
+  margin-top: 6px;
+  padding: 9px 16px;
+  border: 1px solid #3f7a9a;
+  border-radius: 8px;
+  background: #0d1f30;
+  color: #cfe3ee;
+  font: 11px "IBM Plex Mono";
+  cursor: pointer;
+}
+.empty-viewport button:hover {
+  background: #12304a;
+}
+.upload-reference-row {
+  display: flex;
+  gap: 6px;
+}
+.upload-reference-row .upload-reference {
+  flex: 1;
+  min-width: 0;
+}
+.upload-reference-clear {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  border: 1px solid #2b4a5f;
+  border-radius: 7px;
+  background: transparent;
+  color: #8ea5b5;
+  cursor: pointer;
+}
+.upload-reference-clear:hover {
+  color: #ffb3bf;
+  border-color: #7a2a3a;
+}
+.quality-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #8ea5b5;
+  font: 10px "IBM Plex Mono";
+}
+.quality-row .segmented {
+  display: flex;
+  gap: 4px;
+}
+.quality-row .segmented button {
+  padding: 5px 12px;
+  border: 1px solid #2b4a5f;
+  border-radius: 6px;
+  background: transparent;
+  color: #8ea5b5;
+  font: 10px "IBM Plex Mono";
+  cursor: pointer;
+}
+.quality-row .segmented button.selected {
+  background: #12304a;
+  border-color: #3f7a9a;
+  color: #cfe3ee;
+}
+.progress-track {
+  display: block;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: #16293a;
+  overflow: hidden;
+}
+.progress-fill {
+  display: block;
+  height: 100%;
+  background: #8bd2c4;
+  transition: width 0.35s ease;
+}
+.processing-overlay {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, 80%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 20px;
+  border: 1px solid #2b4a5f;
+  border-radius: 12px;
+  background: rgba(8, 20, 31, 0.92);
+  color: #cfe3ee;
+  font: 11px "IBM Plex Mono";
+  backdrop-filter: blur(6px);
+}
+.processing-overlay span {
+  color: #8ea5b5;
+}
+.processing-overlay small {
+  align-self: flex-end;
+  color: #8bd2c4;
+}
+.building-card {
+  position: absolute;
+  z-index: 4;
+  right: 24px;
+  top: 104px;
+  width: 230px;
+  padding: 12px 14px;
+  border: 1px solid #2b4a5f;
+  border-radius: 10px;
+  background: rgba(8, 20, 31, 0.9);
+  color: #cfe3ee;
+  font: 11px "IBM Plex Mono";
+  backdrop-filter: blur(6px);
+}
+.building-card .label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.building-card .label-row button {
+  border: 0;
+  background: transparent;
+  color: #8ea5b5;
+  cursor: pointer;
+}
+.building-card dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 10px;
+  margin: 10px 0 0;
+}
+.building-card dt {
+  color: #8ea5b5;
+}
+.building-card dd {
+  margin: 0;
+  text-align: right;
+  color: #7ff0d8;
 }

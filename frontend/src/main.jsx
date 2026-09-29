@@ -22,11 +22,12 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
+import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import "./styles.css";
 import "./light.css";
 import "./enhancements.css";
@@ -372,12 +373,21 @@ const curatedBuildingCoverage = {
   "test:DC_20_23": 0,
   "test:DC_20_25": 7.6,
 };
+const GAMUS_CITIES = { DC: "Washington DC", PHL: "Philadelphia", NYC: "New York" };
+const GAMUS_GSD_M = 0.33;
 const displayedScenes = [...curatedScenes, ...gamusScenes].map((scene) => {
   const buildingCoverage =
     scene.buildingCoverage ??
     curatedBuildingCoverage[`${scene.split}:${scene.id}`];
+  const city = GAMUS_CITIES[scene.id.split("_")[0]] ?? "GAMUS";
   return {
     ...scene,
+    // Provenance, not invented coordinates: these are GAMUS aerial tiles.
+    coord: `GAMUS · ${city} · ${scene.split} tile · ${GAMUS_GSD_M} m/px`,
+    groundWidthM: 1024 * GAMUS_GSD_M,
+    // Preview JPEGs are non-linearly encoded, so pixel -> metres is not
+    // recoverable; the probe reports metres only for uploads (linear encoding).
+    metricHeights: false,
     rgb: scene.rgb || `/${scene.split}-${scene.id}-rgb.jpg`,
     height: scene.height || `/${scene.split}-${scene.id}-height.jpg`,
     depth: scene.depth || `/${scene.split}-${scene.id}-depth.jpg`,
@@ -387,9 +397,15 @@ const displayedScenes = [...curatedScenes, ...gamusScenes].map((scene) => {
     urban: scene.urban ?? (buildingCoverage != null && buildingCoverage >= 20),
   };
 });
-const initialSample =
-  displayedScenes.find((scene) => scene.id === samples.train.id) ||
-  displayedScenes[0];
+// Nothing is preloaded: the workspace starts empty until imagery is imported or
+// a catalog scene is picked. Text fields fall back to this placeholder.
+const EMPTY_SAMPLE = {
+  id: "",
+  label: "No imagery loaded",
+  coord: "Import a PNG, JPG or GeoTIFF to begin",
+  max: "—",
+  sourceLabel: "no source",
+};
 const urbanScenes = displayedScenes.filter((scene) => scene.urban);
 const otherScenes = displayedScenes.filter((scene) => !scene.urban);
 
@@ -503,6 +519,44 @@ function buildHeightField(px, width, height) {
   const cap = Float32Array.from(smoothed).sort()[Math.floor(size * 0.985)];
   for (let i = 0; i < size; i++) if (smoothed[i] > cap) smoothed[i] = cap;
   return smoothed;
+}
+
+// Uploads: the model's own metric heights, drawn faithfully. Only a 3x3 median
+// against single-pixel speckle; no blur, cap or discontinuity limiting, since
+// those erode walls into mounds and break projection accuracy. Scaled so world
+// y = metres * (8 / ground width): at exaggeration 1x the relief is true scale.
+function metricDisplayField(px, width, height, maxM, groundWidthM) {
+  const metres = new Float32Array(width * height);
+  for (let i = 0; i < metres.length; i++) metres[i] = (px[i * 4] / 255) * maxM;
+  const clean = medianFilter(metres, width, height, 1);
+  const toField = 8 / groundWidthM / HEIGHT_WORLD_SCALE;
+  for (let i = 0; i < clean.length; i++)
+    clean[i] = TERRAIN_BASELINE + clean[i] * toField;
+  return clean;
+}
+
+// Steep faces (building walls) get darker vertex colours. A single overhead
+// photo has no facade pixels, so walls otherwise show roof-edge texture
+// smeared downwards; shading them reads as a facade instead. Slope is taken at
+// true 1x scale so the shading does not shift with the exaggeration slider.
+function buildWallShade(field, width, height) {
+  const out = new Float32Array(field.length * 3);
+  const step = 8 / (width - 1); // world units between samples
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      const xl = x > 0 ? i - 1 : i;
+      const xr = x < width - 1 ? i + 1 : i;
+      const yu = y > 0 ? i - width : i;
+      const yd = y < height - 1 ? i + width : i;
+      const gx = ((field[xr] - field[xl]) * HEIGHT_WORLD_SCALE) / ((xr - xl) * step || 1);
+      const gy = ((field[yd] - field[yu]) * HEIGHT_WORLD_SCALE) / (((yd - yu) / width) * step || 1);
+      const slope = Math.hypot(gx, gy); // rise over run; 1 = 45 degrees
+      const shade = 1 - 0.45 * Math.min(1, Math.max(0, (slope - 1) / 2));
+      out[i * 3] = out[i * 3 + 1] = out[i * 3 + 2] = shade;
+    }
+  }
+  return out;
 }
 
 function buildClassField(px, width, height) {
@@ -790,18 +844,217 @@ function resolveWaypointHit(hit) {
   return obj;
 }
 
+// 3D city model: every footprint from /api/estimate (normalized u,v rings +
+// height in metres) becomes a real extruded block. Roofs sample the photo at
+// their own ground position; walls get a plain lit facade material, since a
+// single overhead image has no facade pixels. All roofs and all walls are
+// merged into two meshes (two draw calls). Built in metres; the group's y scale
+// maps metres to world units, so exaggeration is one scale change.
+const FACADE_COLOR = 0xd6cfc0;
+const TRUNK_COLOR = 0x5b4636;
+// 1x1 black height map: flat ground under the city model.
+const FLAT_HEIGHT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC";
+function buildCityGroup(buildings, trees, roofTexture, groundWidthM) {
+  const roof = { pos: [], nrm: [], uv: [], ranges: [] }; // ranges: [firstTri, endTri, building]
+  const wall = { pos: [], nrm: [], col: [], ranges: [] };
+  const facade = new THREE.Color(FACADE_COLOR);
+  const wallColour = new THREE.Color();
+  const toVec = ([u, v]) => new THREE.Vector2(-4 + 8 * u, 4 - 8 * v);
+  const uvGenerator = {
+    generateTopUV(_geometry, vertices, a, b, c) {
+      const uv = (i) =>
+        new THREE.Vector2((vertices[i * 3] + 4) / 8, (vertices[i * 3 + 1] + 4) / 8);
+      return [uv(a), uv(b), uv(c)];
+    },
+    generateSideWallUV() {
+      return [0, 1, 2, 3].map(() => new THREE.Vector2());
+    },
+  };
+  for (let bi = 0; bi < buildings.length; bi++) {
+    const b = buildings[bi];
+    let g;
+    try {
+      const shape = new THREE.Shape(b.rings[0].map(toVec));
+      for (const hole of b.rings.slice(1))
+        shape.holes.push(new THREE.Path(hole.map(toVec)));
+      // Base = lowest ground under the footprint, top = median ground + height (metres).
+      g = new THREE.ExtrudeGeometry(shape, {
+        depth: Math.max(0.5, (b.t ?? b.h) - (b.b ?? 0)),
+        bevelEnabled: false,
+        UVGenerator: uvGenerator,
+      });
+    } catch {
+      continue; // a degenerate footprint should not take the whole model down
+    }
+    g.rotateX(-Math.PI / 2); // extrusion axis -> world up; shape y -> image rows
+    g.translate(0, b.b ?? 0, 0);
+    // Walls take the building's own roof colour, softened toward a neutral facade.
+    const c = b.c ?? [200, 195, 185];
+    wallColour
+      .setRGB(c[0] / 255, c[1] / 255, c[2] / 255, THREE.SRGBColorSpace)
+      .lerp(facade, 0.45);
+    const pos = g.attributes.position.array;
+    const nrm = g.attributes.normal.array;
+    const uv = g.attributes.uv.array;
+    const roofStart = roof.pos.length / 9;
+    const wallStart = wall.pos.length / 9;
+    for (const group of g.groups) {
+      const isCap = group.materialIndex === 0;
+      const target = isCap ? roof : wall;
+      for (let t = group.start; t < group.start + group.count; t += 3) {
+        if (isCap && nrm[t * 3 + 1] < 0) continue; // bottom cap faces the ground: never visible
+        for (let k = t; k < t + 3; k++) {
+          target.pos.push(pos[k * 3], pos[k * 3 + 1], pos[k * 3 + 2]);
+          target.nrm.push(nrm[k * 3], nrm[k * 3 + 1], nrm[k * 3 + 2]);
+          if (isCap) target.uv.push(uv[k * 2], uv[k * 2 + 1]);
+          else target.col.push(wallColour.r, wallColour.g, wallColour.b);
+        }
+      }
+    }
+    g.dispose();
+    roof.ranges.push([roofStart, roof.pos.length / 9, bi]);
+    wall.ranges.push([wallStart, wall.pos.length / 9, bi]);
+  }
+  const makeGeometry = (parts) => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(parts.pos, 3));
+    geometry.setAttribute("normal", new THREE.Float32BufferAttribute(parts.nrm, 3));
+    if (parts.uv) geometry.setAttribute("uv", new THREE.Float32BufferAttribute(parts.uv, 2));
+    if (parts.col) geometry.setAttribute("color", new THREE.Float32BufferAttribute(parts.col, 3));
+    return geometry;
+  };
+  const roofs = new THREE.Mesh(
+    makeGeometry(roof),
+    new THREE.MeshStandardMaterial({ map: roofTexture, roughness: 0.9, metalness: 0.02 }),
+  );
+  const walls = new THREE.Mesh(
+    makeGeometry(wall),
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }),
+  );
+  roofs.userData.ranges = roof.ranges;
+  walls.userData.ranges = wall.ranges;
+  const group = new THREE.Group();
+  const meshes = [roofs, walls];
+  // Trees: one instanced crown + trunk per detected tree, crown coloured from
+  // the photo. x/z are world units (metres * 8 / ground width); y is metres,
+  // like the buildings, so the group's y scale applies to both.
+  if (trees?.length) {
+    const toWorld = 8 / groundWidthM;
+    const crownGeo = new THREE.IcosahedronGeometry(1, 1);
+    const trunkGeo = new THREE.CylinderGeometry(1, 1, 1, 6);
+    trunkGeo.translate(0, 0.5, 0); // base at y = 0
+    const crowns = new THREE.InstancedMesh(
+      crownGeo,
+      new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }),
+      trees.length,
+    );
+    const trunks = new THREE.InstancedMesh(
+      trunkGeo,
+      new THREE.MeshStandardMaterial({ color: TRUNK_COLOR, roughness: 1 }),
+      trees.length,
+    );
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const colour = new THREE.Color();
+    trees.forEach((tree, i) => {
+      const x = -4 + 8 * tree.u;
+      const z = -4 + 8 * tree.v;
+      const rv = Math.min(tree.r, tree.h * 0.38); // crown half-height: crown fills the top ~3/4
+      const rw = tree.r * toWorld; // crown radius, world units
+      const base = tree.b ?? 0; // ground at the trunk, metres
+      m4.compose(new THREE.Vector3(x, base + tree.h - rv, z), q, new THREE.Vector3(rw, rv, rw));
+      crowns.setMatrixAt(i, m4);
+      colour.setRGB(tree.c[0] / 255, tree.c[1] / 255, tree.c[2] / 255, THREE.SRGBColorSpace);
+      crowns.setColorAt(i, colour);
+      const tw = Math.max(0.15, tree.r * 0.1) * toWorld;
+      m4.compose(new THREE.Vector3(x, base, z), q, new THREE.Vector3(tw, tree.h - rv, tw));
+      trunks.setMatrixAt(i, m4);
+    });
+    meshes.push(crowns, trunks);
+  }
+  for (const m of meshes) {
+    m.castShadow = true;
+    m.receiveShadow = true;
+    group.add(m);
+  }
+  return group;
+}
+
+// Outline of one extruded building (same placement as buildCityGroup), for highlighting a pick.
+function buildingOutline(b) {
+  const toVec = ([u, v]) => new THREE.Vector2(-4 + 8 * u, 4 - 8 * v);
+  const shape = new THREE.Shape(b.rings[0].map(toVec));
+  for (const hole of b.rings.slice(1)) shape.holes.push(new THREE.Path(hole.map(toVec)));
+  const g = new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(0.5, (b.t ?? b.h) - (b.b ?? 0)),
+    bevelEnabled: false,
+  });
+  g.rotateX(-Math.PI / 2);
+  g.translate(0, b.b ?? 0, 0);
+  const edges = new THREE.EdgesGeometry(g, 20);
+  g.dispose();
+  const lines = new THREE.LineSegments(
+    edges,
+    new THREE.LineBasicMaterial({ color: 0x7ff0d8, depthTest: false, transparent: true }),
+  );
+  lines.renderOrder = 10;
+  return lines;
+}
+
+// Footprint area in m² (outer ring minus holes), u/v scaled to the ground extent.
+function footprintAreaM2(b, widthM, heightM) {
+  const ring = (r) => {
+    let s = 0;
+    for (let i = 0; i < r.length; i++) {
+      const [u1, v1] = r[i];
+      const [u2, v2] = r[(i + 1) % r.length];
+      s += u1 * widthM * (v2 * heightM) - u2 * widthM * (v1 * heightM);
+    }
+    return Math.abs(s) / 2;
+  };
+  return ring(b.rings[0]) - b.rings.slice(1).reduce((a, r) => a + ring(r), 0);
+}
+
+// Real height profile along the scene's centre row: SVG paths + stats.
+// Metres for uploads, % of scene max for non-linear preview tiles.
+function profileStats(profile) {
+  const v = profile?.values;
+  if (!v?.length) return null;
+  let min = Infinity;
+  let max = -Infinity;
+  let sum = 0;
+  for (const x of v) {
+    if (x < min) min = x;
+    if (x > max) max = x;
+    sum += x;
+  }
+  const range = Math.max(max - min, 1e-6);
+  const pts = v.map(
+    (x, i) =>
+      `${((i / (v.length - 1)) * 300).toFixed(1)},${(65 - ((x - min) / range) * 60).toFixed(1)}`,
+  );
+  const line = `M${pts.join(" L")}`;
+  const fmt = profile.metric
+    ? (x) => `${x.toFixed(1)} m`
+    : (x) => `${(x * 100).toFixed(0)}%`;
+  return { line, area: `${line} V70 H0Z`, min, max, avg: sum / v.length, fmt };
+}
+
 function TerrainCanvas({
   sample,
   exaggeration,
   layer,
   resetToken,
   onMeasure,
+  onProfile,
   waypointMode,
   pathCommand,
   onWaypointChange,
   onWaypointSelect,
   onPathEnd,
   autoRotate,
+  onBuildingPick,
+  exportRef,
 }) {
   const ref = useRef(null);
   const state = useRef({});
@@ -851,6 +1104,15 @@ function TerrainCanvas({
     scene.add(new THREE.HemisphereLight(0x9bc9d0, 0x172333, 1.7));
     const sun = new THREE.DirectionalLight(0xf7e4ba, 2.5);
     sun.position.set(-3, 6, 4);
+    // Sun shadows: buildings and canopy shade the ground, which is what makes
+    // relief readable from above.
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 0.5, far: 20 });
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.02;
     scene.add(sun);
     const grid = new THREE.GridHelper(9, 18, 0x315263, 0x1b3040);
     grid.position.y = -0.55;
@@ -868,12 +1130,16 @@ function TerrainCanvas({
     const updateGeometry = () => {
       const current = state.current;
       if (!current.rawHeightField) return;
-      const heightField = applyClassHeightScale(
-        current.rawHeightField,
-        current.classField,
-        HEIGHT_SAMPLE_WIDTH,
-        HEIGHT_SAMPLE_HEIGHT,
-      );
+      // Class-based rescaling is a display heuristic for the lossy catalog
+      // previews; uploads keep the model's metric heights unaltered.
+      const heightField = sample.metricHeights
+        ? current.rawHeightField
+        : applyClassHeightScale(
+            current.rawHeightField,
+            current.classField,
+            HEIGHT_SAMPLE_WIDTH,
+            HEIGHT_SAMPLE_HEIGHT,
+          );
       const pos = geo.attributes.position;
       for (let i = 0; i < pos.count; i++)
         pos.setY(
@@ -884,14 +1150,47 @@ function TerrainCanvas({
         );
       current.heightField = heightField;
       current.heightColors = buildHeightColors(heightField);
+      current.shadeColors = buildWallShade(
+        heightField,
+        HEIGHT_SAMPLE_WIDTH,
+        HEIGHT_SAMPLE_HEIGHT,
+      );
       current.exaggeration = exaggeration;
       pos.needsUpdate = true;
       geo.computeVertexNormals();
-      if (layerRef.current === "depth") {
-        geo.attributes.color.array.set(current.heightColors);
-        geo.attributes.color.needsUpdate = true;
-      }
+      geo.attributes.color.array.set(
+        layerRef.current === "depth" ? current.heightColors : current.shadeColors,
+      );
+      geo.attributes.color.needsUpdate = true;
       current.renderDirty = true;
+    };
+    // Probe copy of the heights, untouched by any display smoothing:
+    // metres for uploads (linear encoding), 0..1 relative for previews.
+    const setProbe = (px) => {
+      const probe = new Float32Array(HEIGHT_SAMPLE_WIDTH * HEIGHT_SAMPLE_HEIGHT);
+      const probeMax = sample.exactHeight ? sample.exactMaxM : sample.maxM;
+      const scale = sample.metricHeights ? probeMax / 255 : 1 / 255;
+      for (let i = 0; i < probe.length; i++) probe[i] = px[i * 4] * scale;
+      state.current.probeField = probe;
+      state.current.probeMetric = Boolean(sample.metricHeights);
+      state.current.groundWidthM = sample.groundWidthM ?? 1024 * GAMUS_GSD_M;
+      const mid = Math.floor(HEIGHT_SAMPLE_HEIGHT / 2) * HEIGHT_SAMPLE_WIDTH;
+      onProfile?.({
+        values: Array.from(probe.subarray(mid, mid + HEIGHT_SAMPLE_WIDTH)),
+        metric: Boolean(sample.metricHeights),
+      });
+    };
+    const loadPixels = (url, done) => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement("canvas");
+        c.width = HEIGHT_SAMPLE_WIDTH;
+        c.height = HEIGHT_SAMPLE_HEIGHT;
+        const context = c.getContext("2d");
+        context.drawImage(img, 0, 0, HEIGHT_SAMPLE_WIDTH, HEIGHT_SAMPLE_HEIGHT);
+        done(context.getImageData(0, 0, HEIGHT_SAMPLE_WIDTH, HEIGHT_SAMPLE_HEIGHT).data);
+      };
+      img.src = url;
     };
     const height = tex.load(sample.height, (loaded) => {
       const c = document.createElement("canvas");
@@ -911,12 +1210,29 @@ function TerrainCanvas({
         HEIGHT_SAMPLE_WIDTH,
         HEIGHT_SAMPLE_HEIGHT,
       ).data;
-      const heightField = buildHeightField(
-        px,
-        HEIGHT_SAMPLE_WIDTH,
-        HEIGHT_SAMPLE_HEIGHT,
-      );
+      const heightField = sample.metricHeights
+        ? metricDisplayField(
+            px,
+            HEIGHT_SAMPLE_WIDTH,
+            HEIGHT_SAMPLE_HEIGHT,
+            sample.maxM,
+            sample.groundWidthM,
+          )
+        : buildHeightField(px, HEIGHT_SAMPLE_WIDTH, HEIGHT_SAMPLE_HEIGHT);
       state.current.rawHeightField = heightField;
+      // In city-model mode the mesh shows canopy only; the probe and profile
+      // still read the exact DSM, which is what the GeoTIFF export contains.
+      if (sample.exactHeight) loadPixels(sample.exactHeight, setProbe);
+      else setProbe(px);
+      // Absolute elevation (exported DSM, metres above the geoid) for the probe.
+      state.current.elevField = null;
+      if (sample.elevation)
+        loadPixels(sample.elevation.png, (dpx) => {
+          const f = new Float32Array(HEIGHT_SAMPLE_WIDTH * HEIGHT_SAMPLE_HEIGHT);
+          const { min_m: lo, relief_m: span } = sample.elevation;
+          for (let i = 0; i < f.length; i++) f[i] = lo + (dpx[i * 4] / 255) * span;
+          state.current.elevField = f;
+        });
       updateGeometry();
     });
     const classTexture = tex.load(sample.classes, (loaded) => {
@@ -953,7 +1269,86 @@ function TerrainCanvas({
       wireframe: false,
     });
     const mesh = new THREE.Mesh(geo, material);
+    mesh.receiveShadow = true;
+    mesh.castShadow = true;
     scene.add(mesh);
+    let city = null;
+    let roofTexture = null;
+    if (sample.buildings) {
+      roofTexture = tex.load(sample.rgb);
+      roofTexture.colorSpace = THREE.SRGBColorSpace;
+      city = buildCityGroup(
+        sample.buildings,
+        sample.trees,
+        roofTexture,
+        sample.groundWidthM ?? 1024 * GAMUS_GSD_M,
+      );
+      city.scale.y =
+        (exaggeration * 8) / (sample.groundWidthM ?? 1024 * GAMUS_GSD_M);
+      scene.add(city);
+    }
+    const pickable = city ? [mesh, ...city.children] : [mesh];
+    // Click a building: outline it and report its facts (uses the raycaster set by the click).
+    let outline = null;
+    const clearOutline = () => {
+      if (!outline) return;
+      city.remove(outline);
+      outline.geometry.dispose();
+      outline.material.dispose();
+      outline = null;
+    };
+    const pickBuilding = () => {
+      if (!city) return;
+      const hit = raycaster.intersectObjects(city.children)[0];
+      const ranges = hit?.object.userData.ranges;
+      const found = ranges?.find(([a, z]) => hit.faceIndex >= a && hit.faceIndex < z);
+      clearOutline();
+      if (!found) {
+        onBuildingPick?.(null);
+        state.current.renderDirty = true;
+        return;
+      }
+      const b = sample.buildings[found[2]];
+      outline = buildingOutline(b);
+      city.add(outline);
+      const widthM = sample.groundWidthM ?? 1024 * GAMUS_GSD_M;
+      onBuildingPick?.({
+        height: b.h,
+        floors: Math.max(1, Math.round(b.h / 3.2)),
+        areaM2: footprintAreaM2(b, widthM, sample.groundHeightM ?? widthM),
+        roofElevation: sample.groundMinM != null ? sample.groundMinM + (b.t ?? b.h) : null,
+      });
+      state.current.renderDirty = true;
+    };
+    // Export the current 3D model (terrain + city) as binary glTF in metres.
+    if (exportRef)
+      exportRef.current = (filename) =>
+        new Promise((resolve, reject) => {
+          const gw = sample.groundWidthM ?? 1024 * GAMUS_GSD_M;
+          const exag = state.current.exaggeration || 1;
+          const wrap = new THREE.Group();
+          wrap.scale.set(gw / 8, gw / (8 * exag), gw / 8); // world units -> metres
+          wrap.add(mesh.clone());
+          if (city) {
+            const c = city.clone();
+            c.children.filter((o) => o.isLineSegments).forEach((o) => c.remove(o));
+            wrap.add(c);
+          }
+          new GLTFExporter().parse(
+            wrap,
+            (glb) => {
+              const url = URL.createObjectURL(new Blob([glb], { type: "model/gltf-binary" }));
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = filename;
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(url), 2000);
+              resolve();
+            },
+            reject,
+            { binary: true, maxTextureSize: 4096 },
+          );
+        });
     const waypointGroup = new THREE.Group();
     scene.add(waypointGroup);
     state.current = {
@@ -962,6 +1357,7 @@ function TerrainCanvas({
       renderer,
       controls,
       mesh,
+      city,
       tex,
       height,
       classTexture,
@@ -1058,6 +1454,38 @@ function TerrainCanvas({
       onWaypointChange(state.current.waypoints.length);
     };
     state.current.deleteWaypoint = deleteWaypoint;
+    // Height + slope under the cursor, read from the probe field at the exact
+    // mesh intersection (uv), so it matches what is drawn at that spot.
+    state.current.measureAt = (event) => {
+      const s = state.current;
+      if (!s.probeField) return null;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObjects(pickable)[0];
+      if (!hit) return null;
+      const W = HEIGHT_SAMPLE_WIDTH;
+      const H = HEIGHT_SAMPLE_HEIGHT;
+      // World x, z in [-4, 4] map to image column, row (row 0 at z = -4).
+      const col = Math.min(W - 2, Math.max(1, Math.round(((hit.point.x + 4) / 8) * (W - 1))));
+      const row = Math.min(H - 2, Math.max(1, Math.round(((hit.point.z + 4) / 8) * (H - 1))));
+      const f = s.probeField;
+      const i = row * W + col;
+      const step = s.groundWidthM / (W - 1); // metres between samples
+      const dzdx = (f[i + 1] - f[i - 1]) / (2 * step);
+      const dzdy = (f[i + W] - f[i - W]) / (2 * step);
+      return {
+        height: f[i],
+        elevation: s.elevField ? s.elevField[i] : null,
+        slopeDeg: s.probeMetric
+          ? (Math.atan(Math.hypot(dzdx, dzdy)) * 180) / Math.PI
+          : null,
+        metric: s.probeMetric,
+        row,
+        col,
+      };
+    };
     transform.addEventListener("objectChange", () => {
       const marker = transform.object;
       if (!marker || marker.userData.waypointIndex === undefined) return;
@@ -1082,6 +1510,19 @@ function TerrainCanvas({
       }
       if (!waypointModeRef.current) {
         deselectMarker();
+        pickBuilding();
+        return;
+      }
+      const roofHit = city ? raycaster.intersectObjects(city.children)[0] : null;
+      if (roofHit) {
+        // Clicked a building: put the waypoint on its roof.
+        const onRoof = roofHit.point.clone();
+        state.current.waypoints.push(onRoof);
+        const roofMarker = createWaypointMarker(state.current.waypoints.length - 1, onRoof);
+        waypointGroup.add(roofMarker);
+        rebuildWaypointLine();
+        selectMarker(roofMarker);
+        onWaypointChange(state.current.waypoints.length);
         return;
       }
       const point = raycaster.ray.intersectPlane(groundPlane, groundPoint);
@@ -1098,7 +1539,8 @@ function TerrainCanvas({
           HEIGHT_SAMPLE_HEIGHT - 1,
           Math.max(
             0,
-            Math.round(((4 - point.z) / 8) * (HEIGHT_SAMPLE_HEIGHT - 1)),
+            // PlaneGeometry row 0 (image top) sits at z = -4 after rotateX(-PI/2)
+            Math.round(((point.z + 4) / 8) * (HEIGHT_SAMPLE_HEIGHT - 1)),
           ),
         );
         const heightValue =
@@ -1304,6 +1746,13 @@ function TerrainCanvas({
       transform.dispose();
       geo.dispose();
       material.dispose();
+      if (city)
+        city.children.forEach((m) => {
+          m.geometry.dispose();
+          m.material.dispose();
+        });
+      roofTexture?.dispose();
+      if (exportRef) exportRef.current = null;
       if (material.map && material.map !== height) material.map.dispose();
       height.dispose();
       classTexture.dispose();
@@ -1386,7 +1835,8 @@ function TerrainCanvas({
       return;
     }
     if (colorAttr) {
-      colorAttr.array.fill(1);
+      if (s.shadeColors) colorAttr.array.set(s.shadeColors);
+      else colorAttr.array.fill(1);
       colorAttr.needsUpdate = true;
     }
     const source =
@@ -1416,6 +1866,9 @@ function TerrainCanvas({
       );
     p.needsUpdate = true;
     m.geometry.computeVertexNormals();
+    if (state.current.city)
+      state.current.city.scale.y =
+        (exaggeration * 8) / (state.current.groundWidthM ?? 1024 * GAMUS_GSD_M);
     state.current.exaggeration = exaggeration;
     state.current.renderDirty = true;
   }, [exaggeration]);
@@ -1435,17 +1888,17 @@ function TerrainCanvas({
   return (
     <div
       ref={ref}
-      onDoubleClick={onMeasure}
+      onDoubleClick={(event) => onMeasure?.(state.current.measureAt?.(event))}
       className={`terrain-canvas ${waypointMode ? "waypoint-active" : ""}`}
     />
   );
 }
 
-// Non-georeferenced path: classify (7 land-cover classes) + elevate by fixed
-// per-class height constants -- no depth model. See viewer/classify.py in
-// the AltiMap backend for why depth is deliberately skipped here and the
-// plan to calibrate one against these same static values later.
-const CLASSIFY_API_URL = "http://localhost:8000/api/classify-static";
+// Upload path: the fine-tuned RS3DAda height model (viewer/estimate.py) turns
+// PNG/JPG into a metric nDSM and GeoTIFF into an absolute DSM (nDSM + GLO-30
+// ground). Served by `python -m viewer.server` on :8000.
+const API_BASE = "http://localhost:8000";
+const ESTIMATE_API_URL = `${API_BASE}/api/estimate`;
 const CLASSIFY_CLASS_LABELS = [
   "background",
   "ground",
@@ -1468,9 +1921,9 @@ const CLASS_DOT_STYLE = {
 };
 
 function App() {
-  const [view, setView] = useState("terrain"); // terrain | upload
+  const [view, setView] = useState("upload"); // terrain | upload
   const [split, setSplit] = useState("train");
-  const [sample, setSample] = useState(initialSample);
+  const [sample, setSample] = useState(null);
   const [layer, setLayer] = useState("texture");
   const [exaggeration, setExaggeration] = useState(0.5);
   const [playing, setPlaying] = useState(false);
@@ -1479,6 +1932,43 @@ function App() {
   const [theme, setTheme] = useState("dark");
   const [resetToken, setResetToken] = useState(0);
   const [profileCleared, setProfileCleared] = useState(false);
+  const [profile, setProfile] = useState(null);
+  const [measurePoint, setMeasurePoint] = useState(null);
+  const [cityMode, setCityMode] = useState(true);
+  const [pickedBuilding, setPickedBuilding] = useState(null);
+  const exportRef = useRef(null);
+  const profileView = profileStats(profile);
+  const shown = sample ?? EMPTY_SAMPLE;
+  // City model: canopy-only terrain + extruded buildings; the exact DSM stays
+  // attached for the probe and profile.
+  const viewSample = useMemo(() => {
+    if (!sample) return sample;
+    const terrain = sample.terrain; // georeferenced uploads only
+    if (cityMode && sample.city)
+      return {
+        ...sample,
+        // bare-earth terrain (or flat ground) under extruded buildings and trees
+        height: terrain ? terrain.ground.png : FLAT_HEIGHT,
+        maxM: terrain ? terrain.ground.relief_m : sample.maxM,
+        exactHeight: sample.height,
+        exactMaxM: sample.maxM,
+        elevation: terrain?.dsm,
+        groundMinM: terrain?.ground.min_m,
+        buildings: sample.city.buildings,
+        trees: sample.city.trees,
+      };
+    if (terrain)
+      // exact surface of a GeoTIFF upload: the exported absolute DSM itself
+      return {
+        ...sample,
+        height: terrain.dsm.png,
+        maxM: terrain.dsm.relief_m,
+        exactHeight: sample.height,
+        exactMaxM: sample.maxM,
+        elevation: terrain.dsm,
+      };
+    return sample;
+  }, [sample, cityMode]);
   const [waypointMode, setWaypointMode] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
   const [waypointCount, setWaypointCount] = useState(0);
@@ -1488,8 +1978,13 @@ function App() {
   const [uploadStatus, setUploadStatus] = useState("idle"); // idle | loading | error
   const [uploadError, setUploadError] = useState("");
   const [uploadMeta, setUploadMeta] = useState(null);
+  const [uploadGsd, setUploadGsd] = useState("");
+  const [referenceFile, setReferenceFile] = useState(null);
+  const [uploadQuality, setUploadQuality] = useState("high"); // high = 4-flip TTA
+  const [uploadProgress, setUploadProgress] = useState(null); // {stage, progress}
   const fileRef = useRef(null);
   const uploadFileRef = useRef(null);
+  const referenceFileRef = useRef(null);
   const notify = (msg) => {
     setToast(msg);
     setTimeout(() => setToast(""), 1800);
@@ -1507,56 +2002,114 @@ function App() {
     setUploadFileName(file.name);
     setUploadStatus("loading");
     setUploadError("");
+    // Progress: the server reports real stages for this job id while the POST runs.
+    const job = crypto.randomUUID();
+    setUploadProgress({ stage: "Uploading", progress: 0 });
+    const poll = setInterval(async () => {
+      try {
+        const r = await fetch(`${API_BASE}/api/progress/${job}`);
+        if (r.ok) setUploadProgress(await r.json());
+      } catch {
+        // a missed poll is harmless; the next one catches up
+      }
+    }, 400);
     try {
       const body = new FormData();
       body.append("file", file);
-      const res = await fetch(CLASSIFY_API_URL, { method: "POST", body });
+      body.append("job", job);
+      body.append("tta", uploadQuality === "high" ? "true" : "false");
+      if (uploadGsd.trim()) body.append("gsd", uploadGsd.trim());
+      if (referenceFile) body.append("reference", referenceFile);
+      const res = await fetch(ESTIMATE_API_URL, { method: "POST", body });
       if (!res.ok) {
         const detail = await res.json().catch(() => null);
-        throw new Error(detail?.detail || `Server returned ${res.status}`);
+        const msg = detail?.detail;
+        throw new Error(
+          (typeof msg === "string" ? msg : JSON.stringify(msg)) ||
+            `Server returned ${res.status}`,
+        );
       }
       const data = await res.json();
+      const gsdText = data.gsd_m
+        ? `${data.gsd_m.toFixed(2)} m/px`
+        : "GSD unknown (0.33 m assumed)";
       // Reuses the exact same `sample` shape as a catalog scene (rgb/height/
       // classes URLs + label/coord/max) so every existing viewer feature --
       // layer switching, waypoints, measuring -- works on it unmodified.
       setSample({
         id: "upload",
         label: file.name,
-        coord: "No coordinates · non-georeferenced",
+        coord: data.dsm
+          ? `Georeferenced · ${gsdText} · DSM ${data.dsm.min_m.toFixed(0)}–${data.dsm.max_m.toFixed(0)} m`
+          : `${data.georeferenced ? "Georeferenced" : "Non-georeferenced"} · ${gsdText}`,
         rgb: data.rgb,
         height: data.height,
         classes: data.classes,
-        max: "static estimate",
+        max: `${data.max_m.toFixed(1)} m`,
         thumb: data.rgb,
+        // /api/estimate encodes height linearly: pixel/255 * max_m.
+        metricHeights: true,
+        maxM: data.max_m,
+        groundWidthM: data.shape[1] * (data.gsd_m || GAMUS_GSD_M),
+        groundHeightM: data.shape[0] * (data.gsd_m || GAMUS_GSD_M),
+        areaKm2:
+          (data.shape[0] * data.shape[1] * (data.gsd_m || GAMUS_GSD_M) ** 2) / 1e6,
+        gsdAssumed: data.gsd_assumed,
+        sourceLabel: `${data.shape[1]} × ${data.shape[0]} source`,
+        city: data.city,
+        terrain: data.terrain,
       });
+      setMeasurePoint(null);
       setUploadMeta({
         seconds: data.seconds,
         width: data.width,
         height_px: data.height_px,
         class_pixel_counts: data.class_pixel_counts,
+        max_m: data.max_m,
+        p99_m: data.ndsm_p99_m,
+        dsm: data.dsm,
+        dsm_error: data.dsm_error,
+        downloads: data.downloads,
+        validation: data.validation,
+        checkpoint: data.checkpoint,
       });
       setProfileCleared(false);
       setWaypointCount(0);
       setSelectedWaypoint(null);
       setPlaying(false);
       setUploadStatus("idle");
-      notify(`Classified ${file.name}`);
+      notify(`Heights estimated for ${file.name}`);
     } catch (err) {
       setUploadError(
         err.message === "Failed to fetch"
-          ? "Couldn't reach the classifier backend — is it running at localhost:8000?"
+          ? "Couldn't reach the height backend — is `python -m viewer.server` running at localhost:8000?"
           : err.message,
       );
       setUploadStatus("error");
+    } finally {
+      clearInterval(poll);
+      setUploadProgress(null);
     }
   };
   const onPickUpload = (e) => {
     const file = e.target.files?.[0];
+    e.target.value = ""; // picking the same file again should re-run
     if (file) runClassification(file);
+  };
+  const onDropFile = (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer?.files?.[0];
+    if (!file || uploadStatus === "loading") return;
+    if (!/\.(png|jpe?g|tiff?)$/i.test(file.name)) {
+      notify("Drop a PNG, JPG or GeoTIFF");
+      return;
+    }
+    setView("upload");
+    runClassification(file);
   };
   const sceneIndex = Math.max(
     0,
-    displayedScenes.findIndex((scene) => scene.id === sample.id),
+    displayedScenes.findIndex((scene) => scene.id === shown.id),
   );
   const changeScene = (offset) => {
     const next =
@@ -1599,15 +2152,29 @@ function App() {
   };
   const importScene = (e) => {
     const f = e.target.files?.[0];
-    if (f) notify(`Imported ${f.name} · preview ready`);
+    e.target.value = ""; // allow re-importing the same file
+    if (!f) return;
+    setView("upload");
+    runClassification(f);
   };
   const exportScene = () => {
+    if (!sample) {
+      notify("Nothing to export yet · import imagery first");
+      return;
+    }
+    if (sample.metricHeights && exportRef.current) {
+      const name = (sample.label || "scene").replace(/\.[^.]+$/, "");
+      exportRef.current(`${name}-3d.glb`)
+        .then(() => notify("3D model exported (.glb, metres)"))
+        .catch((err) => notify(`Export failed: ${err?.message ?? err}`));
+      return;
+    }
     const blob = new Blob(
       [
         JSON.stringify(
           {
             format: "GAMUS Terrain Studio scene",
-            scene: sample.id,
+            scene: shown.id,
             split,
             layer,
             verticalExaggeration: exaggeration,
@@ -1623,7 +2190,7 @@ function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${sample.id}-terrain-scene.json`;
+    a.download = `${shown.id}-terrain-scene.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     notify("Scene manifest downloaded");
@@ -1633,7 +2200,7 @@ function App() {
       <input
         ref={fileRef}
         type="file"
-        accept=".png,.jpg,.jpeg,.tif,.tiff,.geojson"
+        accept=".png,.jpg,.jpeg,.tif,.tiff"
         onChange={importScene}
         hidden
       />
@@ -1652,7 +2219,7 @@ function App() {
           <button
             className={view === "upload" ? "active" : ""}
             onClick={() => setView("upload")}
-            title="Upload & classify"
+            title="Upload imagery"
           >
             <Upload size={18} />
           </button>
@@ -1684,9 +2251,9 @@ function App() {
                   <Satellite size={14} />
                 </span>
                 <div>
-                  <strong>{sample.label}</strong>
+                  <strong>{shown.label}</strong>
                   <small>
-                    {sample.id} · {sample.coord}
+                    {shown.id ? `${shown.id} · ` : ""}{shown.coord}
                   </small>
                 </div>
               </div>
@@ -1714,20 +2281,80 @@ function App() {
                 </button>
               </div>
             </div>
-            <div className="canvas-wrap">
+            <div
+              className="canvas-wrap"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={onDropFile}
+            >
+              {pickedBuilding && (
+                <div className="building-card">
+                  <div className="label-row">
+                    <strong>Building</strong>
+                    <button onClick={() => setPickedBuilding(null)} title="Close">
+                      <X size={13} />
+                    </button>
+                  </div>
+                  <dl>
+                    <dt>Height</dt>
+                    <dd>{pickedBuilding.height.toFixed(1)} m</dd>
+                    <dt>Floors (≈3.2 m each)</dt>
+                    <dd>~{pickedBuilding.floors}</dd>
+                    <dt>Footprint</dt>
+                    <dd>{Math.round(pickedBuilding.areaM2).toLocaleString()} m²</dd>
+                    {pickedBuilding.roofElevation != null && (
+                      <>
+                        <dt>Roof elevation</dt>
+                        <dd>{pickedBuilding.roofElevation.toFixed(1)} m (EGM2008)</dd>
+                      </>
+                    )}
+                  </dl>
+                </div>
+              )}
+              {uploadStatus === "loading" && (
+                <div className="processing-overlay">
+                  <strong>{uploadFileName}</strong>
+                  <span>{uploadProgress?.stage ?? "Working"}…</span>
+                  <i className="progress-track">
+                    <i
+                      className="progress-fill"
+                      style={{ width: `${Math.round((uploadProgress?.progress ?? 0) * 100)}%` }}
+                    />
+                  </i>
+                  <small>{Math.round((uploadProgress?.progress ?? 0) * 100)}%</small>
+                </div>
+              )}
+              {sample ? (
               <TerrainCanvas
-                sample={sample}
+                sample={viewSample}
                 exaggeration={exaggeration}
                 layer={layer}
                 resetToken={resetToken}
-                onMeasure={() => measure && notify("Point captured · 18.4 m")}
+                onMeasure={(info) => {
+                  if (!measure) return;
+                  if (!info) {
+                    notify("Double-click on the terrain surface");
+                    return;
+                  }
+                  setMeasurePoint(info);
+                }}
+                onProfile={setProfile}
                 waypointMode={waypointMode}
                 pathCommand={pathCommand}
                 onWaypointChange={setWaypointCount}
                 onWaypointSelect={setSelectedWaypoint}
                 onPathEnd={() => setPlaying(false)}
                 autoRotate={autoRotate}
+                onBuildingPick={setPickedBuilding}
+                exportRef={exportRef}
               />
+              ) : uploadStatus === "loading" ? null : (
+                <div className="empty-viewport">
+                  <Upload size={28} />
+                  <strong>No imagery loaded</strong>
+                  <span>Import a PNG, JPG or GeoTIFF to estimate heights and build the 3D terrain.</span>
+                  <button onClick={() => fileRef.current?.click()}>Import imagery</button>
+                </div>
+              )}
               <div className="flight-help">
                 <kbd>W</kbd>
                 <kbd>A</kbd>
@@ -1773,15 +2400,18 @@ function App() {
                   <b className="swatch low" /> Low · 0 m
                 </span>
                 <span>
-                  <b className="swatch mid" /> Mid · 21 m
+                  <b className="swatch mid" /> Mid
+                  {shown.metricHeights
+                    ? ` · ${(shown.maxM / 2).toFixed(1)} m`
+                    : ""}
                 </span>
                 <span>
-                  <b className="swatch high" /> High · {sample.max}
+                  <b className="swatch high" /> High · {shown.max}
                 </span>
               </div>
               <div className="footer-note">
-                <Eye size={14} /> 1024 × 1024 source · 513² live mesh · 4
-                aligned layers
+                <Eye size={14} /> {shown.sourceLabel ?? "1024 × 1024 source"}{" "}
+                · 513² live mesh · 4 aligned layers
               </div>
             </div>
           </div>
@@ -1801,15 +2431,48 @@ function App() {
             <div className="metric-grid">
               <div>
                 <small>Surface max</small>
-                <strong>{sample.max}</strong>
-                <em>+ 4.8%</em>
+                <strong>{shown.max}</strong>
+                <em className="neutral">
+                  {shown.metricHeights ? "model estimate" : "scene max"}
+                </em>
               </div>
               <div>
                 <small>Coverage</small>
-                <strong>1.05 km²</strong>
-                <em className="neutral">stable</em>
+                <strong>
+                  {sample
+                    ? `${(shown.areaKm2 ?? (1024 * GAMUS_GSD_M) ** 2 / 1e6).toFixed(3)} km²`
+                    : "—"}
+                </strong>
+                <em className="neutral">
+                  {shown.gsdAssumed ? "GSD assumed 0.33 m" : "ground area"}
+                </em>
               </div>
             </div>
+            {sample?.city && (
+              <div className="control-section">
+                <div className="label-row">
+                  <label>3D model</label>
+                  <span>
+                    {sample.city.buildings.length} buildings ·{" "}
+                    {sample.city.trees.length} trees
+                  </span>
+                </div>
+                <div className="segmented layer-tabs">
+                  <button
+                    className={cityMode ? "selected" : ""}
+                    onClick={() => setCityMode(true)}
+                  >
+                    City model
+                  </button>
+                  <button
+                    className={!cityMode ? "selected" : ""}
+                    onClick={() => setCityMode(false)}
+                  >
+                    Exact DSM
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="control-section">
               <label>Active layer</label>
               <div className="segmented layer-tabs">
@@ -1899,17 +2562,22 @@ function App() {
               </div>
               <div className={`sparkline ${profileCleared ? "cleared" : ""}`}>
                 <svg viewBox="0 0 300 70" preserveAspectRatio="none">
-                  <path
-                    d="M0,60 C12,45 22,51 33,42 S54,50 66,38 S86,46 99,27 S119,36 133,30 S150,46 164,19 S184,32 199,23 S214,30 230,14 S248,29 263,19 S281,20 300,5"
-                    fill="none"
-                    stroke="#8bd2c4"
-                    strokeWidth="2"
-                  />
-                  <path
-                    d="M0,60 C12,45 22,51 33,42 S54,50 66,38 S86,46 99,27 S119,36 133,30 S150,46 164,19 S184,32 199,23 S214,30 230,14 S248,29 263,19 S281,20 300,5 V70 H0Z"
-                    fill="url(#fill)"
-                    opacity=".22"
-                  />
+                  {profileView && (
+                    <>
+                      <path
+                        d={profileView.line}
+                        fill="none"
+                        stroke="#8bd2c4"
+                        strokeWidth="1.5"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <path
+                        d={profileView.area}
+                        fill="url(#fill)"
+                        opacity=".22"
+                      />
+                    </>
+                  )}
                   <defs>
                     <linearGradient id="fill" x1="0" x2="0" y1="0" y2="1">
                       <stop stopColor="#8bd2c4" />
@@ -1919,9 +2587,15 @@ function App() {
                 </svg>
               </div>
               <div className="profile-values">
-                <span>0 m</span>
-                <strong>24.6 m avg</strong>
-                <span>42.8 m</span>
+                {profileView ? (
+                  <>
+                    <span>{profileView.fmt(profileView.min)}</span>
+                    <strong>{profileView.fmt(profileView.avg)} avg · centre line</strong>
+                    <span>{profileView.fmt(profileView.max)}</span>
+                  </>
+                ) : (
+                  <strong>{sample ? "loading…" : "—"}</strong>
+                )}
               </div>
             </div>
             {view === "terrain" ? (
@@ -1934,17 +2608,19 @@ function App() {
                 </span>
               </div>
               <div className="scene-preview">
-                <img src={sample.thumb || sample.rgb} alt={sample.label} />
+                {sample && (
+                  <img src={shown.thumb || shown.rgb} alt={shown.label} />
+                )}
                 <div>
-                  <strong>{sample.id}</strong>
+                  <strong>{shown.id}</strong>
                   <small>
-                    {sample.urban ? "Building-rich · " : ""}
-                    {sample.label}
+                    {shown.urban ? "Building-rich · " : ""}
+                    {shown.label}
                   </small>
                 </div>
               </div>
               <select
-                value={sample.id}
+                value={shown.id}
                 onChange={(event) =>
                   selectScene(
                     displayedScenes.find(
@@ -1953,6 +2629,9 @@ function App() {
                   )
                 }
               >
+                <option value="" disabled>
+                  Choose a GAMUS preview scene…
+                </option>
                 <optgroup
                   label={`Urban / building-rich (${urbanScenes.length})`}
                 >
@@ -1978,35 +2657,107 @@ function App() {
             ) : (
             <div className="control-section upload-switcher">
               <div className="label-row">
-                <label>Upload &amp; classify</label>
-                <span>non-georeferenced</span>
+                <label>Upload imagery</label>
+                <span>PNG · JPG · GeoTIFF</span>
               </div>
               <p className="upload-copy">
-                Upload a plain PNG/JPG with no coordinate metadata — it's
-                classified into 7 land-cover classes, then elevated with
-                fixed per-class height constants. No depth model runs on
-                this path yet.
+                A fine-tuned height model estimates metric height above
+                ground (nDSM) for every pixel. GeoTIFFs with coordinates also
+                get an absolute DSM: nDSM + Copernicus GLO-30 bare-earth
+                ground. Both download as GeoTIFF.
               </p>
+              <div className="upload-options">
+                <label>
+                  <small>Pixel size (m/px, optional)</small>
+                  <input
+                    type="number"
+                    min="0.05"
+                    max="10"
+                    step="0.01"
+                    placeholder="from GeoTIFF, else 0.33"
+                    value={uploadGsd}
+                    onChange={(e) => setUploadGsd(e.target.value)}
+                  />
+                </label>
+                <input
+                  ref={referenceFileRef}
+                  type="file"
+                  accept=".tif,.tiff,.png,.h5"
+                  onChange={(e) => setReferenceFile(e.target.files?.[0] ?? null)}
+                  hidden
+                />
+                <div className="upload-reference-row">
+                  <button
+                    className="upload-reference"
+                    onClick={() => referenceFileRef.current?.click()}
+                  >
+                    {referenceFile
+                      ? `Reference: ${referenceFile.name}`
+                      : "Add reference heights (optional)"}
+                  </button>
+                  {referenceFile && (
+                    <button
+                      className="upload-reference-clear"
+                      title="Remove reference"
+                      onClick={() => {
+                        setReferenceFile(null);
+                        if (referenceFileRef.current) referenceFileRef.current.value = "";
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+                <div className="quality-row">
+                  <small>Quality</small>
+                  <div className="segmented">
+                    <button
+                      className={uploadQuality === "high" ? "selected" : ""}
+                      onClick={() => setUploadQuality("high")}
+                      title="Averages 4 flipped predictions: most accurate"
+                    >
+                      High
+                    </button>
+                    <button
+                      className={uploadQuality === "fast" ? "selected" : ""}
+                      onClick={() => setUploadQuality("fast")}
+                      title="Single prediction: about 4x faster"
+                    >
+                      Fast
+                    </button>
+                  </div>
+                </div>
+              </div>
               <input
                 ref={uploadFileRef}
                 type="file"
-                accept=".png,.jpg,.jpeg"
+                accept=".png,.jpg,.jpeg,.tif,.tiff"
                 onChange={onPickUpload}
                 hidden
               />
               <button
                 className="upload-dropzone"
                 onClick={() => uploadFileRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={onDropFile}
                 disabled={uploadStatus === "loading"}
               >
                 <Upload size={20} />
                 <span>
                   {uploadStatus === "loading"
-                    ? `Classifying ${uploadFileName}…`
+                    ? `${uploadProgress?.stage ?? "Working"} · ${Math.round((uploadProgress?.progress ?? 0) * 100)}%`
                     : uploadFileName
-                      ? `${uploadFileName} — click to replace`
-                      : "Click to choose an image"}
+                      ? `${uploadFileName} — drop or click to replace`
+                      : "Drop an image here, or click to choose"}
                 </span>
+                {uploadStatus === "loading" && (
+                  <i className="progress-track">
+                    <i
+                      className="progress-fill"
+                      style={{ width: `${Math.round((uploadProgress?.progress ?? 0) * 100)}%` }}
+                    />
+                  </i>
+                )}
               </button>
               {uploadStatus === "error" && (
                 <div className="upload-error">{uploadError}</div>
@@ -2019,11 +2770,72 @@ function App() {
                       <strong>{uploadMeta.seconds.toFixed(2)}s</strong>
                     </div>
                     <div>
-                      <small>Resolution</small>
-                      <strong>
-                        {uploadMeta.width}×{uploadMeta.height_px}
-                      </strong>
+                      <small>Tallest object</small>
+                      <strong>{uploadMeta.max_m.toFixed(1)} m</strong>
                     </div>
+                    {uploadMeta.dsm && (
+                      <>
+                        <div>
+                          <small>Ground (GLO-30)</small>
+                          <strong>
+                            {uploadMeta.dsm.ground_min_m.toFixed(0)}–
+                            {uploadMeta.dsm.ground_max_m.toFixed(0)} m
+                          </strong>
+                        </div>
+                        <div>
+                          <small>DSM range</small>
+                          <strong>
+                            {uploadMeta.dsm.min_m.toFixed(0)}–
+                            {uploadMeta.dsm.max_m.toFixed(0)} m
+                          </strong>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {uploadMeta.dsm_error && (
+                    <div className="upload-error">
+                      Absolute DSM unavailable: {uploadMeta.dsm_error}
+                    </div>
+                  )}
+                  {uploadMeta.validation && (
+                    <div className="metric-grid validation-grid">
+                      <div>
+                        <small>RMSE vs reference</small>
+                        <strong>{uploadMeta.validation.rmse?.toFixed(2)} m</strong>
+                      </div>
+                      <div>
+                        <small>MAE</small>
+                        <strong>{uploadMeta.validation.mae?.toFixed(2)} m</strong>
+                      </div>
+                      <div>
+                        <small>Correlation r</small>
+                        <strong>
+                          {uploadMeta.validation.pearson?.toFixed(3) ?? "n/a"}
+                        </strong>
+                      </div>
+                      <div>
+                        <small>Building RMSE</small>
+                        <strong>
+                          {uploadMeta.validation.building_rmse != null
+                            ? `${uploadMeta.validation.building_rmse.toFixed(2)} m`
+                            : "n/a"}
+                        </strong>
+                      </div>
+                    </div>
+                  )}
+                  <div className="download-row">
+                    {Object.entries(uploadMeta.downloads ?? {})
+                      .filter(([name]) => name.endsWith(".tif") || name.endsWith(".geojson"))
+                      .map(([name, path]) => (
+                        <a key={name} href={`${API_BASE}${path}`} download>
+                          ⬇{" "}
+                          {name === "dsm.tif"
+                            ? "Absolute DSM (GeoTIFF)"
+                            : name === "ndsm.tif"
+                              ? "nDSM (GeoTIFF)"
+                              : "3D buildings (GeoJSON)"}
+                        </a>
+                      ))}
                   </div>
                   <div className="class-breakdown">
                     {CLASSIFY_CLASS_LABELS.map((name) => {
@@ -2128,8 +2940,19 @@ function App() {
       {toast && <div className="toast">{toast}</div>}
       {measure && (
         <div className="measure-hint">
-          <Ruler size={15} /> Double-click the terrain to capture a point{" "}
-          <X size={14} onClick={() => setMeasure(false)} />
+          <Ruler size={15} />{" "}
+          {!measurePoint
+            ? "Double-click the terrain to read height and slope"
+            : measurePoint.metric
+              ? `Height ${measurePoint.height.toFixed(1)} m above ground${measurePoint.elevation != null ? ` · elevation ${measurePoint.elevation.toFixed(1)} m (EGM2008)` : ""} · slope ${measurePoint.slopeDeg.toFixed(0)}° · pixel (${measurePoint.col}, ${measurePoint.row})`
+              : `Relative height ${(measurePoint.height * 100).toFixed(0)}% · preview tile, upload imagery for metric heights`}{" "}
+          <X
+            size={14}
+            onClick={() => {
+              setMeasure(false);
+              setMeasurePoint(null);
+            }}
+          />
         </div>
       )}
     </div>
