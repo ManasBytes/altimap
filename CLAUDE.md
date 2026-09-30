@@ -212,6 +212,14 @@ nDSM.
   edge F1 0.529 vs ours 0.854 / 0.688; as 3D footprints 0.720–0.781 vs 0.787–0.841, and it
   separates fewer buildings. It's heavy (860M params, gated) and not a dependency; don't re-add
   it without beating `city_eval`.
+- **No public building model beats ours either** (same 40 tiles, raw masks, IoU / edge F1 at
+  0.33 m and with the image degraded to 0.6 m; each rival fed at its own training GSD): ours
+  0.854 / 0.688 and 0.846 / 0.727; Mask R-CNN trained on 0.6 m NAIP (`giswqs/geoai`) 0.403 / 0.341
+  and 0.404 / 0.390; UNet++ WHU (`giswqs/whu-building-unetplusplus-efficientnet-b4`) at best 0.407 /
+  0.310 and 0.255 / 0.226; DINOv3-S UperNet (`geobase/dinov3s-buildings`) at best 0.387 / 0.376.
+  Caveat: GAMUS is our training domain and theirs is not, so this shows none is a drop-in upgrade,
+  not that ours wins everywhere; an out-of-domain check would need footprints (e.g. Overture via
+  `viewer/footprints.py`) on non-GAMUS imagery.
 - **Squaring off every outline costs accuracy** (IoU 0.843 → 0.793, edge F1 0.661 → 0.569); hence
   the 10 % `max_shift` cap. Splitting blobs at roof-height steps (`_roof_segments`, 2.5 m levels)
   is what took separate buildings 1281 → 2372 and building height RMSE 3.15 → 2.99 m.
