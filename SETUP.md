@@ -13,7 +13,8 @@ with an RTX 3050 6 GB laptop GPU; each step says what it is for, so you can tell
 | [uv](https://docs.astral.sh/uv/) | any recent | creates the Python envs and installs Python 3.12 itself |
 | Node.js | 20+ (22 tested) | builds the React viewer |
 | git | — | also clones the SynRS3D model code |
-| Disk | ~12 GB | ~6 GB Python env (PyTorch), ~3 GB model weights, the rest data/cache |
+| Disk | ~15 GB | ~7 GB Python env (PyTorch), ~6 GB model weights (3 height models + CHMv2), the rest data/cache |
+| RAM | 16 GB recommended | the server holds ~5.5 GB with all three models loaded (two wait on the CPU while one runs on the GPU) |
 | Internet | first run | model downloads; GeoTIFF uploads fetch the Copernicus DEM live |
 
 ## 1. Clone
@@ -140,6 +141,9 @@ Open the app, click **Import** (or drop a file on the viewport):
   offsets: e.g. GPS (ellipsoidal) heights vs EGM2008 differ by tens of metres over India. On our
   LiDAR test scenes the DEM had no such offset, so nothing was applied.
 - **Quality**: *High* averages 4 flipped passes (~3x slower), *Fast* runs one pass.
+- **Time**: a 2000 px GeoTIFF takes about 1.5–2 minutes on *Fast* with an RTX 3050 laptop GPU
+  (two height-model passes, plus CHMv2 in forests). Scenes wider than ~1 km are processed in
+  tiles and take proportionally longer.
 
 In the viewer:
 - Click a building for its height, floors, footprint, volume and roof elevation.
@@ -151,11 +155,18 @@ In the viewer:
   buildings block you.
 - **Export** saves the 3D model as `.glb`. The GeoTIFFs (`ndsm.tif`, `dsm.tif`) and
   `buildings.geojson` download from the right panel.
+- The 3D mesh detail follows the GPU: full detail on dedicated GPUs, half on integrated or
+  software graphics. Add `?detail=high` or `?detail=standard` to the address to force either.
 
-Test images: `demo/` is not in git (57 MB). Ask for it. It holds 3 GAMUS tiles with their LiDAR
-reference heights (`demo/reference_heights/`, use those in the reference box, **not** as the
-image) and 4 NAIP GeoTIFFs (city centre, suburb, hills, forest). Any RGB aerial or satellite
-image works too.
+Test images: `demo/` is not in git (195 MB); ask for it. It holds:
+- 3 GAMUS tiles (PNG) and 4 NAIP GeoTIFFs: city centre, suburb, hills, forest;
+- `reference_heights/`: their LiDAR heights. Use these in the reference box, **not** as the
+  image;
+- `gcps/`: sample control-point CSVs for the NAIP scenes;
+- `india/`: three Sikkim satellite scenes. `scripts/fetch_india_samples.py` downloads these
+  itself.
+
+Any RGB aerial or satellite image works too.
 
 Batch use without the viewer:
 
@@ -167,7 +178,7 @@ Batch use without the viewer:
 ## 6. Tests
 
 ```bash
-.venv/bin/python -m pytest -q     # ~100 tests, under a second, no GPU or network
+.venv/bin/python -m pytest -q     # ~110 tests, under a second, no GPU or network
 ```
 
 ## 7. Evaluation and training (optional)
@@ -210,5 +221,6 @@ test with TTA, upload to Hugging Face).
 | `npm run dev` fails with `ENOSPC: System limit for number of file watchers` | Use `npm run build` and the server (step 5), or raise `fs.inotify.max_user_watches` |
 | The app on a VM loads but uploads fail from your laptop | You're on an old build that called `localhost:8000`: `git pull`, `npm run build`, restart the server |
 | CUDA out of memory | Close other GPU apps, stop the server before evaluations, or choose *Fast* quality |
+| Choppy 3D view | Add `?detail=standard` to the address (half the mesh detail) |
 | GeoTIFF upload has no absolute DSM (`dsm_error` in the panel) | The Copernicus DEM couldn't be read (AWS Open Data, then Planetary Computer; each read gives up after 60 s). The nDSM still works; retry when the network is back |
 | First upload is slow | The model loads on the first upload (plus the DINOv2 download on the very first run); later uploads skip both |
