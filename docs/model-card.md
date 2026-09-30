@@ -51,10 +51,19 @@ GeoTIFFs and a 3D city model. Setup and usage: the repo's
 
 - **Tall objects are underestimated**, e.g. ~72 m predicted vs 167 m real at Philadelphia City
   Hall; the tallest object in a GAMUS tile at 28 m vs 38 m.
-- **Coarser imagery reads low:** on 0.6 m NAIP scenes (resampled to the 0.33 m training
-  resolution) the nDSM bias against USGS 3DEP LiDAR was -4 m (town), -6 m (leafy suburb) and
-  -16 m (forest canopy). ISRO's evaluation imagery is 0.6 m Cartosat-2S, outside the training
-  domain (US cities, aerial).
+- **Out of domain, by landscape** (NAIP aerial RGB vs USGS 3DEP airborne LiDAR, one pass).
+  Absolute DSM = these heights on Copernicus GLO-30, DEM-consistent:
+
+  | Scene | nDSM RMSE (predict 0) | nDSM bias | DSM RMSE (GLO-30 alone) |
+  |---|---|---|---|
+  | Dense city (0.3 m) | 29.8 m (42.4) | −6.8 m | 34.7 m (36.3) |
+  | Suburb (0.6 m) | 4.5 m (6.5) | +1.3 m | 3.99 m (4.02) |
+  | Hilly town (0.6 m) | 3.7 m (6.5) | −0.7 m | 5.04 m (5.53) |
+  | Forest (0.6 m) | 18.5 m (24.7) | −15.9 m | 9.03 m (8.53) |
+
+  Forest canopy reads ~16 m low. Object heights hold up to ~1–2 m pixels and fade to flat by
+  5–10 m. ISRO's evaluation imagery is 0.6 m Cartosat-2S over India, outside the training domain
+  (aerial imagery of US cities).
 - Heights are **above ground**. Absolute elevation needs a terrain model; AltiMap adds Copernicus
   GLO-30 ground for georeferenced inputs.
 

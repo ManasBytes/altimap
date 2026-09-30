@@ -216,11 +216,10 @@ over 2 m). The mesh is 1024² segments (`MESH_SEGMENTS_*`, = `GRID_SIDE` − 1 i
 
 - **UI numbers are computed correctly** (checked 2026-09-30 against an independent recalculation
   and USGS 3DEP LiDAR): validation RMSE/MAE/r, coverage and surface max all match. The weak part
-  is the model, not the display: it reads **low on 0.6 m imagery** (NAIP nDSM bias −4 to −16 m;
-  building card MAE ~4.2 m vs 2.2 m on 0.33 m GAMUS) and **under-reads tall objects** (tallest
-  object 72 m vs 167 m at Philadelphia City Hall, 28 vs 38 m on a GAMUS tile). Exported DSM vs
-  LiDAR DSM RMSE: suburb 4.1 m, hills 5.1 m, forest 9.5 m, dense downtown 34.7 m. v2 training
-  (height-weighted loss + blur augmentation) targets exactly this; its results weren't in yet.
+  is the model, not the display. It **under-reads tall objects** (tallest object 72 m vs 167 m
+  at Philadelphia City Hall, 28 vs 38 m on a GAMUS tile) and **forest canopy** (nDSM bias −15.9 m
+  vs LiDAR); on the suburb and hills at 0.6 m the bias is small (+1.3 / −0.7 m, `dsm_eval`). v2
+  training (height-weighted loss + blur augmentation) targets this; its results weren't in yet.
 - **SAM 3 does not beat our model's building masks** (40 GAMUS val tiles): raw pixels IoU 0.757 /
   edge F1 0.529 vs ours 0.854 / 0.688; as 3D footprints 0.720–0.781 vs 0.787–0.841, and it
   separates fewer buildings. It's heavy (860M params, gated) and not a dependency; don't re-add
