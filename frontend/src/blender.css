@@ -136,6 +136,13 @@ header {
 .layer-tabs {
   grid-template-columns: repeat(4, 1fr);
 }
+.layer-tabs.wide {
+  grid-template-columns: repeat(3, 1fr);
+}
+.layer-tabs button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 .layer-tabs button {
   padding-left: 3px;
   padding-right: 3px;
@@ -735,4 +742,100 @@ footer {
     right: 18px;
     top: 190px;
   }
+}
+
+.gcp-result {
+  font: 11px "IBM Plex Mono", monospace;
+  color: #9fd3c7;
+  background: #0f2229;
+  border: 1px solid #1f4a4a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+.contour-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0 !important;
+  font-size: 11px;
+  color: #9cafbe;
+  cursor: pointer;
+}
+.contour-toggle input {
+  accent-color: var(--mint);
+  margin: 0;
+}
+.walk-toggle {
+  position: absolute;
+  bottom: 62px; /* same row as .flight-help / .canvas-controls, above the footer bar */
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #0b1b29e8;
+  border: 1px solid #294254;
+  border-radius: 6px;
+  padding: 7px 11px;
+  color: #b8c9d2;
+  font: 11px "IBM Plex Mono", monospace;
+}
+.walk-toggle.active {
+  background: #183b3c;
+  color: var(--mint);
+  border-color: #2d6664;
+}
+.validation-detail {
+  margin: 8px 0;
+}
+.validation-note {
+  font: 10px "IBM Plex Mono", monospace;
+  color: #8ea4b6;
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+.scatter {
+  width: 100%;
+  max-width: 260px;
+  display: block;
+  margin: 0 auto;
+}
+.scatter circle {
+  fill: #8bd2c4;
+  opacity: 0.45;
+}
+.scatter .scatter-frame {
+  fill: #0b1c29;
+  stroke: #1b3646;
+  stroke-width: 0.5;
+}
+.scatter .scatter-diag {
+  stroke: #e9b978;
+  stroke-width: 0.6;
+  stroke-dasharray: 2 2;
+}
+.scatter text {
+  fill: #647e94;
+  font: 5px "IBM Plex Mono", monospace;
+}
+.class-errors {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font: 10px "IBM Plex Mono", monospace;
+  color: #aec0cb;
+}
+.class-errors th {
+  text-align: left;
+  color: #6f879b;
+  font-weight: 400;
+  border-bottom: 1px solid #1d3043;
+  padding: 3px 2px;
+}
+.class-errors td {
+  padding: 3px 2px;
+  border-bottom: 1px solid #13253a;
 }

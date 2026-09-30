@@ -5,8 +5,11 @@ process -- so this wraps the same pipeline modules the batch exporters use. An
 uploaded file therefore gets byte-identical treatment to a batch-exported scene:
 same metrics, same rg16 encoding, same georeferencing and calibration rules.
 
-    .venv-da3/bin/python -m viewer.server
-    -> http://localhost:8000/
+    .venv-da3/bin/python -m viewer.server                  # http://127.0.0.1:8000/
+    .venv-da3/bin/python -m viewer.server --host 0.0.0.0   # reachable from other machines (a VM)
+
+Serves the React viewer (frontend/dist) at "/" when it has been built, the older
+dashboards at /dashboards/, and the API under /api/.
 
 Bound to 127.0.0.1 by default. This accepts file uploads and runs inference on
 them; do not expose it to a network you do not trust.
@@ -252,7 +255,7 @@ async def upload(file: UploadFile = File(...), glb: bool = True):
     return JSONResponse(record)
 
 
-GRID_SIDE = 513  # the viewer's mesh vertices per side (HEIGHT_SAMPLE_WIDTH/HEIGHT in main.jsx)
+GRID_SIDE = 1025  # the viewer's mesh vertices per side (HEIGHT_SAMPLE_WIDTH/HEIGHT in main.jsx)
 
 
 def _png_data_uri(arr: np.ndarray) -> str:
@@ -333,6 +336,78 @@ def _read_reference(path: Path) -> np.ndarray:
     return ref
 
 
+def _reference_on_grid(ref_path: Path, scene_dir: Path, shape: tuple[int, int]) -> tuple[np.ndarray, bool]:
+    """Reference heights on the image grid -> (array, reprojected?). Georeferenced
+    reference + georeferenced image: reprojected by coordinates. Otherwise the two are
+    assumed to cover the same area and the reference is resampled to the image size."""
+    if ref_path.suffix.lower() in {".tif", ".tiff"}:
+        import rasterio
+
+        from viewer.geo import warp_to_grid
+
+        with rasterio.open(ref_path) as r, rasterio.open(scene_dir / "ndsm.tif") as img:
+            both = r.crs is not None and img.crs is not None
+            bounds, crs = tuple(img.bounds), img.crs
+        if both:
+            return warp_to_grid([ref_path], bounds, crs, shape), True
+    ref = _read_reference(ref_path)
+    if ref.shape != tuple(shape):
+        ref = np.asarray(Image.fromarray(ref.astype(np.float32), mode="F").resize(
+            (shape[1], shape[0]), Image.BILINEAR))
+    return ref, False
+
+
+def _error_png(err: np.ndarray, size: tuple[int, int]) -> tuple[str, float]:
+    """Signed error (model - reference) as blue (model low) / white / red (model high),
+    clipped at a round limit near the 95th percentile of |error|; no data is grey."""
+    finite = np.abs(err[np.isfinite(err)])
+    p95 = float(np.percentile(finite, 95)) if finite.size else 1.0
+    limit = next((v for v in (0.5, 1, 2, 3, 5, 10, 20, 50, 100, 200) if v >= p95), 500.0)
+    e = np.asarray(Image.fromarray(np.nan_to_num(err, nan=np.inf).astype(np.float32), mode="F")
+                   .resize(size, Image.NEAREST))
+    t = np.clip(np.where(np.isfinite(e), e, 0) / limit, -1, 1)[..., None]
+    blue, white, red = np.array([33, 102, 172]), np.array([247, 247, 247]), np.array([178, 24, 43])
+    rgb = np.where(t < 0, white + (blue - white) * -t, white + (red - white) * t)
+    rgb[~np.isfinite(e)] = (90, 90, 90)
+    return _png_data_uri(rgb.astype(np.uint8)), float(limit)
+
+
+def _validate(out: dict, ref_path: Path, scene_dir: Path) -> tuple[dict, dict]:
+    """Score against a reference: height above ground (vs the nDSM) or an absolute DSM
+    (vs the exported DSM), whichever it matches; plus per-class errors, an error map and
+    a scatter sample for the viewer."""
+    from viewer.height_metrics import class_scores, height_scores
+    from viewer.height_model import clean_height
+
+    ndsm, dsm = out["ndsm"], out["dsm"]
+    ref, reprojected = _reference_on_grid(ref_path, scene_dir, ndsm.shape)
+    ref = np.where(ref < -1e4, np.nan, ref).astype(np.float32)
+    kind = "ndsm"
+    if dsm is not None:
+        d_dsm = np.nanmedian(np.abs(ref - dsm))
+        d_ndsm = np.nanmedian(np.abs(ref - ndsm))
+        kind = "dsm" if d_dsm < d_ndsm else "ndsm"
+    if kind == "ndsm":
+        ref = clean_height(ref)  # height above ground: drop impossible values
+    pred = dsm if kind == "dsm" else ndsm
+    scores = height_scores(pred, ref, out["classes"])
+    err = (pred - ref).astype(np.float32)
+    finite = np.isfinite(err)
+    if not finite.any():
+        raise ValueError("the reference has no valid heights over the image")
+    idx = np.flatnonzero(finite)
+    pick = np.random.default_rng(0).choice(idx, size=min(1500, idx.size), replace=False)
+    png, limit = _error_png(err, _view_size(ndsm.shape))
+    validation = {k: _clean(v) if k != "n" else v for k, v in scores.items()}
+    validation.update(
+        reference_kind=kind, reprojected=reprojected, bias=_clean(float(np.mean(err[finite]))),
+        coverage=float(finite.mean()),
+        by_class=[{k: _clean(v) if isinstance(v, float) else v for k, v in r.items()}
+                  for r in class_scores(pred, ref, out["classes"])],
+        scatter=[[round(float(ref.flat[i]), 2), round(float(pred.flat[i]), 2)] for i in pick])
+    return validation, {"png": png, "limit_m": limit}
+
+
 def _view_size(shape: tuple[int, int], max_side: int = 0) -> tuple[int, int]:
     h, w = shape
     s = min(1.0, (max_side or VIEW_MAX_SIDE) / max(h, w))
@@ -346,21 +421,25 @@ JOB_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
 
 @app.get("/api/progress/{job}")
 def estimate_progress(job: str):
-    if not JOB_ID.fullmatch(job) or job not in JOBS:
+    if not JOB_ID.fullmatch(job):
         raise HTTPException(404, "no such job")
-    return JOBS[job]
+    # The UI starts polling as it starts sending the file, before the server has registered the
+    # job: an unknown (well-formed) id is an upload still in transit, not an error.
+    return JOBS.get(job, {"stage": "Uploading", "progress": 0.0})
 
 
 @app.post("/api/estimate")
 async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Form(None),
                             reference: UploadFile | None = File(None),
+                            gcps: UploadFile | None = File(None),
                             job: str | None = Form(None), tta: bool = Form(True)):
     """Height model on an upload: metric nDSM always, absolute DSM for GeoTIFFs.
 
     Response keeps the classify-static shape (rgb/height/classes data URIs) so
     the terrain viewer consumes it unchanged, plus metres, GeoTIFF download
     paths, the 3D city model, ground relief for georeferenced input, and -- if a
-    reference height map is attached -- RMSE/MAE/r against it. With a `job` id,
+    reference height map is attached -- RMSE/MAE/r against it. A `gcps` CSV (lon, lat,
+    height) corrects a GeoTIFF's absolute DSM. With a `job` id,
     progress is readable at /api/progress/<job> while this request runs.
     """
     from starlette.concurrency import run_in_threadpool
@@ -394,6 +473,22 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
         ref_path = scene_dir / f"reference{ref_suffix}"
         ref_path.write_bytes(await reference.read())
 
+    gcp_points = None
+    if gcps is not None and gcps.filename:
+        from viewer.estimate import read_gcps
+
+        gcp_path = scene_dir / "gcps.csv"
+        gcp_path.write_bytes((await gcps.read())[:1_000_000])
+        try:
+            gcp_points = read_gcps(gcp_path)[:1000]
+        except (UnicodeDecodeError, OSError) as exc:
+            raise HTTPException(422, f"could not read the control points CSV: {exc}") from exc
+        finally:
+            gcp_path.unlink(missing_ok=True)
+        if not gcp_points:
+            raise HTTPException(422, "no control points found; expected CSV rows of lon, lat, height "
+                                     "(or a header naming lat/lon/height columns)")
+
     def report(stage: str, fraction: float) -> None:
         if job:
             JOBS[job] = {"stage": stage, "progress": round(float(fraction), 3)}
@@ -403,7 +498,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
         # Model inference is blocking: run it off the event loop so the server keeps
         # answering progress polls and static files meanwhile.
         payload = await run_in_threadpool(_run_estimate, staged, scene_dir, scene_id, gsd,
-                                          ref_path, report, tta)
+                                          ref_path, report, tta, gcp_points)
     except HTTPException:
         raise
     except Exception as exc:
@@ -418,7 +513,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
 
 
 def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | None,
-                  ref_path: Path | None, report, tta: bool = True) -> dict:
+                  ref_path: Path | None, report, tta: bool = True, gcps: list | None = None) -> dict:
     from viewer.city_model import city_model
     from viewer.classify import classes_to_rgb
     from viewer.estimate import estimate
@@ -428,17 +523,11 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
     report("Loading height model", 0.01)
     model, device = _get_height_model()
     started = time.perf_counter()
-    out = estimate(staged, model, device, scene_dir, gsd_m=gsd, tta=tta, report=report)
-    validation = None
+    out = estimate(staged, model, device, scene_dir, gsd_m=gsd, tta=tta, report=report, gcps=gcps)
+    validation, error_view = None, None
     if ref_path is not None:
         report("Scoring against reference", 0.88)
-        ref = clean_height(_read_reference(ref_path))
-        ndsm = out["ndsm"]
-        if ref.shape != ndsm.shape:
-            ref = np.asarray(Image.fromarray(ref, mode="F").resize(
-                (ndsm.shape[1], ndsm.shape[0]), Image.BILINEAR))
-        validation = height_scores(ndsm, ref, out["classes"])
-        validation = {k: _clean(v) if k != "n" else v for k, v in validation.items()}
+        validation, error_view = _validate(out, ref_path, scene_dir)
 
     report("Building 3D city model", 0.92)
     record = out["record"]
@@ -508,6 +597,7 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
         "city": city,
         "terrain": terrain,
         "grids": grids,
+        "error": error_view,
     }
 
 
@@ -617,7 +707,13 @@ def health():
 # Mounted last so /api/* wins over a same-named static path.
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _write_upload_index()
-app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+# The React viewer (frontend/dist, from `npm run build`) at "/", so one process and one URL
+# serve the whole app; the older vanilla dashboards stay reachable under /dashboards/.
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+app.mount("/data-uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+app.mount("/dashboards", StaticFiles(directory=str(WEB_DIR), html=True), name="dashboards")
+app.mount("/", StaticFiles(directory=str(FRONTEND_DIST if FRONTEND_DIST.is_dir() else WEB_DIR),
+                           html=True), name="web")
 
 
 def main() -> None:
@@ -627,7 +723,8 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
-    print(f"AltiMap on http://{args.host}:{args.port}/  (upload at /upload.html)")
+    viewer = "the 3D viewer" if FRONTEND_DIST.is_dir() else "dashboards (run `npm run build` in frontend/ for the 3D viewer)"
+    print(f"AltiMap on http://{args.host}:{args.port}/  -> {viewer}")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 

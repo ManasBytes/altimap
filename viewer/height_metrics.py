@@ -38,6 +38,27 @@ def height_scores(pred: np.ndarray, ref: np.ndarray, classes: np.ndarray | None 
     return out
 
 
+CLASS_NAMES = {1: "ground", 2: "low vegetation", 3: "buildings", 4: "water", 5: "roads", 6: "trees"}
+
+
+def class_scores(pred: np.ndarray, ref: np.ndarray, classes: np.ndarray) -> list[dict]:
+    """RMSE / MAE / bias (mean of pred - ref) and pixel share per land-cover class, so a
+    validation can say where the error is (e.g. tall buildings, not roads)."""
+    pred = np.asarray(pred, np.float64)
+    ref = np.asarray(ref, np.float64)
+    valid = np.isfinite(pred) & np.isfinite(ref)
+    total = max(int(valid.sum()), 1)
+    rows = []
+    for c, name in CLASS_NAMES.items():
+        m = valid & (np.asarray(classes) == c)
+        if m.sum() == 0:
+            continue
+        e = pred[m] - ref[m]
+        rows.append({"class": name, "share": float(m.sum() / total), "rmse": float(np.sqrt(np.mean(e ** 2))),
+                     "mae": float(np.mean(np.abs(e))), "bias": float(np.mean(e))})
+    return rows
+
+
 class ScoreAccumulator:
     """Pixel-pooled scores over many tiles, from running sums. Averaging
     per-tile RMSEs instead would over-weight near-empty tiles."""

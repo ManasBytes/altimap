@@ -15,7 +15,39 @@ constrains terrain level, not building height.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
+
+# GDAL's HTTP reads have no timeout by default: a stalled Planetary Computer transfer would hang
+# an upload (or a benchmark) forever. Fail after 60 s instead, retrying transient errors; the
+# caller then reports "no DSM" and still returns the nDSM. Env vars set by the user win.
+for _k, _v in (("GDAL_HTTP_TIMEOUT", "60"), ("GDAL_HTTP_CONNECTTIMEOUT", "20"),
+               ("GDAL_HTTP_MAX_RETRY", "4"), ("GDAL_HTTP_RETRY_DELAY", "2")):
+    os.environ.setdefault(_k, _v)
+HTTP_TIMEOUT_S = 60
+
+
+def _default_request_timeout() -> None:
+    """planetary_computer signs URLs with requests and no timeout, so a stalled token request
+    hung uploads at "Writing absolute DSM". Give every requests call in this process that
+    doesn't choose its own a (connect, read) timeout."""
+    import requests
+
+    if getattr(requests.Session.request, "_altimap_timeout", False):
+        return
+    original = requests.Session.request
+
+    def request(self, method, url, **kwargs):
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = (20, HTTP_TIMEOUT_S)
+        return original(self, method, url, **kwargs)
+
+    request._altimap_timeout = True
+    requests.Session.request = request
+
+
+_default_request_timeout()
 
 STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 COLLECTION = "3dep-seamless"
@@ -54,7 +86,8 @@ class DemSource:
         import planetary_computer
         import pystac_client
 
-        catalog = pystac_client.Client.open(STAC_URL, modifier=planetary_computer.sign_inplace)
+        catalog = pystac_client.Client.open(STAC_URL, modifier=planetary_computer.sign_inplace,
+                                            timeout=HTTP_TIMEOUT_S)
         items = list(catalog.search(collections=[self.collection], bbox=bbox_lonlat,
                                     max_items=10).items())
         if not items:
@@ -146,3 +179,45 @@ class DemSource:
             finally:
                 self._handle = None
                 self._handle_bounds_lonlat = None
+
+
+GLO30_AWS = "https://copernicus-dem-30m.s3.amazonaws.com/{name}/{name}.tif"
+
+
+def glo30_tile_urls(west: float, south: float, east: float, north: float) -> list[str]:
+    """Copernicus GLO-30 1x1 degree tiles on AWS Open Data covering a lon/lat box. Tiles are
+    named by their south-west corner: N40_00_W080_00 covers 40..41 N, 80..79 W."""
+    import math
+
+    urls = []
+    for lat in range(math.floor(south), math.floor(north) + 1):
+        for lon in range(math.floor(west), math.floor(east) + 1):
+            name = (f"Copernicus_DSM_COG_10_{'N' if lat >= 0 else 'S'}{abs(lat):02d}_00_"
+                    f"{'E' if lon >= 0 else 'W'}{abs(lon):03d}_00_DEM")
+            urls.append(GLO30_AWS.format(name=name))
+    return urls
+
+
+def glo30(bounds, crs, shape: tuple[int, int]) -> np.ndarray | None:
+    """Copernicus GLO-30 (m, EGM2008) reprojected onto the grid `bounds` x `shape` in `crs`.
+
+    From the AWS Open Data copy first: plain HTTPS, no catalogue search or URL signing (the
+    same tiles as Planetary Computer's cop-dem-glo-30, byte for byte, but Planetary
+    Computer's token service stalled for 50-120 s at a time). Tiles missing on AWS are open
+    ocean, filled with 0 m as GLO-30 does at sea. Falls back to Planetary Computer."""
+    import rasterio
+    from rasterio.warp import transform_bounds
+
+    from viewer.geo import warp_to_grid
+
+    urls = []
+    for url in glo30_tile_urls(*transform_bounds(crs, "EPSG:4326", *bounds)):
+        try:
+            with rasterio.open(url):
+                urls.append(url)
+        except rasterio.RasterioIOError:
+            pass  # no tile here: all sea (or AWS unreachable -> fallback below)
+    if urls:
+        dem = warp_to_grid(urls, bounds, crs, shape).astype(np.float64)
+        return np.where(np.isfinite(dem), dem, 0.0)
+    return DemSource("cop-dem-glo-30").patch(list(bounds), str(crs), shape)

@@ -12,6 +12,9 @@ Ground: GLO-30 is itself a surface model (it contains buildings and canopy),
 so a grey-scale morphological opening wider than any building approximates
 bare earth before the nDSM is added -- otherwise buildings are counted twice.
 Heights are orthometric (EGM2008 geoid), recorded as such in the sidecar.
+
+Ground control points (lon, lat, height CSV) correct the DSM's vertical offset when it
+exceeds GLO-30's own accuracy (e.g. a datum mix-up).
 """
 
 from __future__ import annotations
@@ -30,6 +33,80 @@ DEM_POSTING_M = 30.0
 OPENING_M = 150.0  # wider than any building footprint we expect in a 30 m DEM
 MAX_SIDE = 4096  # ponytail: caps inference memory; tile the scene if larger outputs are needed
 MODEL_VERSION = "rs3dada-vitl-gamus"
+def read_gcps(path: Path) -> list[tuple[float, float, float]]:
+    """Ground control points from a CSV: lon, lat, height (m above mean sea level, the
+    DEM's datum). A header row naming the columns (lon/lng/longitude/x, lat/latitude/y,
+    h/height/elev/elevation/z/alt) sets their order; without one, lon,lat,height."""
+    import csv
+
+    names = {"lon": 0, "lng": 0, "longitude": 0, "x": 0, "lat": 1, "latitude": 1, "y": 1,
+             "h": 2, "height": 2, "elev": 2, "elevation": 2, "z": 2, "alt": 2}
+    order, points = [0, 1, 2], []
+    with open(path, newline="") as f:
+        for row in csv.reader(f):
+            cells = [c.strip().lower() for c in row]
+            if not cells or not any(cells):
+                continue
+            try:
+                vals = [float(c) for c in cells[:max(order) + 1]]
+            except ValueError:  # a header: map named columns
+                found = {names[c]: i for i, c in enumerate(cells) if c in names}
+                if len(found) == 3:
+                    order = [found[0], found[1], found[2]]
+                continue
+            if len(vals) > max(order):
+                points.append((vals[order[0]], vals[order[1]], vals[order[2]]))
+    return points
+
+
+GCP_MIN_OFFSET_M = 4.0  # Copernicus GLO-30's specified absolute vertical accuracy (LE90)
+
+
+def gcp_correction(ground: np.ndarray, transform, crs, gcps) -> tuple[np.ndarray | None, dict]:
+    """Vertical offset (m, a constant field to add to the DSM and ground) from ground control
+    points, compared with `ground`, the bare-earth estimate the points measure.
+
+    Applied only when it is a real offset: at least GCP_MIN_OFFSET_M, i.e. beyond GLO-30's own
+    accuracy (a datum mix-up such as GPS ellipsoidal heights vs EGM2008 is tens of metres), and
+    better than no correction at predicting left-out points. Measured against 3DEP LiDAR on
+    three US scenes where GLO-30 has no such offset, smaller fitted corrections (and tilted
+    planes) made the DSM worse, e.g. suburb 3.99 -> 6.06 m."""
+    from rasterio.warp import transform as warp
+
+    xs, ys = warp("EPSG:4326", crs, [g[0] for g in gcps], [g[1] for g in gcps])
+    inv = ~transform
+    res, used = [], []
+    for (lon, lat, h), x, y in zip(gcps, xs, ys):
+        c, r = inv * (x, y)
+        r, c = int(math.floor(r)), int(math.floor(c))
+        if 0 <= r < ground.shape[0] and 0 <= c < ground.shape[1] and np.isfinite(ground[r, c]):
+            res.append(h - float(ground[r, c]))
+            used.append({"lon": lon, "lat": lat, "height_m": h, "ground_m": float(ground[r, c])})
+    n = len(res)
+    info = {"n_given": len(gcps), "n_used": n}
+    if n == 0:
+        info["error"] = "no control point falls inside the image"
+        return None, info
+    rv = np.array(res)
+    offset = float(rv.mean())
+    rmse_none = float(np.sqrt(np.mean(rv ** 2)))
+    # leave-one-out: each point predicted by the mean of the others
+    left_out = float(np.sqrt(np.mean((rv - (rv.sum() - rv) / (n - 1)) ** 2))) if n > 1 else None
+    info.update(offset_m=offset, rmse_before_m=rmse_none, rmse_left_out_m=left_out, points=used)
+    if abs(offset) < GCP_MIN_OFFSET_M:
+        note = (f"not applied: the points put the ground within {abs(offset):.1f} m of them on "
+                f"average, inside GLO-30's own ±{GCP_MIN_OFFSET_M:.0f} m accuracy")
+    elif left_out is not None and left_out >= rmse_none:
+        note = "not applied: the points don't agree on a common offset"
+    else:
+        for p, r in zip(used, rv - offset):
+            p["residual_after_m"] = float(r)
+        info.update(model="offset", rmse_after_m=float(np.sqrt(np.mean((rv - offset) ** 2))))
+        return np.full(ground.shape, offset, np.float32), info
+    for p, r in zip(used, rv):
+        p["residual_after_m"] = float(r)
+    info.update(model="none", rmse_after_m=rmse_none, note=note)
+    return None, info
 
 
 def gsd_metres(geo: dict) -> float | None:
@@ -152,31 +229,57 @@ def _resize(arr: np.ndarray, shape: tuple[int, int], nearest: bool = False) -> n
     return np.asarray(Image.fromarray(arr.astype(np.float32), mode="F").resize((shape[1], shape[0]), mode))
 
 
-def ground_for(geo: dict, shape: tuple[int, int], opening_m: float | None = None) -> np.ndarray | None:
-    """Bare-earth ground (m, orthometric) on the image grid, or None if unavailable."""
-    from viewer.dem import DemSource
-    from viewer.geo import resample_to
+BARE_EARTH_PAD_M = 300.0  # margin around the image: the widest bare-earth opening below
 
-    opening = opening_m or OPENING_M
+
+def padded_dem(geo: dict) -> tuple[np.ndarray | None, tuple[int, int]]:
+    """One GLO-30 read for the whole upload: the image extent plus BARE_EARTH_PAD_M on every
+    side, at the DEM's ~30 m posting -> (coarse array, (pad rows, pad cols) in image pixels).
+    The export DEM and the viewer's bare-earth ground both come from it (reading twice
+    doubled the upload's network time)."""
+    from viewer.dem import glo30
+
     gsd = gsd_metres(geo)
     w, s, e, n = geo["bounds"]
-    pad = opening * (geo["res_m"][0] / gsd)  # one opening width of padding, in CRS units
+    pad = BARE_EARTH_PAD_M * (geo["res_m"][0] / gsd)  # in CRS units
     padded = [w - pad, s - pad, e + pad, n + pad]
     coarse = (max(3, math.ceil((n - s + 2 * pad) * gsd / geo["res_m"][1] / DEM_POSTING_M)),
               max(3, math.ceil((e - w + 2 * pad) * gsd / geo["res_m"][0] / DEM_POSTING_M)))
-    dem = DemSource(DEM_COLLECTION).patch(padded, geo["crs"], coarse)
-    if dem is None:
-        return None
-    ground = bare_earth(dem, size_px=max(3, round(opening / DEM_POSTING_M)))
-    # back onto the padded image grid, then crop the padding off
-    ph, pw = round(pad / geo["res_m"][1]), round(pad / geo["res_m"][0])
-    full = resample_to(ground, (shape[0] + 2 * ph, shape[1] + 2 * pw))
-    return full[ph:ph + shape[0], pw:pw + shape[1]].astype(np.float32)
+    dem = glo30(padded, geo["crs"], coarse)
+    return dem, (round(pad / geo["res_m"][1]), round(pad / geo["res_m"][0]))
+
+
+def dem_on_image(coarse: np.ndarray, pad_px: tuple[int, int], shape: tuple[int, int]) -> np.ndarray:
+    """The padded coarse DEM bilinearly resampled onto the image grid, cropping the margin.
+    Separable (rows, then columns), so memory is the output size even for huge images."""
+    ph, pw = pad_px
+    a = np.asarray(coarse, np.float64)
+
+    def axis_weights(n_out: int, pad: int, n_coarse: int):
+        x = (np.arange(n_out) + pad + 0.5) * n_coarse / (n_out + 2 * pad) - 0.5
+        x = np.clip(x, 0, n_coarse - 1)
+        i0 = np.floor(x).astype(int)
+        i1 = np.minimum(i0 + 1, n_coarse - 1)
+        return i0, i1, x - i0
+
+    r0, r1, tr = axis_weights(shape[0], ph, a.shape[0])
+    c0, c1, tc = axis_weights(shape[1], pw, a.shape[1])
+    rows = a[r0] * (1 - tr)[:, None] + a[r1] * tr[:, None]
+    return (rows[:, c0] * (1 - tc) + rows[:, c1] * tc).astype(np.float32)
+
+
+def ground_for(coarse: np.ndarray, pad_px: tuple[int, int], shape: tuple[int, int],
+               opening_m: float = OPENING_M) -> np.ndarray:
+    """Bare-earth ground (m, orthometric) on the image grid from the padded coarse DEM."""
+    bare = bare_earth(coarse, size_px=max(3, round(opening_m / DEM_POSTING_M)))
+    return dem_on_image(bare, pad_px, shape)
 
 
 def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None = None,
-             tta: bool = True, report=None) -> dict:
+             tta: bool = True, report=None, gcps: list | None = None) -> dict:
     """Run the height model on `path`, write GeoTIFFs into `out_dir`, return arrays + a record.
+
+    `gcps`: (lon, lat, height) control points that correct the DSM (georeferenced input only).
 
     `report(stage, fraction)`, if given, receives progress for a UI (fraction 0..0.9).
     """
@@ -234,11 +337,10 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
 
     ground, dsm = None, None  # ground: bare earth for the 3D view only; dsm: the export
     if geo.get("georeferenced"):
-        from viewer.dem import DemSource
-
         report("Fetching ground elevation (Copernicus GLO-30)", 0.78)
         try:
-            dem = DemSource(DEM_COLLECTION).patch(geo["bounds"], geo["crs"], shape)
+            coarse, pad_px = padded_dem(geo)
+            dem = None if coarse is None else dem_on_image(coarse, pad_px, shape)
             if dem is None:
                 record["dsm_error"] = "no Copernicus GLO-30 coverage for this area"
         except Exception as exc:  # network / coverage: the nDSM is still a valid product
@@ -246,22 +348,30 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
         if dem is not None:
             report("Writing absolute DSM", 0.86)
             dsm = dem_consistent_ground(dem, ndsm, gsd_out) + ndsm
-            dsm_range = (float(np.nanmin(dsm)), float(np.nanmax(dsm)))
-            write_elevation_cog(out_dir / "dsm.tif", dsm, transform, crs, Sidecar(
-                gsd_m=gsd_out, source_gsd_m=gsd_out, datum="orthometric", vertical_unit="m",
-                model_version=MODEL_VERSION, height_range_m=dsm_range, tile_overlap_px=259,
-                dtm_source=f"{DEM_COLLECTION}, DEM-consistent: model detail added with its "
-                           f"{DEM_POSTING_M:.0f} m mean removed"))
             method = display_ground_method(float((classes == 3).mean()))
             if method == "subtract":
                 ground = dem_consistent_ground(dem, ndsm, gsd_out)
             else:
-                try:
-                    ground = ground_for(geo, shape, opening_m=300.0 if method == "open300" else 150.0)
-                except Exception:
-                    ground = None
-                if ground is None:
-                    ground = dem_consistent_ground(dem, ndsm, gsd_out)
+                ground = ground_for(coarse, pad_px, shape, 300.0 if method == "open300" else 150.0)
+            fix, gcp_info = (None, None)
+            if gcps:
+                # Control points measure the ground, so they are compared with the bare-earth
+                # estimate, not the DSM: along streets the DEM-consistent DSM carries the
+                # street/roof balancing of each 30 m cell, and fitting that cost accuracy on roofs.
+                fix, gcp_info = gcp_correction(ground, transform, crs, gcps)
+                record["gcp"] = gcp_info
+                if fix is not None:
+                    dsm = dsm + fix
+                    ground = ground + fix  # the 3D view's terrain follows the corrected DSM
+            dem_note = (f"Copernicus GLO-30, DEM-consistent: model detail added with its "
+                        f"{DEM_POSTING_M:.0f} m mean removed")
+            if fix is not None:
+                dem_note += f"; GCP offset {gcp_info['offset_m']:+.2f} m ({gcp_info['n_used']} points)"
+            dsm_range = (float(np.nanmin(dsm)), float(np.nanmax(dsm)))
+            write_elevation_cog(out_dir / "dsm.tif", dsm, transform, crs, Sidecar(
+                gsd_m=gsd_out, source_gsd_m=gsd_out, datum="orthometric", vertical_unit="m",
+                model_version=MODEL_VERSION, height_range_m=dsm_range, tile_overlap_px=259,
+                dtm_source=dem_note))
             record["dsm"] = {"min_m": dsm_range[0], "max_m": dsm_range[1],
                              "dem_min_m": float(np.nanmin(dem)), "dem_max_m": float(np.nanmax(dem)),
                              "ground_min_m": float(np.nanmin(ground)),
@@ -296,19 +406,25 @@ def main() -> None:
     ap.add_argument("--ckpt", type=Path, default=default_ckpt)
     ap.add_argument("--synrs3d", type=Path, default=cache / "SynRS3D")
     ap.add_argument("--no-tta", action="store_true", help="4x faster, slightly less accurate")
+    ap.add_argument("--gcps", type=Path, default=None,
+                    help="CSV of ground control points (lon, lat, height m) to correct the DSM")
     args = ap.parse_args()
+    gcps = read_gcps(args.gcps) if args.gcps else None
 
     model, device = load_model(args.ckpt, args.synrs3d)
     print(f"model {args.ckpt.name} on {device}")
     for path in args.images:
         out_dir = args.out / path.stem
-        result = estimate(path, model, device, out_dir, gsd_m=args.gsd, tta=not args.no_tta)
+        result = estimate(path, model, device, out_dir, gsd_m=args.gsd, tta=not args.no_tta, gcps=gcps)
         record = result["record"]
         (out_dir / "meta.json").write_text(json.dumps(record, indent=2))
         dsm = record["dsm"]
         print(f"{path.name}: nDSM max {record['ndsm_max_m']:.1f} m"
               + (f", DSM {dsm['min_m']:.1f}-{dsm['max_m']:.1f} m ({dsm['datum']})" if dsm else "")
               + (f", DSM skipped: {record['dsm_error']}" if record.get("dsm_error") else "")
+              + (f", GCPs {record['gcp']['n_used']}/{record['gcp']['n_given']} used, RMSE "
+                 f"{record['gcp']['rmse_before_m']:.2f} -> {record['gcp']['rmse_after_m']:.2f} m"
+                 if record.get("gcp", {}).get("n_used") else "")
               + f" -> {out_dir}")
 
 

@@ -123,3 +123,57 @@ def test_encode_grid16_keeps_millimetre_heights_on_the_mesh_grid():
     # neighbours differ by the real slope, not by an 8-bit step
     step = np.diff(decoded[256, 250:260])
     assert np.allclose(step, 0.01 * 768 / 513, atol=0.002)
+
+
+def test_warp_to_grid_mosaics_tiles_in_another_crs(tmp_path):
+    import rasterio
+    from rasterio.transform import from_origin
+
+    from viewer.geo import warp_to_grid
+
+    # two lon/lat DEM tiles side by side (west one = 100 m, east one = 200 m, 0.001 deg posting)
+    for name, lon0, value in (("w.tif", 77.0, 100.0), ("e.tif", 77.1, 200.0)):
+        with rasterio.open(tmp_path / name, "w", driver="GTiff", width=100, height=100, count=1,
+                           dtype="float32", crs="EPSG:4326", nodata=-32767,
+                           transform=from_origin(lon0, 28.1, 0.001, 0.001)) as dst:
+            dst.write(np.full((1, 100, 100), value, np.float32))
+    # a UTM 43N grid straddling the tile seam at lon 77.1 (x ~ 709.8 km at lat 28.05)
+    from rasterio.warp import transform
+    xs, ys = transform("EPSG:4326", "EPSG:32643", [77.08, 77.12], [28.04, 28.06])
+    grid = warp_to_grid([tmp_path / "w.tif", tmp_path / "e.tif"],
+                        (xs[0], ys[0], xs[1], ys[1]), "EPSG:32643", (50, 80))
+    assert np.nanmin(grid) >= 99 and np.nanmax(grid) <= 201
+    assert np.isclose(grid[25, 2], 100, atol=1) and np.isclose(grid[25, -3], 200, atol=1)
+    # outside every tile -> NaN, never a sentinel
+    far = warp_to_grid([tmp_path / "w.tif"], (xs[0] + 5e4, ys[0], xs[1] + 5e4, ys[1]), "EPSG:32643", (10, 10))
+    assert np.isnan(far).all()
+
+
+def test_requests_without_a_timeout_get_one_after_importing_dem(monkeypatch):
+    import requests
+
+    import viewer.dem  # noqa: F401  (installs the default)
+
+    seen = {}
+
+    def fake_send(self, request, **kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+        raise requests.ConnectionError("offline in tests")
+
+    monkeypatch.setattr(requests.Session, "send", fake_send)
+    try:
+        requests.Session().get("https://example.invalid/")
+    except requests.ConnectionError:
+        pass
+    assert seen["timeout"] == (20, viewer.dem.HTTP_TIMEOUT_S)
+
+
+def test_glo30_tile_names_follow_the_south_west_corner():
+    from viewer.dem import glo30_tile_urls
+
+    (url,) = glo30_tile_urls(-79.99, 40.42, -79.97, 40.44)  # Pittsburgh
+    assert url.endswith("Copernicus_DSM_COG_10_N40_00_W080_00_DEM/Copernicus_DSM_COG_10_N40_00_W080_00_DEM.tif")
+    names = [u.rsplit("/", 1)[1] for u in glo30_tile_urls(77.9, 12.9, 78.1, 13.1)]  # straddles 78 E, 13 N
+    assert names == ["Copernicus_DSM_COG_10_N12_00_E077_00_DEM.tif", "Copernicus_DSM_COG_10_N12_00_E078_00_DEM.tif",
+                     "Copernicus_DSM_COG_10_N13_00_E077_00_DEM.tif", "Copernicus_DSM_COG_10_N13_00_E078_00_DEM.tif"]
+    assert glo30_tile_urls(-0.5, -0.5, -0.4, -0.4)[0].rsplit("/", 1)[1] == "Copernicus_DSM_COG_10_S01_00_W001_00_DEM.tif"

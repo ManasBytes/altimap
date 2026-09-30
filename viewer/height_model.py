@@ -61,11 +61,32 @@ def normalize(rgb: np.ndarray) -> np.ndarray:
 
 
 def build_model(synrs3d_dir: Path):
+    import torch
+
     sys.path.insert(0, str(synrs3d_dir))
     from models.dpt import DPT_DINOv2  # noqa: E402 -- from the cloned SynRS3D repo
 
-    # Encoder code comes via torch.hub (needs internet once; runs offline from ~/.cache/torch/hub after).
-    return DPT_DINOv2(encoder="vitl", head_configs=HEADS, pretrained=False)
+    # The encoder code comes via torch.hub('facebookresearch/dinov2'), which asks GitHub for
+    # the default branch on *every* load (urlopen, no timeout): on a slow network that hung
+    # model loading. Once the code is cached, load it from disk instead; the first run still
+    # downloads it into ~/.cache/torch/hub.
+    cached = Path(torch.hub.get_dir()) / "facebookresearch_dinov2_main"
+    if not (cached / "hubconf.py").exists():
+        return DPT_DINOv2(encoder="vitl", head_configs=HEADS, pretrained=False)
+    hub_load = torch.hub.load
+
+    def load_cached(repo_or_dir, model, *args, **kwargs):
+        if repo_or_dir == "facebookresearch/dinov2":
+            kwargs.pop("trust_repo", None)
+            kwargs["source"] = "local"
+            return hub_load(str(cached), model, *args, **kwargs)
+        return hub_load(repo_or_dir, model, *args, **kwargs)
+
+    torch.hub.load = load_cached
+    try:
+        return DPT_DINOv2(encoder="vitl", head_configs=HEADS, pretrained=False)
+    finally:
+        torch.hub.load = hub_load
 
 
 def load_model(ckpt: Path, synrs3d_dir: Path, device: str | None = None):

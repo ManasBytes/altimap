@@ -70,3 +70,19 @@ def test_all_nan_input_returns_nan_not_raise() -> None:
     ref = np.full((3, 3), np.nan, np.float32)
     s = height_scores(ref, ref)
     assert s["n"] == 0 and math.isnan(s["rmse"])
+
+
+def test_class_scores_locate_the_error():
+    from viewer.height_metrics import class_scores
+
+    ref = np.zeros((10, 10))
+    ref[:5] = 20.0  # top half buildings
+    classes = np.ones((10, 10), np.uint8)
+    classes[:5] = 3
+    pred = ref.copy()
+    pred[:5] -= 4.0  # buildings read 4 m low, ground exact
+    pred[9, 9] = np.nan
+    rows = {r["class"]: r for r in class_scores(pred, ref, classes)}
+    assert set(rows) == {"ground", "buildings"}
+    assert rows["buildings"]["bias"] == -4.0 and rows["buildings"]["rmse"] == 4.0
+    assert rows["ground"]["rmse"] == 0.0 and abs(rows["buildings"]["share"] - 50 / 99) < 1e-9

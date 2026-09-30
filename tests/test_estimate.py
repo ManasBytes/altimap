@@ -141,3 +141,81 @@ def test_gsd_metres_for_any_geographic_crs():
     g = gsd_metres({"georeferenced": True, "crs": "EPSG:4674", "res_m": [1e-5, 1e-5],
                     "bounds": [-47.0, -0.01, -46.99, 0.01]})  # SIRGAS 2000, geographic
     assert 1.0 < g < 1.2
+
+
+def test_read_gcps_follows_the_header_and_skips_junk(tmp_path):
+    from viewer.estimate import read_gcps
+
+    f = tmp_path / "gcps.csv"
+    f.write_text("name,lat,lon,elevation\nA,28.61,77.20,215.5\n\nB,28.62,77.21,219\n")
+    assert read_gcps(f) == []  # a non-numeric first column: rows don't parse as numbers
+    f.write_text("lat,lon,elevation\n28.61,77.20,215.5\n\n28.62,77.21,219\n")
+    assert read_gcps(f) == [(77.20, 28.61, 215.5), (77.21, 28.62, 219.0)]  # -> lon, lat, h
+    f.write_text("77.20,28.61,215.5\n")  # no header: lon, lat, height
+    assert read_gcps(f) == [(77.20, 28.61, 215.5)]
+
+
+def _utm_grid():
+    from rasterio.transform import from_origin
+
+    return from_origin(700_000.0, 3_100_000.0, 1.0, 1.0), "EPSG:32643"  # 1 m pixels, UTM 43N
+
+
+def _lonlat(transform, crs, rows, cols):
+    from rasterio.warp import transform as warp
+
+    xs, ys = zip(*[transform * (c + 0.5, r + 0.5) for r, c in zip(rows, cols)])
+    lons, lats = warp(crs, "EPSG:4326", list(xs), list(ys))
+    return lons, lats
+
+
+def test_gcps_remove_a_datum_sized_offset_and_ignore_outside_points():
+    from viewer.estimate import gcp_correction
+
+    transform, crs = _utm_grid()
+    true = np.full((200, 200), 250.0, np.float32)
+    ground = true - 30.0  # e.g. GPS ellipsoidal points vs an EGM2008 DEM: tens of metres
+    lons, lats = _lonlat(transform, crs, [20, 100, 180], [30, 90, 150])
+    gcps = [(lo, la, 250.0 + e) for lo, la, e in zip(lons, lats, (0.3, -0.2, 0.1))]
+    gcps.append((0.0, 0.0, 10.0))  # far outside the image
+    fix, info = gcp_correction(ground, transform, crs, gcps)
+    assert info["n_given"] == 4 and info["n_used"] == 3 and info["model"] == "offset"
+    assert abs(float(fix[0, 0]) - 30.0) < 0.2
+    assert info["rmse_after_m"] < 0.3 and abs(info["rmse_before_m"] - 30.0) < 0.3
+
+
+def test_gcps_leave_small_or_inconsistent_offsets_alone():
+    from viewer.estimate import GCP_MIN_OFFSET_M, gcp_correction
+
+    transform, crs = _utm_grid()
+    ground = np.full((200, 200), 300.0, np.float32)
+    rows, cols = [10, 10, 190, 190, 100, 50], [10, 190, 10, 190, 100, 150]
+    lons, lats = _lonlat(transform, crs, rows, cols)
+    # within GLO-30's own accuracy: not a datum problem, leave it
+    small = [(lo, la, 300.0 + GCP_MIN_OFFSET_M / 2) for lo, la in zip(lons, lats)]
+    fix, info = gcp_correction(ground, transform, crs, small)
+    assert fix is None and info["model"] == "none" and "accuracy" in info["note"]
+    # large on average but the points disagree wildly: no common offset to apply
+    wild = [(lo, la, 300.0 + e) for lo, la, e in zip(lons, lats, (40, -35, 30, -25, 45, -20))]
+    fix, info = gcp_correction(ground, transform, crs, wild)
+    assert fix is None and info["model"] == "none"
+
+
+def test_one_padded_dem_read_serves_the_export_and_the_bare_earth_ground():
+    from viewer.estimate import dem_on_image, ground_for
+
+    # a 30 m-posted DEM over the image plus a 300 m margin: a plane z = 100 + 0.01 x + 0.02 y
+    # (x, y in image pixels of 1 m), so any correct resampling onto the image reproduces it
+    pad, shape = 300, (1020, 780)  # padded extents 1620 x 1380 m: whole 30 m cells, as padded_dem asks
+    rows_c, cols_c = (shape[0] + 2 * pad) // 30, (shape[1] + 2 * pad) // 30
+    yc = (np.arange(rows_c) + 0.5) * 30 - 0.5 - pad
+    xc = (np.arange(cols_c) + 0.5) * 30 - 0.5 - pad
+    coarse = 100 + 0.01 * xc[None, :] + 0.02 * yc[:, None]
+    dem = dem_on_image(coarse, (pad, pad), shape)
+    yy, xx = np.mgrid[: shape[0], : shape[1]]
+    assert dem.shape == shape and np.abs(dem - (100 + 0.01 * xx + 0.02 * yy)).max() < 0.05
+    # the opening removes a 60 m "building" block but keeps the terrain plane
+    bumpy = coarse.copy()
+    bumpy[20:22, 20:22] += 30
+    ground = ground_for(bumpy, (pad, pad), shape, 150.0)
+    assert np.abs(ground - dem).max() < 1.5

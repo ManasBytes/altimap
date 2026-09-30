@@ -11,6 +11,9 @@ Built for SIH 2026 problem statement 26175, *DepthWizard* (ISRO). Brief: `docs/p
 All elevation outputs are float32 Cloud-Optimized GeoTIFFs in metres, NaN nodata, with a JSON sidecar
 (GSD, vertical datum, height range, DEM source).
 
+Docs: **[SETUP.md](SETUP.md)** (install and run), **[ARCHITECTURE.md](ARCHITECTURE.md)** (how every
+part works, data formats, API, models, measured results and limits), [model card](https://huggingface.co/Dilavesh/altimap-height).
+
 ## How it works
 
 1. **Height model.** RS3DAda ([SynRS3D, NeurIPS 2024](https://github.com/JTRNEO/SynRS3D)): a DINOv2 ViT-L
@@ -91,6 +94,29 @@ RMSE (10.0 m) against MAE (1.4 m) shows a small number of very tall pixels being
 (the long-tail problem, §4.3 of the design doc). New York was in the training split; the validation
 split used for checkpoint selection covered DC and Philadelphia only.
 
+## Results by landscape (USGS 3DEP airborne LiDAR)
+
+Four NAIP scenes covering the brief's landscape types, scored as the app produces them
+(`python -m viewer.dsm_eval`, one pass without flip averaging). *DSM* is the exported absolute
+DSM; *GLO-30 alone* is what you'd get with no model at all.
+
+| Scene (pixel size) | nDSM RMSE (predict 0) | nDSM bias | DSM RMSE (GLO-30 alone) | DSM r (GLO-30 alone) |
+|---|---|---|---|---|
+| Dense city, Philadelphia (0.3 m) | 29.8 m (42.4) | −6.8 m | 34.7 m (36.3) | 0.388 (0.272) |
+| Suburb, Chevy Chase (0.6 m) | 4.5 m (6.5) | +1.3 m | 3.99 m (4.02) | 0.817 (0.796) |
+| Hilly town, Pittsburgh (0.6 m) | 3.7 m (6.5) | −0.7 m | 5.04 m (5.53) | 0.940 (0.923) |
+| Forest, Smoky Mountains (0.6 m) | 18.5 m (24.7) | −15.9 m | 9.03 m (8.53) | 0.991 (0.993) |
+
+- **Where it helps**: the model improves the absolute DSM over Copernicus in the city, suburb and
+  hills.
+- **Weak spots**: very tall buildings, and forest canopy (16 m too low), where the DSM ends up
+  0.5 m worse than Copernicus alone.
+- **Resolution** (images block-averaged to 1, 2, 5 and 10 m): object heights hold up to about
+  1–2 m and fade to flat by 5–10 m. Because the export is DEM-consistent, the DSM stays within
+  0.1 m of GLO-30 alone there.
+
+Full breakdown in [ARCHITECTURE.md](ARCHITECTURE.md) §9.
+
 ## Run it
 
 Teammates setting up from scratch: follow **[SETUP.md](SETUP.md)** (every step, model
@@ -119,10 +145,13 @@ git clone https://github.com/JTRNEO/SynRS3D.git viewer/cache/SynRS3D
 .venv-da3/bin/python -m viewer.estimate scene.tif photo.png --out results/
 .venv-da3/bin/python -m viewer.estimate photo.jpg --gsd 0.5 --out results/   # known pixel size
 
-# 3b. Interactive app
-.venv-da3/bin/python -m viewer.server            # API on http://127.0.0.1:8000
-cd frontend && npm install && npm run build && npm run preview -- --host 127.0.0.1 --port 5173
-                                                 # open http://127.0.0.1:5173 → Upload tab
+# 3a'. With ground control points (CSV lon, lat, height) correcting the DSM's vertical offset
+.venv-da3/bin/python -m viewer.estimate scene.tif --gcps points.csv --out results/
+
+# 3b. Interactive app: build the viewer once, then one server serves app + API
+(cd frontend && npm install && npm run build)
+.venv-da3/bin/python -m viewer.server            # open http://127.0.0.1:8000
+.venv-da3/bin/python -m viewer.server --host 0.0.0.0   # on a VM, reachable from other machines
 ```
 
 Reproduce training and evaluation (24 GB GPU, ~8 h):
@@ -142,11 +171,19 @@ Tests (no GPU, no network): `uv pip install -e ".[dev]"`, then `python -m pytest
 - **Training domain.** GAMUS is 0.33 m aerial imagery from three US cities. On imagery that differs a
   lot in resolution, off-nadir angle or landscape (hilly, forested, rural India), accuracy will drop.
   Supplying the true GSD matters most.
-- **PNG/JPG without a GSD** is assumed to be 0.33 m/pixel. A wrong assumption changes how large
-  objects look to the model and biases the predicted heights, so pass `--gsd` (or fill the UI
-  field) whenever the pixel size is known.
+- **PNG/JPG without a GSD** is assumed to be 0.33 m/pixel. Measured on the 0.6 m NAIP scenes
+  uploaded as plain PNGs, the wrong assumption moved nDSM RMSE by −0.7 to +1.0 m (better in the
+  suburb, worse in the hills and forest). Pass `--gsd` (or fill the UI field) when it's known.
 - **Absolute DSM accuracy is bounded by GLO-30** (30 m posting, ~2–4 m vertical accuracy) for the
   ground component. Hilly terrain relief comes from the DEM, not the model.
 - **Vertical datum** is orthometric (EGM2008). Comparing against ellipsoidal references needs a
   geoid correction.
-- The RS3DAda weights carry no explicit licence. Research use only.
+- **Forest canopy** reads ~16 m low, and there the DSM is 0.5 m worse than GLO-30 alone. Meta's
+  CHMv2 canopy model was tested and didn't fix it (ARCHITECTURE.md §5).
+- **Large scenes** are processed at no more than 4096 px on the long side, at the model's 0.33 m.
+  Beyond ~1.35 km the model sees a coarser image, and object heights fade (see the resolution
+  numbers above). Tiling is the fix.
+- **Network**: GeoTIFFs need Copernicus GLO-30. It's read from AWS Open Data, with Microsoft
+  Planetary Computer as fallback; remote reads time out after 60 s and then return the nDSM only.
+- **Licences**: RS3DAda weights are MIT (JTRNEO/RS3DAda), and so are our fine-tuned v1 weights.
+  v2 is also trained on SynRS3D data (CC BY-NC 4.0): treat it as non-commercial.

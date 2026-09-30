@@ -85,6 +85,41 @@ def resample_to(array: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
     return ndimage.zoom(src, zoom, order=1, mode="nearest")
 
 
+def warp_to_grid(sources, bounds, crs, shape: tuple[int, int]) -> np.ndarray:
+    """Rasters (paths or URLs, any CRS; tiles, a mosaic or one file) resampled bilinearly
+    onto the grid `bounds` (w, s, e, n in `crs`) x `shape`. The first source to cover a
+    pixel wins; nodata and uncovered pixels are NaN. Used for local and uploaded DEMs,
+    georeferenced reference heights and LiDAR benchmarks, so all land on the image grid
+    through the same reprojection."""
+    import rasterio
+    from rasterio.enums import Resampling
+    from rasterio.transform import from_bounds
+    from rasterio.vrt import WarpedVRT
+    from rasterio.warp import transform_bounds
+
+    h, w = shape
+    dst = from_bounds(*bounds, width=w, height=h)
+    out = np.full(shape, np.nan, np.float32)
+    for source in sources:
+        with rasterio.open(source) as src:
+            if src.crs is None:
+                continue
+            sw, ss, se, sn = transform_bounds(crs, src.crs, *bounds)
+            b = src.bounds
+            if sw > b.right or se < b.left or ss > b.top or sn < b.bottom:
+                continue  # tile doesn't touch the grid: skip without reading it
+            nodata = src.nodata if src.nodata is not None else np.nan
+            with WarpedVRT(src, crs=crs, transform=dst, width=w, height=h, src_nodata=nodata,
+                           nodata=np.nan, dtype="float32", resampling=Resampling.bilinear) as vrt:
+                a = vrt.read(1)
+        a[a < -1e4] = np.nan  # large negative sentinels even when nodata is unset
+        fill = np.isnan(out) & np.isfinite(a)
+        out[fill] = a[fill]
+        if np.isfinite(out).all():
+            break
+    return out
+
+
 def fit_absolute_elevation(
     height01: np.ndarray,
     dem: np.ndarray,

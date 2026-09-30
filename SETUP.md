@@ -72,8 +72,9 @@ and licence (MIT, crediting RS3DAda and GAMUS); its source is `docs/model-card.m
 training run finishes, its weights appear under `v2/` in the same repo.
 
 The DINOv2 encoder code is fetched by `torch.hub` from GitHub the first time a model loads, then
-cached in `~/.cache/torch/hub`. After that the app runs offline, except for GeoTIFF uploads,
-which read the Copernicus GLO-30 DEM from Microsoft Planetary Computer.
+loaded from `~/.cache/torch/hub` without contacting GitHub. After that the app runs offline,
+except for GeoTIFF uploads, which read the Copernicus GLO-30 DEM from AWS Open Data (Microsoft
+Planetary Computer as fallback).
 
 ## 4. Frontend
 
@@ -86,28 +87,51 @@ cd ..
 
 ## 5. Run the app
 
-Two terminals, both from the repo root:
+One command from the repo root. The server serves the built viewer (step 4) and the API on the
+same port:
 
 ```bash
-# Terminal 1: height API on http://127.0.0.1:8000 (the model loads on the first upload)
-.venv-da3/bin/python -m viewer.server
-
-# Terminal 2: the viewer on http://127.0.0.1:5173
-cd frontend && npm run preview -- --host 127.0.0.1 --port 5173
+.venv-da3/bin/python -m viewer.server                  # http://127.0.0.1:8000
+.venv-da3/bin/python -m viewer.server --host 0.0.0.0   # on a VM: http://<vm-address>:8000
 ```
 
-Open http://127.0.0.1:5173, click **Import** (or drop a file on the viewport):
+On a VM, either open port 8000 in its firewall, or keep it private and tunnel it from your laptop
+with `ssh -L 8000:127.0.0.1:8000 <user>@<vm>`, then open http://127.0.0.1:8000. The server accepts
+uploads and runs the model on them, so don't expose it to networks you don't trust.
+The model loads on the first upload.
+
+(Frontend development: `cd frontend && npm run dev` serves on :5173 and forwards `/api` to the
+server on :8000, see `frontend/vite.config.js`. Rebuild with `npm run build` for step 5.)
+
+Open the app, click **Import** (or drop a file on the viewport):
 
 - **PNG / JPG** gives heights above ground (nDSM) and a 3D city model on flat ground. Enter the
   pixel size in metres if you know it (otherwise 0.33 m is assumed; it sets the footprint scale).
 - **GeoTIFF** also gives an absolute DSM (metres above sea level, EGM2008) on real terrain.
-- **Add reference heights** (optional): a single-band height-above-ground GeoTIFF on the same
-  grid. The app then scores the model against it (RMSE, MAE, correlation).
+- **Add reference heights** (optional): a single-band height map, either height above ground
+  or an absolute DSM (the app works out which). A georeferenced reference is reprojected onto
+  the image by its coordinates; any other is assumed to cover the same area. The app scores the
+  model (RMSE, MAE, correlation, bias, per land-cover class, a scatter plot) and adds an
+  **Error** layer showing where the model reads high or low.
+- **Add ground control points** (optional, GeoTIFF only): a CSV of `lon, lat, height` (WGS84
+  degrees, metres above mean sea level, the same datum as the DEM; a header row naming the
+  columns is fine). They are compared with the bare-earth ground. The DSM is shifted by their
+  mean difference only if that is at least 4 m (beyond GLO-30's own accuracy) and consistent
+  across the points; otherwise nothing changes, and the panel says why. That's for real vertical
+  offsets: e.g. GPS (ellipsoidal) heights vs EGM2008 differ by tens of metres over India. On our
+  LiDAR test scenes the DEM had no such offset, so nothing was applied.
 - **Quality**: *High* averages 4 flipped passes (~3x slower), *Fast* runs one pass.
 
-In the viewer: click a building for its height, floors, footprint area and roof elevation;
-double-click the terrain to probe height and slope; **Export** saves the 3D model as `.glb`.
-The GeoTIFFs (`ndsm.tif`, `dsm.tif`) and `buildings.geojson` download from the right panel.
+In the viewer:
+- Click a building for its height, floors, footprint, volume and roof elevation.
+- **Measure**, then double-click the terrain: height, elevation and slope at that point; a
+  second double-click draws the height profile from A to B.
+- Layers: **Surface**, **Height** (above ground), **RGB**, **Classes**, **Slope** (degrees) and
+  **Error** (with a reference); **Contour lines** at an automatic interval.
+- **Walk**: first person at eye height on the ground, WASD (Shift runs), drag to look,
+  buildings block you.
+- **Export** saves the 3D model as `.glb`. The GeoTIFFs (`ndsm.tif`, `dsm.tif`) and
+  `buildings.geojson` download from the right panel.
 
 Test images: `demo/` is not in git (57 MB). Ask for it. It holds 3 GAMUS tiles with their LiDAR
 reference heights (`demo/reference_heights/`, use those in the reference box, **not** as the
@@ -135,6 +159,10 @@ Stop the server first on a 6 GB GPU: the server's model and an evaluation's mode
 # 3D city model (building outlines + heights) on 40 GAMUS val tiles; --fetch downloads them once
 .venv-da3/bin/python -m viewer.city_eval --fetch
 
+# DSM accuracy by landscape (city, suburb, hills, forest) and by pixel size (native -> 10 m),
+# against USGS 3DEP airborne LiDAR; needs demo/ and internet the first time (LiDAR is cached)
+.venv-da3/bin/python -m viewer.dsm_eval
+
 # Height model per city against baselines (needs GAMUS under $ALTIMAP_DATA/gamus, default ~/altimap-data)
 .venv-da3/bin/python -m viewer.height_eval --split test --ckpt viewer/cache/best.pth \
     --synrs3d viewer/cache/SynRS3D --tta --out test.json
@@ -151,11 +179,12 @@ test with TTA, upload to Hugging Face).
 
 | Symptom | Fix |
 |---|---|
-| `Couldn't reach the height backend` in the viewer | Terminal 1 isn't running, or something else holds port 8000. The frontend only talks to `viewer.server` on :8000; Django (`make dev`) also defaults to :8000 and can't serve uploads |
+| `Couldn't reach the height backend` in the viewer | `viewer.server` isn't running, or something else holds port 8000 (Django's `make dev` also defaults to :8000 and can't serve uploads). With `npm run dev`, the server must be on :8000 |
 | `no height checkpoint; expected one of ...` | Step 3 weights are missing from `viewer/cache/` |
 | `could not process this image: ... looks like a height or elevation map` | You uploaded a single-band height map as the image. Upload the RGB image; put the height map in the reference box |
 | pytest fails with errors from `/opt/ros/...` or `launch_testing` | ROS is on `PYTHONPATH`: run `env -u PYTHONPATH .venv/bin/python -m pytest -q` (same for the server) |
-| `npm run dev` fails with `ENOSPC: System limit for number of file watchers` | Use `npm run build` + `npm run preview` (step 5), or raise `fs.inotify.max_user_watches` |
+| `npm run dev` fails with `ENOSPC: System limit for number of file watchers` | Use `npm run build` and the server (step 5), or raise `fs.inotify.max_user_watches` |
+| The app on a VM loads but uploads fail from your laptop | You're on an old build that called `localhost:8000`: `git pull`, `npm run build`, restart the server |
 | CUDA out of memory | Close other GPU apps, stop the server before evaluations, or choose *Fast* quality |
-| GeoTIFF upload has no absolute DSM (`dsm_error` in the panel) | No internet or Planetary Computer unreachable: the nDSM still works, the DEM ground doesn't |
+| GeoTIFF upload has no absolute DSM (`dsm_error` in the panel) | The Copernicus DEM couldn't be read (AWS Open Data, then Planetary Computer; each read gives up after 60 s). The nDSM still works; retry when the network is back |
 | First upload is slow | The model loads on the first upload (plus the DINOv2 download on the very first run); later uploads skip both |
