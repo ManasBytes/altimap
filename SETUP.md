@@ -87,7 +87,8 @@ vs 7.25 m zero-shot, see README), so don't run on the fallback. The model card a
 https://huggingface.co/Dilavesh/altimap-height has the architecture, results, known limitations
 and licences; its source is `docs/model-card.md`. v1 is MIT. v2 is also trained on SynRS3D data
 (CC BY-NC 4.0), so treat it as non-commercial. CHMv2 is under Meta's DINOv3 licence, which asks
-for "Built with DINOv3" in the product: the app's upload panel says it when CHMv2 ran.
+for "Built with DINOv3" in the product. The app doesn't show it at the moment; add it back before
+distributing the app with CHMv2.
 
 The DINOv2 encoder code is fetched by `torch.hub` from GitHub the first time a model loads, then
 loaded from `~/.cache/torch/hub` without contacting GitHub. After that the app runs offline,

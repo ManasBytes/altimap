@@ -209,8 +209,9 @@ over 2 m). Mesh detail is chosen once at load (`pickMeshSegments`):
 - override with `?detail=high|standard`.
 
 Measured on this laptop's Intel Raptor Lake iGPU: 1025 mesh 38 fps, 513 mesh 60 fps (the display
-cap); software rendering 1.2 vs 5.1 fps. The upload panel lists the models that ran and shows
-"Built with DINOv3" when CHMv2 did (the DINOv3 licence asks for it).
+cap); software rendering 1.2 vs 5.1 fps. The upload panel lists the models that ran.
+The "Built with DINOv3" credit the DINOv3 licence asks for (when CHMv2 ships) is removed from the
+UI for now at the team's request; restore it before any public release.
 
 ### Models, weights and data (all under gitignored `viewer/cache/` unless noted)
 

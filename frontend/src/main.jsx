@@ -3407,9 +3407,6 @@ function App() {
                       Models: {uploadMeta.models.join(" · ")}
                       {uploadMeta.gsd_m && uploadMeta.work_gsd_m > 0.34 &&
                         ` · processed at ${uploadMeta.work_gsd_m.toFixed(2)} m (very large scene)`}
-                      {uploadMeta.models.some((m) => m.startsWith("CHMv2")) && (
-                        <span className="dino-credit"> · Built with DINOv3</span>
-                      )}
                     </div>
                   )}
                   {uploadMeta.dsm_error && (
