@@ -839,3 +839,13 @@ footer {
   padding: 3px 2px;
   border-bottom: 1px solid #13253a;
 }
+
+.models-line {
+  font: 10px "IBM Plex Mono", monospace;
+  color: #7f96aa;
+  margin: 6px 0;
+  line-height: 1.5;
+}
+.models-line .dino-credit {
+  color: #9fd3c7;
+}

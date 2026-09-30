@@ -63,7 +63,6 @@ _device = None
 _class_model = None
 _class_device = None
 _height_model = None
-_height_device = None
 _dem = None
 
 CACHE_DIR = Path(__file__).resolve().parent / "cache"
@@ -107,14 +106,15 @@ def _height_ckpt() -> Path:
     raise HTTPException(503, f"no height checkpoint; expected one of {[str(c) for c in HEIGHT_CKPTS]}")
 
 
-def _get_height_model():
-    """Loaded on first request, same reasoning as _get_model."""
-    global _height_model, _height_device
+def _get_height_model() -> dict:
+    """The height pipeline (v1 + v2 for buildings + CHMv2 for forest, whichever are installed),
+    loaded on first request, same reasoning as _get_model. -> kwargs for estimate()."""
+    global _height_model
     if _height_model is None:
-        from viewer.height_model import load_model
+        from viewer.estimate import load_pipeline
 
-        _height_model, _height_device = load_model(_height_ckpt(), SYNRS3D_DIR)
-    return _height_model, _height_device
+        _height_model = load_pipeline(_height_ckpt(), SYNRS3D_DIR)
+    return _height_model
 
 
 def _get_class_model():
@@ -521,9 +521,9 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
     from viewer.height_model import GAMUS_GSD_M, clean_height
 
     report("Loading height model", 0.01)
-    model, device = _get_height_model()
+    models = _get_height_model()
     started = time.perf_counter()
-    out = estimate(staged, model, device, scene_dir, gsd_m=gsd, tta=tta, report=report, gcps=gcps)
+    out = estimate(staged, out_dir=scene_dir, gsd_m=gsd, tta=tta, report=report, gcps=gcps, **models)
     validation, error_view = None, None
     if ref_path is not None:
         report("Scoring against reference", 0.88)

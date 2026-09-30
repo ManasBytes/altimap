@@ -70,6 +70,8 @@ Inference / export scripts (`.venv-da3` only):
 .venv-da3/bin/python -m viewer.estimate scene.tif photo.png --out results/   # batch: images -> ndsm.tif / dsm.tif
 .venv-da3/bin/python -m viewer.city_eval [--fetch]                       # 3D city model buildings vs GAMUS truth (40 val tiles)
 .venv-da3/bin/python -m viewer.dsm_eval [--scenes ...] [--gsd ...]      # DSM vs 3DEP LiDAR by landscape and pixel size (demo/ NAIP scenes)
+.venv-da3/bin/python scripts/fetch_india_samples.py                      # Sikkim Maxar Open Data crops -> demo/india/
+.venv-da3/bin/python -m viewer.dem_check demo/india/*.tif               # DSM vs Copernicus GLO-30 and SRTM/NASADEM (the FAQ's references)
 .venv-da3/bin/python -m viewer.height_eval --split test --ckpt viewer/cache/best.pth --synrs3d viewer/cache/SynRS3D --tta
 .venv-da3/bin/python -m viewer.height_train --hours 8 --out runs/ft      # fine-tune (24 GB GPU); see scripts/overnight_v2.sh
 ```
@@ -148,10 +150,12 @@ Module map:
 | `viewer/classify.py` / `train_classifier.py` / `gamus_dataset.py` | torch lazily | **Non-georeferenced path**: ResNet34-UNet predicts 7 land-cover classes, each mapped to a fixed relative height (`STATIC_CLASS_HEIGHT`, normalized units, *not* metres) — a "layer cake" placeholder preview, no depth model. Trained on raw GAMUS `.h5` tiles (exact labels), not the lossy frontend JPEGs. GAMUS roots are hardcoded to `/home/biplab-dev/...`; the checkpoint lives in gitignored `viewer/cache/`, so it must be trained before `/api/classify-static` works. |
 | `viewer/height_model.py` / `height_eval.py` / `height_train.py` | torch lazily | **Metric height path** (spec `docs/superpowers/specs/2026-09-29-24h-metric-height-design.md`). RS3DAda (DINOv2 ViT-L + DPT, from the cloned SynRS3D repo in `viewer/cache/SynRS3D`) predicts nDSM in metres plus 8 OpenEarthMap classes; `height_train` fine-tunes it on GAMUS (BitFit encoder), `height_eval` scores per city against `zero`/`train-mean` baselines. Inputs must be multiples of 14 px (518 windows). GAMUS GSD is 0.33 m; the HF release names DC images `*_RGB.h5` and PHL/NYC `*_IMG.h5`. |
 | `viewer/city_model.py` | No | LoD1 city model **for display only**. Buildings: each blob of building-class pixels is cut into roofs (`_roof_segments`: one seed per roof plateau, watershed over the height gradient, so touching row houses split at the step/dip between them), then each roof into height levels ≥ 2.5 m apart (`_component_parts`, interior pixels so wall ramps don't terrace). Outlines keep the traced shape; `regularize` squares one off (rectangle or right angles) **only if that moves ≤ 10 % of its area** (`max_shift`). Plus roof colour, base/top on terrain, individual tree crowns. Never feeds the GeoTIFFs (regularizing heights costs RMSE). `/api/estimate` returns it as `city` and writes `buildings.geojson`; the frontend extrudes it (`buildCityGroup`). |
+| `viewer/canopy.py` | torch/transformers lazily | CHMv2 loader (`local_dir` finds the weights in the HF cache) and 0.6 m, 384 px-window canopy prediction. Optional: `load` returns None when weights or `transformers` are missing. |
+| `viewer/dem_check.py` | Yes | Any GeoTIFF through the app pipeline, DSM compared with Copernicus GLO-30 and NASADEM (SRTM) per pixel and per 30 m cell, plus model heights by class. For scenes without LiDAR (India). |
 | `viewer/dsm_eval.py` | Yes | DSM accuracy against USGS 3DEP airborne LiDAR (Planetary Computer `3dep-lidar-dsm/dtm/hag`, cached in `viewer/cache/dsm_eval/`) for the four `demo/` NAIP scenes (dense city, suburb, hilly town, forest), at native resolution and block-averaged to 0.6/1/2/5/10 m: nDSM vs LiDAR height above ground (vs an all-zero baseline), DSM vs LiDAR DSM (vs GLO-30 alone), and an 8-point GCP test. Where PC lacks LiDAR DTM/HAG (Philadelphia), bare earth is `3dep-seamless`. |
 | `viewer/city_eval.py` | model only if cache is cold | Scores the city model against GAMUS truth on 40 pinned val tiles (`EVAL_TILES`, `--fetch` downloads them): footprint IoU, edge F1 within 1 m, height RMSE on buildings, building count. Height predictions are cached in `viewer/cache/city_eval/`, so re-scoring a `city_model.py` change is CPU-only. Run it before and after any change to building extraction. |
 | `viewer/height_metrics.py` | No | RMSE/MAE/Pearson/building-RMSE, pooled over tiles via running sums (`ScoreAccumulator`), NaN-excluding. |
-| `viewer/estimate.py` | torch via model | Image → `ndsm.tif` (always) and `dsm.tif` (GeoTIFF input, DEM-consistent: `GLO-30 − mean₃₀ₘ(nDSM) + nDSM`, orthometric, so 30 m block means match the DEM as the FAQ scores it), resampled to/from 0.33 m. The *viewer's* ground is chosen separately by building share (`display_ground_method`: ≥0.4 → 300 m opening, ≥0.1 → 150 m, else subtract), measured against 3DEP LiDAR. `read_image` follows band colour tags, masks nodata, and rejects single-band float rasters (height maps) with `NotImageryError`. Ground control points (`read_gcps`: CSV lon, lat, height, header optional; `gcp_correction` against the bare-earth ground): one vertical offset, applied only if ≥ 4 m and better than none on left-out points (see findings). GLO-30 is read once per upload (`padded_dem`, image + 300 m margin, `dem.glo30` from AWS Open Data, Planetary Computer as fallback) for both the export and the display ground. Post-filtering the nDSM (guided/median) was measured on 40 val tiles and gives no gain, so exports stay raw. |
+| `viewer/estimate.py` | torch via model | Image → `ndsm.tif` (always) and `dsm.tif` (GeoTIFF input, DEM-consistent: `GLO-30 − mean₃₀ₘ(nDSM) + nDSM`, orthometric, so 30 m block means match the DEM as the FAQ scores it), resampled to/from 0.33 m. The *viewer's* ground is chosen separately by building share (`display_ground_method`: ≥0.4 → 300 m opening, ≥0.1 → 150 m, else subtract), measured against 3DEP LiDAR. `read_image` follows band colour tags, masks nodata, and rejects single-band float rasters (height maps) with `NotImageryError`. Ground control points (`read_gcps`: CSV lon, lat, height, header optional; `gcp_correction` against the bare-earth ground): one vertical offset, applied only if ≥ 4 m and better than none on left-out points (see findings). GLO-30 is read once per upload (`padded_dem`, image + 300 m margin, `dem.glo30` from AWS Open Data, Planetary Computer as fallback) for both the export and the display ground. **Three models** (`load_pipeline`): v1 everywhere, building pixels the mean of v1 and v2 (`fuse_heights`), tree pixels in extensive forest (≥ 80 % canopy within 150 m, `forest_mask`) from CHMv2; v2 and CHMv2 optional, kept on the CPU and moved to the GPU only while they run (`_on`). In forest the DSM keeps GLO-30's surface (no fine detail). **Tiling** (`predict_scene`): 3072 px tiles at 0.33 m with a 259 px context margin, so large scenes run at full resolution; only > 400 MP at 0.33 m runs coarser (`work_gsd_m`). Post-filtering the nDSM (guided/median) was measured on 40 val tiles and gives no gain, so exports stay raw. |
 | `viewer/server.py` | Yes | FastAPI app: `POST /api/estimate` (what `frontend/` calls) runs the height model via `viewer/estimate.py`, returns preview data URIs + GeoTIFF download paths + 16-bit `grids`, takes optional `gcps` (CSV) and scores against an optional uploaded reference height map (`_validate`: reprojected by coordinates when both are georeferenced; compared with the DSM or the nDSM, whichever it matches by median distance; `clean_height` only for nDSM references, since it would drop real elevations > 1000 m; returns per-class errors, a scatter sample and a signed error-map PNG); checkpoint is `viewer/cache/best.pth` if present, else stock RS3DAda, overridable with `ALTIMAP_HEIGHT_CKPT`. `POST /api/upload` runs DA3 on an uploaded image through the *same* pipeline (`metrics.py`, `geo.py`, `terrain.py`) the batch exporters use, so uploads and pre-exported scenes are treated identically; `POST /api/classify-static` runs the older static-classifier path (no longer called by `frontend/`). Models load lazily on first request, not at import. Serves `viewer/web/` as static files, mounted after the API routes. |
 | `viewer/web/` | — (browser) | Static vanilla-JS dashboards (`index.html` curated set, `offnadir.html` Atlanta set, `inria.html`, `demdirect.html`, `upload.html` live upload) sharing vendored, pinned three.js (`viewer/web/vendor/three/`, **never CDN** — standalone-deployment requirement). Depth uploads as a float32 `DataTexture`; the grid mesh is displaced in the **vertex shader**, never on the CPU, so exaggeration is a free uniform and swapping scenes is one texture upload. The `heightAt()` GLSL function is shared between vertex and fragment stages (`viewer/web/js/shaders.js`) since normals are derived by finite differences in the fragment shader. |
 
@@ -188,9 +192,9 @@ always means height above ground** (jet over 0..nDSM max, `buildHeightColors(pro
 the city model's roofs, walls and crowns switch to it (`setHeightMode`), and the city ground is
 uniform 0 m. The legend's gradient is built from the same `JET_STOPS` (`JET_CSS`), so it can't
 drift from the map. Heights for the mesh, probe, profile and slope come from `/api/estimate`'s
-`grids` (16-bit, `viewer/geo.py:encode_grid16`, 513x513 = `GRID_SIDE` = `HEIGHT_SAMPLE_*`; the
-8-bit PNGs stepped 0.1-0.3 m and quantised slope to ~13°); the PNGs remain the fallback and the
-layer textures. Slope is taken from the absolute DSM when georeferenced (terrain counts), else the
+`grids` (16-bit, `viewer/geo.py:encode_grid16`, `GRID_SIDE` = 1025 a side; the 513 mesh takes
+every other sample; the 8-bit PNGs stepped 0.1-0.3 m and quantised slope to ~13°); the PNGs
+remain the fallback and the layer textures. Slope is taken from the absolute DSM when georeferenced (terrain counts), else the
 nDSM. Upload-only tools: **Slope** layer (vertex colours from the shown surface's metres,
 0–45°+, `SLOPE_STOPS`/`SLOPE_CSS`), **Error** layer (the server's signed error PNG,
 `ERROR_CSS` must match `viewer/server.py:_error_png`), **contour lines** (a per-vertex
@@ -198,19 +202,29 @@ nDSM. Upload-only tools: **Slope** layer (vertex colours from the shown surface'
 m), a **two-point profile** (Measure: double-click A then B; `profilePoints` → line on the
 surface + profile panel) and **Walk** mode (camera at 1.7 m above `walkGround`, OrbitControls
 around a target 5 cm ahead as mouse-look, 6 m/s, Shift ×4, blocked by building-class cells
-over 2 m). The mesh is 1024² segments (`MESH_SEGMENTS_*`, = `GRID_SIDE` − 1 in the server).
+over 2 m). Mesh detail is chosen once at load (`pickMeshSegments`):
+- 1024² segments on capable GPUs;
+- 512² on software renderers, mobile GPUs and Intel integrated graphics (`LOW_DETAIL` also
+  halves the shadow map and drops supersampling);
+- override with `?detail=high|standard`.
+
+Measured on this laptop's Intel Raptor Lake iGPU: 1025 mesh 38 fps, 513 mesh 60 fps (the display
+cap); software rendering 1.2 vs 5.1 fps. The upload panel lists the models that ran and shows
+"Built with DINOv3" when CHMv2 did (the DINOv3 licence asks for it).
 
 ### Models, weights and data (all under gitignored `viewer/cache/` unless noted)
 
 | What | Where it comes from |
 |---|---|
-| `viewer/cache/best.pth` — our fine-tuned RS3DAda (v1: test RMSE 5.02 m vs 7.25 m zero-shot) | HF **public** [`Dilavesh/altimap-height`](https://huggingface.co/Dilavesh/altimap-height) (`best.pth`; v2 results go to `v2/` when the overnight run uploads). Its README is `docs/model-card.md`: edit there, re-upload as `README.md` |
+| `viewer/cache/best.pth` — our fine-tuned RS3DAda v1 (test RMSE 5.02 m vs 7.25 m zero-shot), heights everywhere | HF **public** [`Dilavesh/altimap-height`](https://huggingface.co/Dilavesh/altimap-height) `best.pth`. Its README is `docs/model-card.md`: edit there, re-upload as `README.md` |
+| `viewer/cache/best_v2.pth` — v2 (test RMSE 4.55 m, building RMSE 6.74 m), averaged in on building pixels | same repo, `v2/best.pth` (+ `v2/test_v2.json`, `v2/overnight.log`); uploaded by `scripts/overnight_v2.sh` itself. SynRS3D data → non-commercial |
+| CHMv2 canopy heights (1.35 GB), forest tree pixels only | HF `WEO-SAS/chm-meta-v2` (public, byte-identical `model.safetensors` to Meta's gated `facebook/dinov3-vitl16-chmv2-dpt-head`), found in the HF cache by `viewer/canopy.py`; needs `transformers`. DINOv3 licence |
 | `viewer/cache/SynRS3D/` — RS3DAda model code | `git clone https://github.com/JTRNEO/SynRS3D`, commit `ab5a485` |
 | `SynRS3D/pretrain/RS3DAda_vitl_DPT_height.pth` — stock weights, the server's fallback | HF `JTRNEO/RS3DAda` |
 | DINOv2 encoder code | `torch.hub` (`facebookresearch/dinov2`), fetched on first model load, cached in `~/.cache/torch/hub` |
 | GAMUS tiles (`images/`, `heights/`, `classes/` `.h5`) | HF dataset `earthflow/GAMUS`; `city_eval --fetch` pulls the 40 eval tiles into `viewer/cache/gamus` |
 | Copernicus GLO-30 ground for GeoTIFF inputs | AWS Open Data `copernicus-dem-30m` (`dem.glo30`), Planetary Computer `cop-dem-glo-30` as fallback; read live per upload |
-| `demo/` test images (not in git, 57 MB) | 3 GAMUS tiles as PNG + LiDAR `reference_heights/`, 4 NAIP GeoTIFFs (city, suburb, hills, forest) |
+| `demo/` test images (not in git) | 3 GAMUS tiles as PNG + LiDAR `reference_heights/` (GAMUS AGL and 3DEP LiDAR DSMs for the NAIP scenes), 4 NAIP GeoTIFFs (city, suburb, hills, forest), `gcps/` sample CSVs, `india/` Sikkim Maxar crops (CC BY-NC) |
 
 ### Measured findings (don't re-run these without a reason)
 
@@ -218,8 +232,8 @@ over 2 m). The mesh is 1024² segments (`MESH_SEGMENTS_*`, = `GRID_SIDE` − 1 i
   and USGS 3DEP LiDAR): validation RMSE/MAE/r, coverage and surface max all match. The weak part
   is the model, not the display. It **under-reads tall objects** (tallest object 72 m vs 167 m
   at Philadelphia City Hall, 28 vs 38 m on a GAMUS tile) and **forest canopy** (nDSM bias −15.9 m
-  vs LiDAR); on the suburb and hills at 0.6 m the bias is small (+1.3 / −0.7 m, `dsm_eval`). v2
-  training (height-weighted loss + blur augmentation) targets this; its results weren't in yet.
+  vs LiDAR); on the suburb and hills at 0.6 m the bias is small (+1.3 / −0.7 m, `dsm_eval`). Both
+  are addressed by the three-model pipeline (below), not by v2 alone.
 - **SAM 3 does not beat our model's building masks** (40 GAMUS val tiles): raw pixels IoU 0.757 /
   edge F1 0.529 vs ours 0.854 / 0.688; as 3D footprints 0.720–0.781 vs 0.787–0.841, and it
   separates fewer buildings. It's heavy (860M params, gated) and not a dependency; don't re-add
@@ -238,12 +252,14 @@ over 2 m). The mesh is 1024² segments (`MESH_SEGMENTS_*`, = `GRID_SIDE` − 1 i
 - Post-filtering the nDSM (guided/median filter) gives no gain; exports stay raw (see estimate row).
 - **LiDAR benchmark** (`dsm_eval`, 4 NAIP scenes vs 3DEP, one pass):
 
-  | Scene | nDSM RMSE (predict-0) | DSM RMSE (GLO-30 alone) |
+  | Scene | v1 alone | Pipeline (v1 + v2 buildings + CHMv2 forest) |
   |---|---|---|
-  | Dense city | 29.8 (42.4) | 34.7 (36.3) |
-  | Suburb | 4.5 (6.5) | 3.99 (4.02) |
-  | Hills | 3.7 (6.5) | 5.04 (5.53) |
-  | Forest | 18.5 (24.7), bias −15.9 | 9.03 (8.53) |
+  | Dense city | 29.8 (42.4) / 34.7 (36.3) | 30.1 / 35.0 |
+  | Suburb | 4.5 (6.5) / 3.99 (4.02) | 4.5 / 3.97 |
+  | Hills | 3.7 (6.5) / 5.04 (5.53) | 3.5 / 5.02 |
+  | Forest | 18.5 (24.7), bias −15.9 / 9.03 (8.53) | 15.7, bias −10.8 / 8.75 |
+
+  Cells are nDSM RMSE (predict-0) / DSM RMSE (GLO-30 alone). The pipeline is what the app runs.
 
   **Pixel size**: object heights hold to ~1–2 m and fade to flat by 5–10 m. The DSM stays within
   0.1 m of GLO-30 there, so no special coarse-GSD rule is needed. Treating a 0.6 m PNG as 0.33 m
@@ -257,10 +273,30 @@ over 2 m). The mesh is 1024² segments (`MESH_SEGMENTS_*`, = `GRID_SIDE` − 1 i
   - Final rule: fit against the bare-earth ground, offset only, applied only if ≥ 4 m (GLO-30's
     accuracy spec, `GCP_MIN_OFFSET_M`) and better than none on left-out points. It declines all
     three and still fixes datum-sized offsets. Don't loosen it without re-running `dsm_eval`.
-- **Meta CHMv2 canopy heights: not adopted.**
-  - Forest tree pixels: RMSE 18.1 → 13.0 m, but the DSM gets worse (9.49 → 10.06).
-  - Suburb and hills tree pixels: worse (5.5 → 8.3 and 2.9 → 6.3 m).
+- **v2 alone generalises worse than v1** (3DEP LiDAR, native): it over-reads trees and ground
+  (nDSM RMSE suburb 4.5 → 6.2, city 29.8 → 33.9 m), despite better GAMUS test scores. On
+  buildings it is right where v1 isn't: tallest objects 145 vs 66 m in the city (LiDAR 151),
+  52 vs 28 m in the hills (LiDAR 53). Hence `fuse_heights` (mean on building pixels only):
+  building RMSE city 44.5 → 41.9, hills 5.2 → 4.4, suburb 2.87 → 2.82, GAMUS val 2.57 → 2.40 m.
+- **CHMv2, confined to extensive forest**, is what fixes canopy heights. Everywhere else it is
+  worse than our model (suburban trees 5.5 → 8.3 m).
+  - The forest rule matters: 150 m / 80 % leaves the city, suburb and hills exactly unchanged
+    and takes the forest nDSM 18.5 → 15.7 m. A 30 m window counted suburban tree clusters and
+    cost the suburb 0.5 m.
+  - Keeping CHMv2's (or our) canopy detail out of the *DSM* in forest takes it 8.92 → 8.63 m
+    (GLO-30 alone 8.53): under closed canopy both models place detail at r ≈ 0.3.
   - The public mirror `WEO-SAS/chm-meta-v2` has byte-identical weights to Meta's gated repo.
+- **Tiling adds no seams** (Pittsburgh vs LiDAR): one pass / default 3072 px tiles / 1024 px
+  tiles give nDSM 3.461 / 3.467 / 3.455 m and DSM 5.021 / 5.021 / 5.022 m. The mean height jump at
+  default tile edges is 0.114 m, against 0.135 m between any neighbouring pixels.
+- **City model with fused heights** (`city_eval`): IoU 0.843, edge F1 0.660, building height RMSE
+  2.86 m (v1 alone 2.99), 2376 buildings.
+- **India** (`dem_check`, Sikkim Maxar crops): DSM vs Copernicus GLO-30 is 0.85–1.34 m RMSE in 30 m
+  cells, with bias ≈ 0. vs SRTM/NASADEM it is biased +7 to +14 m, because GLO-30 is that far above
+  SRTM in the Himalaya. If the organisers score against SRTM, offering SRTM as the base DEM would
+  remove the bias. Model heights are plausible (buildings median ~4 m, trees 5–10 m). TALD
+  (IIST's Kerala aerial LiDAR, available to Indian researchers on request) is the real Indian
+  test set to get.
 - **Network stalls (all measured 2026-09-30)**:
   - Planetary Computer's URL signing took 50–120 s at a time. GLO-30 now comes from AWS Open Data
     (`dem.glo30`, byte-identical tiles, ~3 s), with Planetary Computer as fallback.

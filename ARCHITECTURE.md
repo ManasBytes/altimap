@@ -103,14 +103,27 @@ Pixel size comes from the GeoTIFF: metres, or degrees converted at the scene's l
 user can also type it in. With neither, 0.33 m is assumed and reported as assumed.
 
 ### 4.2 Height model inference
-- **Resampling**: the image is resampled from its pixel size to the model's training resolution
-  (0.33 m), capped at 4096 px on the long side, which bounds GPU memory. The results are
-  resampled back to the input grid.
+- **Resampling and tiling** (`predict_scene`):
+  - The image is resampled from its pixel size to the model's training resolution (0.33 m).
+  - Scenes larger than one tile (3072 px at 0.33 m, ~1 km) are processed tile by tile. Each tile
+    has a margin of half a model window (259 px) that is predicted for context but not kept.
+  - Every part of a large scene is seen at full resolution, and memory stays bounded. Before
+    this, anything wider than ~1.35 km was squeezed into 4096 px.
+  - Only very wide coarse scenes, beyond 400 MP at 0.33 m (e.g. 50 km at 10 m), run at a
+    coarser working resolution. That is reported as `work_gsd_m`.
+  - Results are resampled back to the input grid.
 - **Prediction**: `height_model.predict` runs 518 px windows (ViT patch 14) at half-window
   stride, blended with a feathered weight so seams don't show. Optional test-time augmentation
   averages four flips (the UI's *High* quality).
 - **Outputs**: height in metres, clamped at 0 because height above ground is non-negative, and
   8 OpenEarthMap classes, mapped to GAMUS's 7.
+- **Three models, by land cover** (`load_pipeline`, §5):
+  - Height v1 everywhere.
+  - Building pixels: the average of v1 and v2 (`fuse_heights`).
+  - Tree pixels inside extensive forest: Meta CHMv2 canopy heights. "Forest" is ≥ 80 % canopy
+    within 150 m (`forest_mask`).
+  - v2 and CHMv2 are optional and kept on the CPU. They move to the GPU only while they run,
+    so a 6 GB GPU holds one ViT-L at a time.
 
 ### 4.3 Absolute DSM: DEM-consistent composition
 The organisers score GeoTIFF output against SRTM/Copernicus ("values must match DEM heights").
@@ -122,7 +135,10 @@ DSM = GLO-30 − mean₃₀ₘ(nDSM) + nDSM
 ```
 
 Averaged over any 30 m cell, the DSM reproduces the DEM. Within the cell, the model supplies the
-detail: buildings, trees, streets. The ground DEM is read once per upload: the image extent
+detail: buildings, trees, streets. In extensive forest the fine detail is left out, so the DSM
+there is GLO-30's own surface. Under closed canopy both our model and CHMv2 place that detail
+poorly (r ≈ 0.3 against LiDAR), and including it made the forest DSM worse than the DEM alone
+(8.92 vs 8.53 m RMSE; with the rule, 8.63 m, and the other landscapes are unchanged). The ground DEM is read once per upload: the image extent
 plus a 300 m margin, at the DEM's 30 m posting (`padded_dem`), then reprojected onto the image.
 The read comes from the AWS Open Data copy of GLO-30 (`viewer/dem.py:glo30`: plain HTTPS tiles
 named by their south-west corner, byte-identical to Planetary Computer's `cop-dem-glo-30`), with
@@ -177,32 +193,63 @@ GCPs fix offsets, not model error. §9.2 shows why the rule is this strict.
   - Loss: L1 + 0.5 × gradient-L1 + 0.2 × cross-entropy, on 518 px crops, in bf16.
   - Schedule: cosine on wall-clock time; the best checkpoint is kept by validation RMSE, and
     restarts can't overwrite a better one.
-- **v2** (training on an RTX A5000; results go to `v2/` in the same repo):
+- **v2** (`v2/best.pth` in the same repo, used as `viewer/cache/best_v2.pth`; 6.5 h on an RTX
+  A5000, best checkpoint at step 25,500):
   - Starts from v1 with the last 8 encoder blocks unfrozen.
   - Height-weighted L1 (a pixel at h metres counts 1 + h/10 times), against tall-building
     underestimation.
   - 30 % of samples from SynRS3D, whose synthetic scenes are rich in high-rises and hills.
   - 50 % of samples satellite-style degraded: 1.3–6× coarser, blur, haze, gamma, saturation,
-    noise. This targets 0.6 m Cartosat and the FAQ's 0.35–10 m range.
+    noise.
+  - GAMUS test (500 tiles, TTA), v1 → v2:
+
+    | | v1 | v2 |
+    |---|---|---|
+    | RMSE | 5.02 m | 4.55 m |
+    | Correlation r | 0.833 | 0.864 |
+    | Building RMSE | 8.28 m | 6.74 m |
+    | Philadelphia building RMSE | 10.04 m | 8.04 m |
+
+  - Out of domain it over-reads trees and ground, so the app uses it for buildings only
+    ("Why three models", below).
 - **Evaluation**: `height_eval.py` scores per city against `zero` and `train-mean` baselines.
 
-**Tree heights: Meta CHMv2 measured, not adopted.** Meta/WRI's Canopy Height Maps v2 (DINOv3
-satellite backbone, March 2026; `facebook/dinov3-vitl16-chmv2-dpt-head`, DINOv3 licence) was
-tested against 3DEP LiDAR, with its heights swapped in on our tree pixels:
+### Why three models
 
-| Scene | Tree-pixel RMSE, ours → CHMv2 | DSM RMSE, ours → with CHMv2 |
-|---|---|---|
-| Forest (76 % trees) | 18.1 → 13.0 m | 9.49 → 10.06 m |
-| Suburb | 5.5 → 8.3 m | 4.10 → 4.96 m |
-| Hilly town | 2.9 → 6.3 m | 5.06 → 5.20 m |
-| Dense city | 6.6 → 7.6 m | 34.72 → 34.72 m |
+The app combines three models. The numbers are from 3DEP airborne LiDAR on four NAIP scenes and
+the 40 GAMUS val tiles (`viewer/dsm_eval.py`, one pass).
 
-- **Forest**: better canopy heights, but a worse DSM. The DEM-consistent export keeps each 30 m
-  cell at the Copernicus value, so a model only adds within-cell variation. Both models place
-  that variation poorly under canopy (r ≈ 0.2–0.3), so taller trees mean larger misplaced bumps.
-- **Everywhere else**: worse than ours.
+- **v2 alone generalises worse than v1**, despite better GAMUS test scores. Its height-weighted
+  loss taught it to read everything taller: nDSM RMSE suburb 4.5 → 6.2 m, city 29.8 → 33.9 m,
+  with a positive bias on trees and ground. But on buildings it is right where v1 isn't:
 
-It is not a dependency.
+  | | LiDAR | v1 | v2 |
+  |---|---|---|---|
+  | Tallest objects, city (99.9th percentile) | 151 m | 66 m | 145 m |
+  | Tallest objects, hills | 53 m | 28 m | 52 m |
+  | Building bias, city | — | −22 m | −0.4 m |
+
+- **Averaging the two on building pixels** (v1 elsewhere) gives the best building error:
+
+  | Building RMSE | v1 | Fused |
+  |---|---|---|
+  | City | 44.5 m | 41.9 m |
+  | Hills | 5.2 m | 4.4 m |
+  | Suburb | 2.87 m | 2.82 m |
+  | GAMUS val | 2.57 m | 2.40 m |
+
+  Tallest objects rise to 104 m in the city and 40 m in the hills. The city's overall nDSM is
+  0.3 m worse; the hills improve (3.68 → 3.47 m).
+- **Meta CHMv2** (DINOv3 satellite backbone, March 2026; `facebook/dinov3-vitl16-chmv2-dpt-head`,
+  or its byte-identical public mirror `WEO-SAS/chm-meta-v2`; DINOv3 licence) reads forest canopy
+  better than our model: tree-pixel RMSE 18.1 → 13.0 m, bias −15 → −7 m. It is worse on
+  suburban and street trees (5.5 → 8.3 m), so it only replaces tree heights inside extensive
+  forest. With the 150 m / 80 % rule:
+  - forest nDSM 18.5 → 15.7 m;
+  - city, suburb and hills identical;
+  - a 30 m window instead would have cost the suburb 0.5 m.
+
+The DSM's forest rule (§4.3) is independent of CHMv2 and applies even without it.
 
 ## 6. Server (`viewer/server.py`, FastAPI)
 
@@ -262,8 +309,13 @@ to 2.86–3.38 m on validation tiles, so the exports stay the model's raw output
 Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `styles.css`.
 
 ### 7.1 Scene
-- **Terrain**: a 1024×1024-segment plane (2M triangles), displaced by the 16-bit grid at true
-  vertical scale × the exaggeration slider, with the RGB image draped on it.
+- **Terrain**: a plane displaced by the 16-bit grid at true vertical scale × the exaggeration
+  slider, with the RGB image draped on it. Its detail is chosen at load from the GPU
+  (`pickMeshSegments`):
+  - 1024×1024 segments (2M triangles) on capable GPUs;
+  - 512×512 on software renderers, mobile GPUs and Intel integrated graphics, which also get a
+    smaller shadow map;
+  - `?detail=high|standard` overrides it.
 - **Normals and shading**: normals are recomputed from the surface; steep faces get darker vertex
   colours; a directional sun casts PCF soft shadows.
 - **Two modes**:
@@ -322,8 +374,13 @@ Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `st
     both set in `viewer/dem.py`), so a stalled Planetary Computer transfer ends as "Absolute
     DSM unavailable" with the nDSM still delivered, instead of hanging the upload.
 - **Hardware**: a 6 GB NVIDIA GPU is enough for inference (RTX 3050 laptop tested). A 2000 px
-  GeoTIFF at 0.6 m takes 42–51 s end to end on *Fast* there: 30 s model, 5 s DEM, the rest DSM,
-  city model and previews. *High* runs the model about 4× longer. Training used a 24 GB RTX A5000.
+  GeoTIFF at 0.6 m takes about 60–100 s end to end on *Fast* there: about 30 s per height-model
+  pass (v1, then v2 when the scene has buildings), 5 s DEM, plus CHMv2 in forests. Without v2
+  the upload is 42–51 s. *High* runs each model pass about 4× longer. Training used a 24 GB RTX
+  A5000.
+- **Browser**: mesh detail follows the GPU (§7.1). Measured on an Intel Raptor Lake iGPU: the
+  automatic 513 mesh runs at 51–60 fps, the forced 1025 mesh at 30–38 fps; on software rendering
+  5 vs 1.2 fps.
 
 ## 9. Evaluation and results
 
@@ -342,16 +399,22 @@ All scripts are in `viewer/`, and their numbers are reproducible.
 
 | Scene (pixel size) | nDSM RMSE (predict-0 baseline) | nDSM bias | DSM RMSE (GLO-30 alone) | DSM r (GLO-30 alone) |
 |---|---|---|---|---|
-| Dense city, Philadelphia (0.3 m) | 29.8 m (42.4) | −6.8 m | 34.7 m (36.3) | 0.388 (0.272) |
-| Suburb, Chevy Chase (0.6 m) | 4.5 m (6.5) | +1.3 m | 3.99 m (4.02) | 0.817 (0.796) |
-| Hilly town, Pittsburgh (0.6 m) | 3.7 m (6.5) | −0.7 m | 5.04 m (5.53) | 0.940 (0.923) |
-| Forest, Smoky Mountains (0.6 m) | 18.5 m (24.7) | −15.9 m | 9.03 m (8.53) | 0.991 (0.993) |
+The app's pipeline (v1, v2 on buildings, CHMv2 in forest; §5), with v1 alone in brackets:
 
-- **Where the model helps**: it beats the predict-0 baseline everywhere, and it improves the
-  absolute DSM over GLO-30 alone in the city, suburb and hills.
-- **Weak spots**:
-  - Tall buildings: Philadelphia's towers read far too low (City Hall ~72 m vs 167 m).
-  - Forest: canopy reads 16 m low, leaving the DSM 0.5 m worse than GLO-30 alone.
+| Scene (pixel size) | nDSM RMSE (predict-0 baseline) [v1] | nDSM bias [v1] | DSM RMSE (GLO-30 alone) [v1] | DSM r (GLO-30 alone) |
+|---|---|---|---|---|
+| Dense city, Philadelphia (0.3 m) | 30.1 m (42.4) [29.8] | −1.2 m [−6.8] | 35.0 m (36.3) [34.7] | 0.376 (0.272) |
+| Suburb, Chevy Chase (0.6 m) | 4.5 m (6.5) [4.5] | +1.4 m [+1.3] | 3.97 m (4.02) [3.99] | 0.820 (0.796) |
+| Hilly town, Pittsburgh (0.6 m) | 3.5 m (6.5) [3.7] | −0.4 m [−0.7] | 5.02 m (5.53) [5.04] | 0.941 (0.923) |
+| Forest, Smoky Mountains (0.6 m) | 15.7 m (24.7) [18.5] | −10.8 m [−15.9] | 8.75 m (8.53) [9.03] | 0.992 (0.993) |
+
+- **Where the model helps**: it beats the predict-0 baseline everywhere. It improves the absolute
+  DSM over GLO-30 alone in the city, suburb and hills, and in the forest it is within 0.2 m of it.
+- **Tall buildings**: the city's tallest objects (99.9th percentile) went from 66 m (v1) to 104 m;
+  LiDAR says 151 m. The city's all-pixel error is 0.3 m worse: taller towers slightly out of place
+  (NAIP's relief displacement) cost more than they gain.
+- **Forest**: canopy bias went from −15.9 to −10.8 m, and the DSM came to within 0.2 m of GLO-30
+  alone (it was 0.5 m worse).
 - **GCPs** (8 LiDAR bare-ground points, scored on all other pixels): GLO-30 has no real vertical
   offset against LiDAR here, so any fitted correction mostly fits noise. Earlier rules made
   things worse:
@@ -381,10 +444,10 @@ All scripts are in `viewer/`, and their numbers are reproducible.
 
 | Metric | Value |
 |---|---|
-| Footprint IoU | 0.841 |
-| Edge F1 (within 1 m) | 0.655 |
-| Height RMSE on buildings | 2.99 m |
-| Separate buildings | 2372 |
+| Footprint IoU | 0.843 |
+| Edge F1 (within 1 m) | 0.660 |
+| Height RMSE on buildings (v1 + v2 fused) | 2.86 m (v1 alone 2.99) |
+| Separate buildings | 2376 |
 
 Raw building masks: ours IoU 0.854, which beats every public model we tested:
 
@@ -397,21 +460,56 @@ Raw building masks: ours IoU 0.854, which beats every public model we tested:
 
 That comparison is on our training domain, and it holds at 0.6 m too.
 
+### 9.5 Tiling (Pittsburgh, 2000 px at 0.6 m, vs LiDAR)
+
+| Processing | nDSM RMSE | DSM RMSE | Mean height jump at tile edges |
+|---|---|---|---|
+| One pass | 3.461 m | 5.021 m | — |
+| Default 3072 px tiles | 3.467 m | 5.021 m | 0.114 m |
+| 1024 px tiles (stress test) | 3.455 m | 5.022 m | 0.193 m |
+
+The typical jump between neighbouring pixels anywhere in the image is 0.135 m, so the default tile
+edges are indistinguishable.
+
+### 9.6 India: Sikkim, Maxar WorldView-2/3 (`viewer/dem_check.py`)
+
+Three 1.2 km scenes, 0.37–0.49 m, 13–26° off-nadir, from `scripts/fetch_india_samples.py`. There is
+no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
+
+| Scene | vs Copernicus GLO-30, 30 m cells | vs SRTM (NASADEM), 30 m cells |
+|---|---|---|
+| Chungthang town | RMSE 1.13 m, bias +0.34 m | RMSE 15.5 m, bias +11.6 m |
+| Chungthang forest | RMSE 1.34 m, bias −0.17 m | RMSE 16.1 m, bias +13.7 m |
+| Namchi town | RMSE 0.85 m, bias −0.03 m | RMSE 8.3 m, bias +7.4 m |
+
+- The pipeline runs cleanly on real Indian satellite imagery, including the 26° off-nadir scene.
+- Heights are plausible:
+  - buildings: median ~4 m, top 5 % 9–11 m (1–3 storey hill-town houses);
+  - trees: median 5–10 m, top 5 % 16–21 m.
+- The DSM matches Copernicus to ~1 m, as designed.
+- **Copernicus itself sits 7–14 m above SRTM here** (radar penetration into canopy, and SRTM's
+  errors on steep Himalayan slopes). A score against SRTM would carry that difference.
+- For true accuracy in India, TALD is the dataset to get: aerial LiDAR over Thiruvananthapuram,
+  released to Indian researchers by IIST.
+
 ## 10. Known limits
 
-- **Tall structures** are underestimated (the long tail); v2 training targets this.
+- **Very tall structures** still read low: the city's tallest objects come out at 104 m against
+  151 m. v2 reaches 145 m, but alone it over-reads everything else (§5).
+- **Forest canopy** still reads ~11 m low after CHMv2. The forest DSM stays 0.2 m worse than GLO-30
+  alone, since GLO-30 already holds the canopy surface.
 - **Coarse imagery** (≳ 2 m): object heights fade and the DSM falls back to GLO-30 (§9.3). GLO-30
   is itself only 30 m, so the absolute level can't be better than that without GCPs or a finer
   DEM.
+- **Base DEM**: the DSM follows Copernicus GLO-30. Over the Himalaya that is 7–14 m above SRTM
+  (§9.6), so a score against SRTM would inherit the difference.
 - **Training domain**: aerial imagery of three US cities. Cartosat-2S at 0.6 m over India is out
-  of domain; v2's degradation augmentation and SynRS3D data aim to narrow the gap. There is no
-  Indian LiDAR test set here yet.
-- **Scene size**: capped at 4096 px after resampling to 0.33 m; larger scenes lose detail (tiling
-  is the upgrade path).
+  of domain. The Sikkim scenes behave plausibly, but without Indian LiDAR their accuracy is
+  unmeasured.
+- **Speed**: two height-model passes per scene (plus CHMv2 in forests) roughly double the upload
+  time on a 6 GB laptop GPU. Very large scenes run tile by tile and take minutes.
 - **Internet**: GeoTIFF processing reads GLO-30 online (AWS, then Planetary Computer); there's
   no offline DEM option.
-- **Forest DSM**: canopy heights read 16 m low, and within-cell detail makes the forest DSM 0.5 m
-  worse than GLO-30 alone. Neither our model nor CHMv2 places canopy detail well enough (r ≈ 0.3).
 - **Non-georeferenced input**: without a pixel size, 0.33 m is assumed. Heights stay metric, but
   footprint areas scale with the assumption.
 
@@ -425,10 +523,12 @@ That comparison is on our training domain, and it holds at 0.6 m too.
 | `viewer/height_train.py`, `height_eval.py`, `gamus_dataset.py` | Fine-tuning, per-city evaluation, GAMUS loading |
 | `viewer/city_model.py`, `city_eval.py` | 3D city model and its benchmark |
 | `viewer/dsm_eval.py` | LiDAR benchmark by landscape and pixel size |
+| `viewer/dem_check.py` | DSM vs Copernicus/SRTM for scenes without LiDAR (India) |
+| `viewer/canopy.py` | CHMv2 forest canopy heights (optional) |
 | `viewer/geo.py`, `dem.py` | Geo helpers (16-bit grids, reprojection), DEM reads |
 | `viewer/server.py` | FastAPI app: API + static app |
 | `frontend/` | React + three.js viewer |
-| `scripts/` | Training-data download, the unattended v2 training run |
+| `scripts/` | Training-data download, the unattended v2 training run, Indian test scenes |
 | `tests/` | Synthetic-fixture test suite (no GPU, no network) |
 | `viewer/web/`, `viewer/export_*.py`, `refine*.py`, `validate.py`, `backend/` | Earlier DA3-based dashboards and exporters, the Django backend (legacy, kept working) |
 | `docs/` | Problem statement, model card, design specs, plans, spikes |

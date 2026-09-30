@@ -416,11 +416,34 @@ const otherScenes = displayedScenes.filter((scene) => !scene.urban);
 
 // Terrain detail controls. Keep samples one larger than segments because a grid
 // with N segments contains N + 1 vertices along that axis.
-// 1024 segments (~1 vertex per preview pixel, 2M triangles): the Exact DSM shows the
-// model's detail instead of blobs. Must match GRID_SIDE - 1 in viewer/server.py.
-// Drop to 512 if a target machine's GPU struggles.
-const MESH_SEGMENTS_X = 1024;
-const MESH_SEGMENTS_Y = 1024;
+// Mesh detail, chosen once at load. 1024 segments (~1 vertex per preview pixel, 2M
+// triangles) shows the model's detail in Exact DSM; software renderers, mobile GPUs and
+// Intel integrated graphics get 512 (0.5M triangles) so navigation stays smooth. Override
+// with ?detail=high or ?detail=standard. The server's grids are 1025 samples a side
+// (GRID_SIDE in viewer/server.py); 513 is every other one of them.
+function pickMeshSegments() {
+  const asked = new URLSearchParams(window.location.search).get("detail");
+  if (asked === "high") return 1024;
+  if (asked === "standard") return 512;
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+    if (!gl) return 512;
+    const info = gl.getExtension("WEBGL_debug_renderer_info");
+    const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return /swiftshader|llvmpipe|softpipe|software|mali|adreno|powervr|intel(?!.*arc)/i.test(name)
+      ? 512
+      : 1024;
+  } catch {
+    return 512;
+  }
+}
+const MESH_SEGMENTS_X = pickMeshSegments();
+const MESH_SEGMENTS_Y = MESH_SEGMENTS_X;
+// Weak GPUs also get a smaller shadow map and no supersampling: on software rendering the
+// 513 mesh ran at 5 fps with these at full quality.
+const LOW_DETAIL = MESH_SEGMENTS_X < 1024;
 const HEIGHT_SAMPLE_WIDTH = MESH_SEGMENTS_X + 1;
 const HEIGHT_SAMPLE_HEIGHT = MESH_SEGMENTS_Y + 1;
 
@@ -546,14 +569,20 @@ function pxToMetres(px, maxM) {
   return out;
 }
 
-// 16-bit heights from /api/estimate `grids` (metres = lo + u16 / 65535 * span), on the
-// mesh grid. The 8-bit preview PNGs step 0.1-0.3 m, which made slopes jump ~13 degrees.
-function decodeGrid(g) {
+// 16-bit heights from /api/estimate `grids` (metres = lo + u16 / 65535 * span), taken onto
+// the mesh grid: `srcSide` samples a side, every `step`-th one (step 2 for the 513 mesh).
+// The 8-bit preview PNGs step 0.1-0.3 m, which made slopes jump ~13 degrees.
+function decodeGrid(g, srcSide, side) {
   if (!g) return null;
   const bin = atob(g.b64);
-  const out = new Float32Array(bin.length / 2);
-  for (let i = 0; i < out.length; i++)
-    out[i] = g.lo + ((bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8)) / 65535) * g.span;
+  const step = (srcSide - 1) / (side - 1);
+  const out = new Float32Array(side * side);
+  for (let r = 0; r < side; r++)
+    for (let c = 0; c < side; c++) {
+      const k = r * step * srcSide + c * step;
+      out[r * side + c] =
+        g.lo + ((bin.charCodeAt(2 * k) | (bin.charCodeAt(2 * k + 1) << 8)) / 65535) * g.span;
+    }
   return out;
 }
 
@@ -1264,7 +1293,7 @@ function TerrainCanvas({
       antialias: false,
       powerPreference: "high-performance",
     });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+    renderer.setPixelRatio(LOW_DETAIL ? 1 : Math.min(window.devicePixelRatio || 1, 1.25));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     host.appendChild(renderer.domElement);
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -1288,7 +1317,7 @@ function TerrainCanvas({
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(LOW_DETAIL ? 1024 : 2048, LOW_DETAIL ? 1024 : 2048);
     Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 0.5, far: 20 });
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.02;
@@ -2485,12 +2514,12 @@ function App() {
         metricHeights: true,
         maxM: data.max_m,
         ndsmMaxM: data.max_m, // viewSample overrides maxM per mode; this stays the nDSM's
-        // 16-bit heights on the mesh grid, when the server sends a grid of the right size
-        ...(data.grids?.side === HEIGHT_SAMPLE_WIDTH && data.grids?.side === HEIGHT_SAMPLE_HEIGHT
+        // 16-bit heights on the mesh grid, when the server's grid lines up with it
+        ...(data.grids && (data.grids.side - 1) % (HEIGHT_SAMPLE_WIDTH - 1) === 0
           ? {
-              ndsmGrid: decodeGrid(data.grids.ndsm),
-              groundGrid: decodeGrid(data.grids.ground),
-              dsmGrid: decodeGrid(data.grids.dsm),
+              ndsmGrid: decodeGrid(data.grids.ndsm, data.grids.side, HEIGHT_SAMPLE_WIDTH),
+              groundGrid: decodeGrid(data.grids.ground, data.grids.side, HEIGHT_SAMPLE_WIDTH),
+              dsmGrid: decodeGrid(data.grids.dsm, data.grids.side, HEIGHT_SAMPLE_WIDTH),
             }
           : {}),
         groundWidthM: data.shape[1] * (data.gsd_m || GAMUS_GSD_M),
@@ -2520,6 +2549,9 @@ function App() {
         validation: data.validation,
         gcp: data.gcp,
         checkpoint: data.checkpoint,
+        models: data.models,
+        work_gsd_m: data.work_gsd_m,
+        gsd_m: data.gsd_m,
       });
       setProfileCleared(false);
       setWaypointCount(0);
@@ -3370,6 +3402,16 @@ function App() {
                       </>
                     )}
                   </div>
+                  {uploadMeta.models && (
+                    <div className="models-line">
+                      Models: {uploadMeta.models.join(" · ")}
+                      {uploadMeta.gsd_m && uploadMeta.work_gsd_m > 0.34 &&
+                        ` · processed at ${uploadMeta.work_gsd_m.toFixed(2)} m (very large scene)`}
+                      {uploadMeta.models.some((m) => m.startsWith("CHMv2")) && (
+                        <span className="dino-credit"> · Built with DINOv3</span>
+                      )}
+                    </div>
+                  )}
                   {uploadMeta.dsm_error && (
                     <div className="upload-error">
                       Absolute DSM unavailable: {uploadMeta.dsm_error}

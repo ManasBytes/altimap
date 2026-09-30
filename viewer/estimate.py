@@ -31,7 +31,16 @@ from viewer.height_model import GAMUS_GSD_M, OEM_TO_GAMUS, predict
 DEM_COLLECTION = "cop-dem-glo-30"
 DEM_POSTING_M = 30.0
 OPENING_M = 150.0  # wider than any building footprint we expect in a 30 m DEM
-MAX_SIDE = 4096  # ponytail: caps inference memory; tile the scene if larger outputs are needed
+# Large scenes are processed in tiles of TILE_WORK_PX at the model's 0.33 m (~1 km), each with
+# a margin of half a model window of context that is predicted but not kept, so every tile sees
+# full-resolution imagery and memory stays bounded. (It used to squeeze any scene into 4096 px,
+# i.e. anything wider than ~1.35 km was processed coarser, and object heights fade with pixel size.)
+TILE_WORK_PX = 3072
+TILE_MARGIN_WORK_PX = 259
+# Only coarse, very wide scenes hit this (e.g. 50 km at 10 m would be 150k px a side at 0.33 m,
+# hours of work for heights the model can't see at 10 m anyway): they run at a coarser working
+# resolution, reported as work_gsd_m.
+MAX_WORK_PIXELS = 400e6
 MODEL_VERSION = "rs3dada-vitl-gamus"
 def read_gcps(path: Path) -> list[tuple[float, float, float]]:
     """Ground control points from a CSV: lon, lat, height (m above mean sea level, the
@@ -127,12 +136,42 @@ def gsd_metres(geo: dict) -> float | None:
     return res
 
 
-def work_shape(shape: tuple[int, int], src_gsd: float | None, dst_gsd: float = GAMUS_GSD_M,
-               max_side: int = MAX_SIDE) -> tuple[int, int]:
-    h, w = shape
-    scale = src_gsd / dst_gsd if src_gsd else 1.0
-    scale = min(scale, max_side / max(h, w)) if max(h, w) * scale > max_side else scale
-    return max(1, round(h * scale)), max(1, round(w * scale))
+def working_scale(shape: tuple[int, int], src_gsd: float | None) -> float:
+    """Resampling factor from the input grid to the model's working grid (0.33 m)."""
+    scale = src_gsd / GAMUS_GSD_M if src_gsd else 1.0
+    work_px = shape[0] * shape[1] * scale ** 2
+    if work_px > MAX_WORK_PIXELS:
+        scale *= math.sqrt(MAX_WORK_PIXELS / work_px)
+    return scale
+
+
+def predict_scene(rgb: np.ndarray, scale: float, run, progress=None) -> tuple[np.ndarray, np.ndarray]:
+    """Height (m) and model classes on the input grid. `run(work_rgb, progress)` predicts one
+    working-resolution image. Scenes larger than one tile are cut into tiles (in input pixels)
+    with a margin of context; each is resampled by `scale`, predicted, resampled back, and only
+    its central part kept."""
+    h, w = rgb.shape[:2]
+    report = progress or (lambda f: None)
+    tile = max(1, int(TILE_WORK_PX / scale))
+    margin = int(math.ceil(TILE_MARGIN_WORK_PX / scale))
+    if h <= tile + 2 * margin and w <= tile + 2 * margin:  # one pass
+        hw, cw = run(_resize(rgb, (max(1, round(h * scale)), max(1, round(w * scale)))), report)
+        return _resize(hw, (h, w)), _resize(cw, (h, w), nearest=True)
+    height = np.zeros((h, w), np.float32)
+    classes = np.zeros((h, w), np.uint8)
+    starts = [(r, c) for r in range(0, h, tile) for c in range(0, w, tile)]
+    for k, (r, c) in enumerate(starts):
+        r0, c0 = max(0, r - margin), max(0, c - margin)
+        r1, c1 = min(h, r + tile + margin), min(w, c + tile + margin)
+        crop = rgb[r0:r1, c0:c1]
+        work = _resize(crop, (max(1, round((r1 - r0) * scale)), max(1, round((c1 - c0) * scale))))
+        hw, cw = run(work, lambda f, k=k: report((k + f) / len(starts)))
+        hb, cb = _resize(hw, crop.shape[:2]), _resize(cw, crop.shape[:2], nearest=True)
+        kh, kw = min(tile, h - r), min(tile, w - c)
+        height[r:r + kh, c:c + kw] = hb[r - r0:r - r0 + kh, c - c0:c - c0 + kw]
+        classes[r:r + kh, c:c + kw] = cb[r - r0:r - r0 + kh, c - c0:c - c0 + kw]
+    report(1.0)
+    return height, classes
 
 
 def bare_earth(dem: np.ndarray, size_px: int) -> np.ndarray:
@@ -275,11 +314,64 @@ def ground_for(coarse: np.ndarray, pad_px: tuple[int, int], shape: tuple[int, in
     return dem_on_image(bare, pad_px, shape)
 
 
+def fuse_heights(h1: np.ndarray, h2: np.ndarray | None, classes: np.ndarray) -> np.ndarray:
+    """Building pixels take the mean of the two height models, all others the first.
+
+    v1 (BitFit fine-tune) under-reads tall buildings; v2 (8 encoder blocks, height-weighted
+    loss, SynRS3D high-rises) reads them at full height but over-reads trees and ground on
+    imagery it wasn't trained on. Against 3DEP LiDAR the mean on buildings cut building RMSE
+    (city 44.5 -> 41.9, hills 5.2 -> 4.4, suburb 2.87 -> 2.82 m) and raised the city's tallest
+    objects from 66 to 104 m (LiDAR 151 m); on GAMUS val, building RMSE 2.57 -> 2.40 m."""
+    if h2 is None:
+        return h1
+    return np.where(classes == 3, 0.5 * (h1 + h2), h1).astype(np.float32)
+
+
+def forest_mask(classes: np.ndarray, gsd_m: float, window_m: float = 150.0, share: float = 0.8) -> np.ndarray:
+    """Tree pixels inside extensive forest: at least `share` of the surrounding `window_m` is
+    canopy. Wide enough that garden trees and suburban clusters never count (a 30 m window did,
+    and cost the suburb 0.5 m of DSM RMSE); measured on four landscapes, 150 m / 0.8 changes
+    the city, suburb and hills by exactly nothing."""
+    from scipy import ndimage
+
+    tree = classes == 6
+    if not tree.any():
+        return tree
+    size = max(1, round(window_m / gsd_m))
+    return tree & (ndimage.uniform_filter(tree.astype(np.float32), size=size) >= share)
+
+
+def _on(model, device: str):
+    """Move a secondary model onto the device for one use (and back), so only one of the
+    ViT-L models sits on a 6 GB GPU at a time."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def ctx():
+        target = model[0] if isinstance(model, tuple) else model
+        target.to(device)
+        try:
+            yield model
+        finally:
+            target.to("cpu")
+            if device != "cpu":
+                import torch
+
+                torch.cuda.empty_cache()
+
+    return ctx()
+
+
 def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None = None,
-             tta: bool = True, report=None, gcps: list | None = None) -> dict:
+             tta: bool = True, report=None, gcps: list | None = None,
+             building_model=None, canopy_model=None) -> dict:
     """Run the height model on `path`, write GeoTIFFs into `out_dir`, return arrays + a record.
 
     `gcps`: (lon, lat, height) control points that correct the DSM (georeferenced input only).
+    `building_model`: a second height model whose heights are averaged in on building pixels
+    (`fuse_heights`). `canopy_model`: CHMv2 (viewer/canopy.py) for canopy heights in forest.
+    Both are kept on the CPU and moved to `device` only while they run. `load_pipeline()` loads
+    all three the way the app does.
 
     `report(stage, fraction)`, if given, receives progress for a UI (fraction 0..0.9).
     """
@@ -304,13 +396,32 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
     src_gsd = gsd_m or gsd_metres(geo)
 
     shape = rgb.shape[:2]
-    work = _resize(rgb, work_shape(shape, src_gsd))
-    ndsm_work, oem_work = predict(model, work, device, tta=tta,
-                                  progress=lambda f: report("Estimating heights", 0.05 + 0.7 * f))
-    ndsm = np.maximum(_resize(ndsm_work, shape), 0).astype(np.float32)
+    scale = working_scale(shape, src_gsd)
+    share = 0.35 if building_model is not None else 0.7  # of the progress bar, for this pass
+    height, oem = predict_scene(
+        rgb, scale, lambda work, prog: predict(model, work, device, tta=tta, progress=prog),
+        progress=lambda f: report("Estimating heights", 0.05 + share * f))
+    classes = OEM_TO_GAMUS[oem]
+    models_used = ["height v1"]
+    if building_model is not None and (classes == 3).any():
+        with _on(building_model, device) as m2:
+            h2, _ = predict_scene(
+                rgb, scale, lambda work, prog: predict(m2, work, device, tta=tta, progress=prog),
+                progress=lambda f: report("Estimating building heights", 0.40 + 0.25 * f))
+        height = fuse_heights(height, h2, classes)
+        models_used.append("height v2 (buildings)")
+    forest = forest_mask(classes, src_gsd or GAMUS_GSD_M)
+    if canopy_model is not None and forest.any():
+        from viewer import canopy
+
+        report("Estimating forest canopy", 0.66)
+        with _on(canopy_model, device) as chm:
+            height = np.where(forest, canopy.predict(chm, rgb, src_gsd or GAMUS_GSD_M, device), height)
+        models_used.append("CHMv2 (forest canopy)")
+    ndsm = np.maximum(height, 0).astype(np.float32)
     ndsm[~valid] = np.nan  # NaN is the project-wide nodata value
-    classes = OEM_TO_GAMUS[_resize(oem_work, shape, nearest=True)]
     classes[~valid] = 0
+    forest &= valid
 
     transform, crs = Affine.identity(), None
     if geo.get("georeferenced"):
@@ -328,6 +439,9 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
         "georeferenced": bool(geo.get("georeferenced")),
         "gsd_m": src_gsd,
         "gsd_assumed": src_gsd is None,
+        "work_gsd_m": round((src_gsd or GAMUS_GSD_M) / scale, 4),  # what the model actually saw
+        "models": models_used,
+        "forest_share": round(float(forest.mean()), 4),
         "shape": list(shape),
         "ndsm_max_m": ndsm_range[1],
         "ndsm_p99_m": float(np.percentile(finite, 99)) if finite.size else 0.0,
@@ -347,7 +461,11 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
             dem, record["dsm_error"] = None, f"{type(exc).__name__}: {exc}"
         if dem is not None:
             report("Writing absolute DSM", 0.86)
-            dsm = dem_consistent_ground(dem, ndsm, gsd_out) + ndsm
+            # In extensive forest the model's within-cell canopy detail is poorly placed (r ~0.3
+            # vs LiDAR) and only added error: there the DSM keeps GLO-30's surface (forest DSM
+            # 8.92 -> 8.63 m RMSE, Copernicus alone 8.53; other landscapes unchanged).
+            detail = np.where(forest, 0.0, ndsm).astype(np.float32)
+            dsm = dem_consistent_ground(dem, detail, gsd_out) + detail
             method = display_ground_method(float((classes == 3).mean()))
             if method == "subtract":
                 ground = dem_consistent_ground(dem, ndsm, gsd_out)
@@ -384,6 +502,26 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
             "dsm": dsm}
 
 
+CACHE_DIR = Path(__file__).resolve().parent / "cache"
+
+
+def load_pipeline(ckpt: Path | None = None, synrs3d: Path | None = None, device: str | None = None) -> dict:
+    """The app's models: height v1 on the device; v2 (buildings) and CHMv2 (forest) on the CPU
+    when installed (`viewer/cache/best_v2.pth`, the CHMv2 weights in the HF cache).
+    -> kwargs for estimate(): model, device, building_model, canopy_model."""
+    from viewer import canopy
+    from viewer.height_model import load_model
+
+    synrs3d = synrs3d or CACHE_DIR / "SynRS3D"
+    ckpt = ckpt or next((c for c in (CACHE_DIR / "best.pth", synrs3d / "pretrain/RS3DAda_vitl_DPT_height.pth")
+                         if c.exists()), CACHE_DIR / "best.pth")
+    model, device = load_model(ckpt, synrs3d, device)
+    v2 = CACHE_DIR / "best_v2.pth"
+    building_model = load_model(v2, synrs3d, "cpu")[0] if v2.exists() and ckpt.name == "best.pth" else None
+    return {"model": model, "device": device, "building_model": building_model,
+            "canopy_model": canopy.load("cpu")}
+
+
 def main() -> None:
     """Batch CLI: every input image -> <out>/<stem>/{ndsm,dsm}.tif + meta.json.
 
@@ -411,11 +549,13 @@ def main() -> None:
     args = ap.parse_args()
     gcps = read_gcps(args.gcps) if args.gcps else None
 
-    model, device = load_model(args.ckpt, args.synrs3d)
-    print(f"model {args.ckpt.name} on {device}")
+    models = load_pipeline(args.ckpt, args.synrs3d)
+    print(f"model {args.ckpt.name} on {models['device']}"
+          + (" + v2 for buildings" if models["building_model"] is not None else "")
+          + (" + CHMv2 for forest" if models["canopy_model"] is not None else ""))
     for path in args.images:
         out_dir = args.out / path.stem
-        result = estimate(path, model, device, out_dir, gsd_m=args.gsd, tta=not args.no_tta, gcps=gcps)
+        result = estimate(path, out_dir=out_dir, gsd_m=args.gsd, tta=not args.no_tta, gcps=gcps, **models)
         record = result["record"]
         (out_dir / "meta.json").write_text(json.dumps(record, indent=2))
         dsm = record["dsm"]

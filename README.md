@@ -22,20 +22,32 @@ part works, data formats, API, models, measured results and limits), [model card
    LiDAR-derived nDSM), training only the encoder's bias terms (BitFit) plus the decoder, with a joint
    land-cover head as a semantic prior. Loss: L1 on metres + L1 on height gradients + 0.2 × class
    cross-entropy.
-2. **Scale.** The model outputs metres directly. Inputs are resampled to the model's 0.33 m ground
+2. **Three models, by land cover.** Each was measured against USGS airborne LiDAR
+   (ARCHITECTURE.md §5):
+   - **Fine-tune v1**: heights everywhere.
+   - **v2** (8 encoder blocks, height-weighted loss, SynRS3D high-rises): averaged in on building
+     pixels. It reads tall buildings at nearer their true height; alone it over-reads trees and
+     ground on imagery it wasn't trained on.
+   - **Meta's CHMv2 canopy model**: tree heights inside extensive forest (≥ 80 % canopy within
+     150 m), where the main model reads trees ~16 m low. It is worse than ours outside forests.
+   - The last two are optional downloads.
+3. **Scale.** The models output metres directly. Inputs are resampled to the model's 0.33 m ground
    sampling distance (from the GeoTIFF, or a user-supplied GSD), then back to the input grid.
-3. **Absolute elevation (GeoTIFF input).** The organisers score GeoTIFF output against SRTM/Copernicus
+   Large scenes are processed in ~1 km tiles with a context margin, so every part is seen at full
+   resolution.
+4. **Absolute elevation (GeoTIFF input).** The organisers score GeoTIFF output against SRTM/Copernicus
    and require values that "match DEM heights". So the exported DSM is **DEM-consistent**: Copernicus
    GLO-30 supplies absolute level and terrain, and the model adds the detail inside each 30 m cell with
    its own cell-mean removed (`DSM = GLO-30 − mean₃₀(nDSM) + nDSM`). Averaged over 30 m, the DSM
    reproduces GLO-30; at full resolution it has the buildings and trees. Heights are **orthometric
    (EGM2008 geoid)**, and the sidecar says so. Known trade-off: in dense downtowns GLO-30's radar
    under-records building mass, so street pixels come out below their true (LiDAR) level while the
-   30 m average still matches the DEM.
-4. **Terrain in the 3D view.** A bare-earth estimate chosen by scene type (measured against USGS
+   30 m average still matches the DEM. In extensive forest the fine detail is left out (both
+   models place it poorly under closed canopy), so the DSM there is GLO-30's own surface.
+5. **Terrain in the 3D view.** A bare-earth estimate chosen by scene type (measured against USGS
    LiDAR on four scenes): a 300 m morphological opening of GLO-30 for dense cities, 150 m for towns
    (keeps hills), model subtraction for forest and farmland. Display only.
-5. **3D city model (display).** From the same prediction, `viewer/city_model.py` builds an LoD1
+6. **3D city model (display).** From the same prediction, `viewer/city_model.py` builds an LoD1
    city: each building complex cut into roofs where the roof height steps or dips (touching row
    houses become separate blocks) and into distinct height levels (a tower on a podium becomes two
    blocks), outlines kept as traced unless squaring them off barely moves them, extruded with the
@@ -46,10 +58,16 @@ part works, data formats, API, models, measured results and limits), [model card
    `buildings.geojson` (footprint + height, WGS84 for GeoTIFF input). This is for the 3D view only:
    regularizing heights this way raised RMSE from 2.66 m to 2.86–3.38 m on validation tiles, so the
    GeoTIFFs stay the raw model output. The viewer's *Exact surface* toggle shows that raw DSM.
-6. **Viewer.** React + three.js. The RGB image is draped on a 513 × 513 displaced mesh, with orbit,
-   WASD/QE fly controls and waypoint flythroughs. Uploads show a height-and-slope probe
-   (double-click in Measure mode), a centre-line height profile, land-cover layers, GeoTIFF
-   downloads, and RMSE/MAE/correlation against an optional uploaded reference height map.
+7. **Viewer.** React + three.js. The RGB image is draped on a displaced mesh: 1025 × 1025 on
+   capable GPUs, 513 × 513 on integrated or software graphics, chosen automatically. Navigation:
+   orbit, WASD/QE flight, first-person **Walk** and waypoint flythroughs.
+
+   Uploads get:
+   - a height-and-slope probe and an **A→B height profile** (Measure mode);
+   - **Slope** and **Error** layers and **contour lines**;
+   - GeoTIFF downloads;
+   - validation against an optional reference height map (RMSE/MAE/correlation, bias, per-class
+     errors, scatter plot).
    Drop an image anywhere on the view or use Import; a live progress bar shows each processing stage,
    and *Quality: Fast* skips the 4-flip averaging (~4× quicker). Click a building for its height,
    estimated floors, footprint area and roof elevation; *Export* saves the current 3D model as a
@@ -102,15 +120,22 @@ DSM; *GLO-30 alone* is what you'd get with no model at all.
 
 | Scene (pixel size) | nDSM RMSE (predict 0) | nDSM bias | DSM RMSE (GLO-30 alone) | DSM r (GLO-30 alone) |
 |---|---|---|---|---|
-| Dense city, Philadelphia (0.3 m) | 29.8 m (42.4) | −6.8 m | 34.7 m (36.3) | 0.388 (0.272) |
-| Suburb, Chevy Chase (0.6 m) | 4.5 m (6.5) | +1.3 m | 3.99 m (4.02) | 0.817 (0.796) |
-| Hilly town, Pittsburgh (0.6 m) | 3.7 m (6.5) | −0.7 m | 5.04 m (5.53) | 0.940 (0.923) |
-| Forest, Smoky Mountains (0.6 m) | 18.5 m (24.7) | −15.9 m | 9.03 m (8.53) | 0.991 (0.993) |
+| Dense city, Philadelphia (0.3 m) | 30.1 m (42.4) | −1.2 m | 35.0 m (36.3) | 0.376 (0.272) |
+| Suburb, Chevy Chase (0.6 m) | 4.5 m (6.5) | +1.4 m | 3.97 m (4.02) | 0.820 (0.796) |
+| Hilly town, Pittsburgh (0.6 m) | 3.5 m (6.5) | −0.4 m | 5.02 m (5.53) | 0.941 (0.923) |
+| Forest, Smoky Mountains (0.6 m) | 15.7 m (24.7) | −10.8 m | 8.75 m (8.53) | 0.992 (0.993) |
 
 - **Where it helps**: the model improves the absolute DSM over Copernicus in the city, suburb and
-  hills.
-- **Weak spots**: very tall buildings, and forest canopy (16 m too low), where the DSM ends up
-  0.5 m worse than Copernicus alone.
+  hills, and in the forest it stays within 0.2 m of it.
+- **What the three-model pipeline fixed** (vs the first model alone):
+  - the city's tallest objects: 66 m → 104 m (LiDAR 151 m);
+  - forest canopy bias: −15.9 → −10.8 m;
+  - forest DSM: 9.03 → 8.75 m.
+
+  Remaining weak spots: very tall towers and forest canopy still read low.
+- **India** (Sikkim, Maxar satellite scenes, `viewer/dem_check.py`): the DSM matches Copernicus
+  to ~1 m. Copernicus itself sits 7–14 m above SRTM in the Himalaya, so the choice of reference
+  DEM matters (ARCHITECTURE.md §9.6).
 - **Resolution** (images block-averaged to 1, 2, 5 and 10 m): object heights hold up to about
   1–2 m and fade to flat by 5–10 m. Because the export is DEM-consistent, the DSM stays within
   0.1 m of GLO-30 alone there.
@@ -178,11 +203,10 @@ Tests (no GPU, no network): `uv pip install -e ".[dev]"`, then `python -m pytest
   ground component. Hilly terrain relief comes from the DEM, not the model.
 - **Vertical datum** is orthometric (EGM2008). Comparing against ellipsoidal references needs a
   geoid correction.
-- **Forest canopy** reads ~16 m low, and there the DSM is 0.5 m worse than GLO-30 alone. Meta's
-  CHMv2 canopy model was tested and didn't fix it (ARCHITECTURE.md §5).
-- **Large scenes** are processed at no more than 4096 px on the long side, at the model's 0.33 m.
-  Beyond ~1.35 km the model sees a coarser image, and object heights fade (see the resolution
-  numbers above). Tiling is the fix.
+- **Very tall buildings and forest canopy** still read low (towers ~104 m where LiDAR says 151 m;
+  canopy ~11 m low), even after fusing v2 and Meta's CHMv2 (ARCHITECTURE.md §5).
+- **Large scenes** run tile by tile at full resolution (no seams: ARCHITECTURE.md §9.5). They
+  take minutes on a laptop GPU.
 - **Network**: GeoTIFFs need Copernicus GLO-30. It's read from AWS Open Data, with Microsoft
   Planetary Computer as fallback; remote reads time out after 60 s and then return the nDSM only.
 - **Licences**: RS3DAda weights are MIT (JTRNEO/RS3DAda), and so are our fine-tuned v1 weights.

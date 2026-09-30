@@ -55,6 +55,16 @@ def predictions(root: Path) -> list[Path]:
             h, oem = predict(model, rgb, dev)
             np.savez_compressed(CACHE / f"{t.scene_id}.npz", cls=cls, ref=clean_height(ref),
                                 h=h.astype(np.float32), pcls=np.asarray(OEM_TO_GAMUS)[oem])
+    v2 = Path("viewer/cache/best_v2.pth")  # the app fuses v2 into building heights
+    todo = [t for t in tiles if v2.exists() and "h2" not in np.load(CACHE / f"{t.scene_id}.npz")]
+    if todo:
+        from viewer.height_model import load_model, predict
+
+        model, dev = load_model(v2, Path("viewer/cache/SynRS3D"))
+        for t in todo:
+            d = dict(np.load(CACHE / f"{t.scene_id}.npz"))
+            d["h2"] = predict(model, load_tile(t)[0], dev)[0].astype(np.float32)
+            np.savez_compressed(CACHE / f"{t.scene_id}.npz", **d)
     return [CACHE / f"{t.scene_id}.npz" for t in tiles]
 
 
@@ -90,7 +100,10 @@ def main() -> None:
     for f in predictions(args.gamus):
         d = np.load(f)
         ref_b = d["cls"] == 3
-        pm, hr, c = footprint_raster(d["h"], d["pcls"], ref_b.shape)
+        from viewer.estimate import fuse_heights
+
+        h = fuse_heights(d["h"], d["h2"] if "h2" in d else None, d["pcls"])
+        pm, hr, c = footprint_raster(h, d["pcls"], ref_b.shape)
         inter += (pm & ref_b).sum()
         union += (pm | ref_b).sum()
         pb, rb = pm & ~ndimage.binary_erosion(pm), ref_b & ~ndimage.binary_erosion(ref_b)

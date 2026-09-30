@@ -34,7 +34,8 @@ tests without PyTorch. Don't merge them.
 uv venv --python 3.12 .venv-da3
 uv pip install --python .venv-da3/bin/python torch torchvision --index-url https://download.pytorch.org/whl/cu128
 uv pip install --python .venv-da3/bin/python h5py numpy scipy rasterio pillow fastapi uvicorn \
-    python-multipart pystac-client planetary-computer huggingface_hub shapely requests trimesh
+    python-multipart pystac-client planetary-computer huggingface_hub shapely requests trimesh \
+    transformers safetensors
 uv pip install --python .venv-da3/bin/python -e . --no-deps
 
 # Tests only (no GPU, no network)
@@ -58,18 +59,35 @@ git -C viewer/cache/SynRS3D checkout ab5a485
 .venv-da3/bin/python -c "from huggingface_hub import hf_hub_download; \
 hf_hub_download('JTRNEO/RS3DAda', 'RS3DAda_vitl_DPT_height.pth', local_dir='viewer/cache/SynRS3D/pretrain')"
 
-# Our fine-tuned weights (public, 1.5 GB, no login needed):
-# https://huggingface.co/Dilavesh/altimap-height
-.venv-da3/bin/python -c "from huggingface_hub import hf_hub_download; \
-hf_hub_download('Dilavesh/altimap-height', 'best.pth', local_dir='viewer/cache')"
+# Our fine-tuned weights (public, no login needed): https://huggingface.co/Dilavesh/altimap-height
+#   best.pth (1.5 GB): the main height model (v1)
+#   v2/best.pth (1.5 GB) -> viewer/cache/best_v2.pth: second model, used for building heights
+.venv-da3/bin/python -c "from huggingface_hub import hf_hub_download; import shutil; \
+hf_hub_download('Dilavesh/altimap-height', 'best.pth', local_dir='viewer/cache'); \
+shutil.copy(hf_hub_download('Dilavesh/altimap-height', 'v2/best.pth'), 'viewer/cache/best_v2.pth')"
+
+# Meta CHMv2 canopy-height model (1.35 GB), used for forest canopy. This public mirror is
+# byte-identical to Meta's gated facebook/dinov3-vitl16-chmv2-dpt-head (DINOv3 licence)
+.venv-da3/bin/python -c "from huggingface_hub import snapshot_download; \
+snapshot_download('WEO-SAS/chm-meta-v2', allow_patterns=['*.json', 'model.safetensors', 'LICENSE.md'])"
 ```
+
+What each model does (all measured against USGS LiDAR, see ARCHITECTURE.md §5):
+- `best.pth` gives the heights everywhere.
+- `best_v2.pth` is averaged in on building pixels. It reads tall buildings at nearer their true
+  height; alone it over-reads trees and ground on unfamiliar imagery.
+- CHMv2 replaces canopy heights inside extensive forest, where the main model reads trees
+  ~16 m low.
+- The last two are optional: without them the app runs with `best.pth` alone and says so in
+  the upload panel ("Models").
 
 The server uses `viewer/cache/best.pth` if it exists, else the stock weights. It also honours
 `ALTIMAP_HEIGHT_CKPT=/path/to/ckpt.pth`. The fine-tuned model is much better (test RMSE 5.02 m
 vs 7.25 m zero-shot, see README), so don't run on the fallback. The model card at
 https://huggingface.co/Dilavesh/altimap-height has the architecture, results, known limitations
-and licence (MIT, crediting RS3DAda and GAMUS); its source is `docs/model-card.md`. When the v2
-training run finishes, its weights appear under `v2/` in the same repo.
+and licences; its source is `docs/model-card.md`. v1 is MIT. v2 is also trained on SynRS3D data
+(CC BY-NC 4.0), so treat it as non-commercial. CHMv2 is under Meta's DINOv3 licence, which asks
+for "Built with DINOv3" in the product: the app's upload panel says it when CHMv2 ran.
 
 The DINOv2 encoder code is fetched by `torch.hub` from GitHub the first time a model loads, then
 loaded from `~/.cache/torch/hub` without contacting GitHub. After that the app runs offline,
@@ -162,6 +180,11 @@ Stop the server first on a 6 GB GPU: the server's model and an evaluation's mode
 # DSM accuracy by landscape (city, suburb, hills, forest) and by pixel size (native -> 10 m),
 # against USGS 3DEP airborne LiDAR; needs demo/ and internet the first time (LiDAR is cached)
 .venv-da3/bin/python -m viewer.dsm_eval
+
+# India: Maxar Open Data satellite scenes of Sikkim (CC BY-NC 4.0), checked against the DEMs the
+# organisers score GeoTIFFs against (Copernicus GLO-30 and SRTM/NASADEM)
+.venv-da3/bin/python scripts/fetch_india_samples.py     # -> demo/india/*.tif (~40 MB each)
+.venv-da3/bin/python -m viewer.dem_check demo/india/*.tif
 
 # Height model per city against baselines (needs GAMUS under $ALTIMAP_DATA/gamus, default ~/altimap-data)
 .venv-da3/bin/python -m viewer.height_eval --split test --ckpt viewer/cache/best.pth \

@@ -2,21 +2,44 @@ import math
 
 import numpy as np
 
-from viewer.estimate import _resize, bare_earth, gsd_metres, work_shape
+from viewer.estimate import _resize, bare_earth, gsd_metres
 
 
-def test_work_shape_resamples_to_model_gsd() -> None:
-    # 0.5 m imagery -> 0.33 m model grid: 1.5x more pixels per side
-    assert work_shape((1000, 600), 0.495, 0.33) == (1500, 900)
+def test_working_scale_resamples_to_model_gsd() -> None:
+    from viewer.estimate import working_scale
+
+    assert abs(working_scale((1000, 600), 0.495) - 1.5) < 1e-9  # 0.495 m -> 0.33 m
+    assert working_scale((700, 500), None) == 1.0  # unknown GSD: run as-is
 
 
-def test_work_shape_without_gsd_keeps_shape() -> None:
-    assert work_shape((700, 500), None, 0.33) == (700, 500)
+def test_working_scale_bounds_the_work_for_huge_coarse_scenes() -> None:
+    from viewer.estimate import MAX_WORK_PIXELS, working_scale
+
+    s = working_scale((5000, 5000), 10.0)  # 50 km at 10 m would be 150k px a side at 0.33 m
+    assert abs((5000 * s) ** 2 - MAX_WORK_PIXELS) / MAX_WORK_PIXELS < 1e-6
 
 
-def test_work_shape_caps_longest_side() -> None:
-    h, w = work_shape((10000, 5000), 0.33, 0.33, max_side=4096)
-    assert max(h, w) == 4096 and math.isclose(h / w, 2.0, rel_tol=0.01)
+def _fake_run(work, progress=None):
+    """A per-pixel "model": height from red, class from green, so tiling can't change it."""
+    if progress:
+        progress(1.0)
+    return work[..., 0].astype(np.float32) / 10.0 + 1.0, (work[..., 1] > 127).astype(np.uint8)
+
+
+def test_tiled_prediction_matches_one_pass_and_fills_every_pixel(monkeypatch) -> None:
+    import viewer.estimate as est
+
+    yy, xx = np.mgrid[:900, :700]
+    rgb = np.stack([(xx * 255 / 700), (yy * 255 / 900), np.full(xx.shape, 90)], -1).astype(np.uint8)
+    one_h, one_c = est.predict_scene(rgb, 1.5, _fake_run)  # fits in one tile
+    monkeypatch.setattr(est, "TILE_WORK_PX", 300)  # force ~4 x 5 tiles
+    monkeypatch.setattr(est, "TILE_MARGIN_WORK_PX", 40)
+    seen = []
+    h, c = est.predict_scene(rgb, 1.5, _fake_run, progress=seen.append)
+    assert h.shape == c.shape == rgb.shape[:2]
+    assert h.min() >= 1.0  # every pixel written (the fake model never returns < 1)
+    assert np.abs(h - one_h).max() < 0.2 and (c != one_c).mean() < 0.01
+    assert seen and seen[-1] == 1.0 and seen == sorted(seen)
 
 
 def test_gsd_metres_projected_and_geographic() -> None:
@@ -219,3 +242,29 @@ def test_one_padded_dem_read_serves_the_export_and_the_bare_earth_ground():
     bumpy[20:22, 20:22] += 30
     ground = ground_for(bumpy, (pad, pad), shape, 150.0)
     assert np.abs(ground - dem).max() < 1.5
+
+
+def test_fusion_averages_the_two_models_on_buildings_only():
+    from viewer.estimate import fuse_heights
+
+    h1 = np.full((4, 4), 10.0, np.float32)
+    h2 = np.full((4, 4), 30.0, np.float32)
+    classes = np.ones((4, 4), np.uint8)
+    classes[:2] = 3  # top half buildings
+    out = fuse_heights(h1, h2, classes)
+    assert np.all(out[:2] == 20.0) and np.all(out[2:] == 10.0)
+    assert fuse_heights(h1, None, classes) is h1  # no second model: unchanged
+
+
+def test_forest_is_extensive_canopy_not_a_tree_cluster():
+    from viewer.estimate import forest_mask
+
+    gsd = 1.0
+    cls = np.ones((600, 600), np.uint8)
+    cls[:, :400] = 6  # a 400 m wide forest
+    cls[500:540, 480:520] = 6  # a 40 m cluster of garden trees
+    forest = forest_mask(cls, gsd)
+    assert forest[300, 100] and forest[300, 300]  # inside the forest
+    assert not forest[520, 500]  # the cluster isn't forest
+    assert not forest[300, 450]  # open ground beside the forest
+    assert not forest[cls != 6].any()

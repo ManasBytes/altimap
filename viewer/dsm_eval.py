@@ -140,8 +140,7 @@ def main() -> None:
     import rasterio
 
     from viewer.dem import glo30
-    from viewer.estimate import estimate
-    from viewer.height_model import load_model
+    from viewer.estimate import estimate, load_pipeline
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--gsd", type=float, nargs="+", default=None,
@@ -152,7 +151,7 @@ def main() -> None:
     ap.add_argument("--scenes", nargs="+", default=list(SCENES), choices=list(SCENES))
     args = ap.parse_args()
 
-    model, device = load_model(args.ckpt, Path("viewer/cache/SynRS3D"))
+    models = load_pipeline(args.ckpt)  # the app's full pipeline (v1 + v2 buildings + CHMv2 forest)
     rows = []
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
@@ -165,7 +164,7 @@ def main() -> None:
             gsds = args.gsd or [native] + [g for g in (0.6, 1.0, 2.0, 5.0, 10.0) if g > native + 0.01]
             for gsd in gsds:
                 img = degrade(path, gsd, tmp)
-                out = estimate(img, model, device, tmp / "out", tta=args.tta)
+                out = estimate(img, out_dir=tmp / "out", tta=args.tta, **models)
                 shape = out["ndsm"].shape
                 r = {k: (v if v.shape == shape else block_mean(v, shape))
                      for k, v in ref.items() if k in LIDAR}
