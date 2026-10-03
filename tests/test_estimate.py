@@ -166,6 +166,24 @@ def test_gsd_metres_for_any_geographic_crs():
     assert 1.0 < g < 1.2
 
 
+def test_geospatial_metadata_warns_for_rotated_and_non_square_grids(tmp_path):
+    import rasterio
+    from affine import Affine
+    from rasterio.crs import CRS
+
+    from viewer.geo import read_geo_meta
+
+    path = tmp_path / "rotated.tif"
+    with rasterio.open(path, "w", driver="GTiff", width=8, height=8, count=3,
+                       dtype="uint8", crs=CRS.from_epsg(32643),
+                       transform=Affine(1.0, 0.1, 500000.0, 0.0, -2.0, 3000000.0)) as dst:
+        dst.write(np.zeros((3, 8, 8), np.uint8))
+    meta = read_geo_meta(path)
+    assert meta["georeferenced"]
+    assert any("rotated" in w for w in meta["geospatial_warnings"])
+    assert any("non-square" in w for w in meta["geospatial_warnings"])
+
+
 def test_read_gcps_follows_the_header_and_skips_junk(tmp_path):
     from viewer.estimate import read_gcps
 
@@ -244,7 +262,7 @@ def test_one_padded_dem_read_serves_the_export_and_the_bare_earth_ground():
     assert np.abs(ground - dem).max() < 1.5
 
 
-def test_fusion_averages_the_two_models_on_buildings_only():
+def test_fusion_uses_validated_v2_weight_on_buildings_only():
     from viewer.estimate import fuse_heights
 
     h1 = np.full((4, 4), 10.0, np.float32)
@@ -252,7 +270,7 @@ def test_fusion_averages_the_two_models_on_buildings_only():
     classes = np.ones((4, 4), np.uint8)
     classes[:2] = 3  # top half buildings
     out = fuse_heights(h1, h2, classes)
-    assert np.all(out[:2] == 20.0) and np.all(out[2:] == 10.0)
+    assert np.all(out[:2] == 25.0) and np.all(out[2:] == 10.0)
     assert fuse_heights(h1, None, classes) is h1  # no second model: unchanged
 
 

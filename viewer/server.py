@@ -107,7 +107,7 @@ def _height_ckpt() -> Path:
 
 
 def _get_height_model() -> dict:
-    """The height pipeline (v1 + v2 for buildings + CHMv2 for forest, whichever are installed),
+    """The height pipeline (v1 + 75%-weighted v2 on buildings + CHMv2 in forest),
     loaded on first request, same reasoning as _get_model. -> kwargs for estimate()."""
     global _height_model
     if _height_model is None:

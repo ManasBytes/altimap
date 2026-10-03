@@ -122,6 +122,8 @@ def gsd_metres(geo: dict) -> float | None:
     """Pixel size in metres from read_geo_meta output, or None."""
     if not geo.get("georeferenced"):
         return None
+    if geo.get("res_metric_m"):
+        return float(geo["res_metric_m"][0])
     res = float(geo["res_m"][0])
     crs = str(geo["crs"])
     try:
@@ -315,16 +317,15 @@ def ground_for(coarse: np.ndarray, pad_px: tuple[int, int], shape: tuple[int, in
 
 
 def fuse_heights(h1: np.ndarray, h2: np.ndarray | None, classes: np.ndarray) -> np.ndarray:
-    """Building pixels take the mean of the two height models, all others the first.
+    """Building pixels take 25% v1 + 75% v2; all others use v1.
 
     v1 (BitFit fine-tune) under-reads tall buildings; v2 (8 encoder blocks, height-weighted
     loss, SynRS3D high-rises) reads them at full height but over-reads trees and ground on
-    imagery it wasn't trained on. Against 3DEP LiDAR the mean on buildings cut building RMSE
-    (city 44.5 -> 41.9, hills 5.2 -> 4.4, suburb 2.87 -> 2.82 m) and raised the city's tallest
-    objects from 66 to 104 m (LiDAR 151 m); on GAMUS val, building RMSE 2.57 -> 2.40 m."""
+    imagery it wasn't trained on. Full GAMUS validation and held-out test evaluation selected
+    a 0.75 v2 weight over the former 0.50 blend; a focused TTA check confirmed the result."""
     if h2 is None:
         return h1
-    return np.where(classes == 3, 0.5 * (h1 + h2), h1).astype(np.float32)
+    return np.where(classes == 3, 0.25 * h1 + 0.75 * h2, h1).astype(np.float32)
 
 
 def forest_mask(classes: np.ndarray, gsd_m: float, window_m: float = 150.0, share: float = 0.8) -> np.ndarray:
@@ -368,8 +369,8 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
     """Run the height model on `path`, write GeoTIFFs into `out_dir`, return arrays + a record.
 
     `gcps`: (lon, lat, height) control points that correct the DSM (georeferenced input only).
-    `building_model`: a second height model whose heights are averaged in on building pixels
-    (`fuse_heights`). `canopy_model`: CHMv2 (viewer/canopy.py) for canopy heights in forest.
+    `building_model`: a second height model blended at 75% on building pixels (`fuse_heights`).
+    `canopy_model`: CHMv2 (viewer/canopy.py) for canopy heights in forest.
     Both are kept on the CPU and moved to `device` only while they run. `load_pipeline()` loads
     all three the way the app does.
 
@@ -394,6 +395,7 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
     except Exception:
         geo = {"georeferenced": False}
     src_gsd = gsd_m or gsd_metres(geo)
+    geospatial_warnings = list(geo.get("geospatial_warnings", []))
 
     shape = rgb.shape[:2]
     scale = working_scale(shape, src_gsd)
@@ -409,7 +411,7 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
                 rgb, scale, lambda work, prog: predict(m2, work, device, tta=tta, progress=prog),
                 progress=lambda f: report("Estimating building heights", 0.40 + 0.25 * f))
         height = fuse_heights(height, h2, classes)
-        models_used.append("height v2 (buildings)")
+        models_used.append("height v2 (75% building blend)")
     forest = forest_mask(classes, src_gsd or GAMUS_GSD_M)
     if canopy_model is not None and forest.any():
         from viewer import canopy
@@ -439,6 +441,10 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
         "georeferenced": bool(geo.get("georeferenced")),
         "gsd_m": src_gsd,
         "gsd_assumed": src_gsd is None,
+        "height_mode": ("user_gsd_metric" if gsd_m is not None else
+                        "metadata_metric" if geo.get("georeferenced") and src_gsd is not None
+                        else "assumed_gsd_experimental"),
+        "geospatial_warnings": geospatial_warnings,
         "work_gsd_m": round((src_gsd or GAMUS_GSD_M) / scale, 4),  # what the model actually saw
         "models": models_used,
         "forest_share": round(float(forest.mean()), 4),
@@ -450,7 +456,7 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
     }
 
     ground, dsm = None, None  # ground: bare earth for the 3D view only; dsm: the export
-    if geo.get("georeferenced"):
+    if geo.get("georeferenced") and not geospatial_warnings:
         report("Fetching ground elevation (Copernicus GLO-30)", 0.78)
         try:
             coarse, pad_px = padded_dem(geo)
@@ -497,6 +503,8 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
                              "display_ground": method,
                              "datum": "orthometric (EGM2008)"}
             record["files"] += ["dsm.tif", "dsm.json"]
+    elif geo.get("georeferenced") and geospatial_warnings:
+        record["dsm_error"] = "; ".join(geospatial_warnings)
 
     return {"record": record, "rgb": rgb, "ndsm": ndsm, "classes": classes, "ground": ground,
             "dsm": dsm}
@@ -506,7 +514,7 @@ CACHE_DIR = Path(__file__).resolve().parent / "cache"
 
 
 def load_pipeline(ckpt: Path | None = None, synrs3d: Path | None = None, device: str | None = None) -> dict:
-    """The app's models: height v1 on the device; v2 (buildings) and CHMv2 (forest) on the CPU
+    """The app's models: height v1 on device; 75%-weighted v2 on buildings and CHMv2 in forest on CPU
     when installed (`viewer/cache/best_v2.pth`, the CHMv2 weights in the HF cache).
     -> kwargs for estimate(): model, device, building_model, canopy_model."""
     from viewer import canopy
@@ -551,7 +559,7 @@ def main() -> None:
 
     models = load_pipeline(args.ckpt, args.synrs3d)
     print(f"model {args.ckpt.name} on {models['device']}"
-          + (" + v2 for buildings" if models["building_model"] is not None else "")
+          + (" + v2 at 75% on buildings" if models["building_model"] is not None else "")
           + (" + CHMv2 for forest" if models["canopy_model"] is not None else ""))
     for path in args.images:
         out_dir = args.out / path.stem

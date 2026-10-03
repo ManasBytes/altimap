@@ -151,7 +151,7 @@ def main() -> None:
     ap.add_argument("--scenes", nargs="+", default=list(SCENES), choices=list(SCENES))
     args = ap.parse_args()
 
-    models = load_pipeline(args.ckpt)  # the app's full pipeline (v1 + v2 buildings + CHMv2 forest)
+    models = load_pipeline(args.ckpt)  # app pipeline: v1 + 75%-weighted v2 buildings + CHMv2 forest
     rows = []
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
