@@ -78,6 +78,27 @@ def test_elevation_cog_roundtrip_preserves_georeferencing(tmp_path: Path) -> Non
     assert (tmp_path / "dsm.json").exists()
 
 
+def test_elevation_writer_emits_a_real_cog(tmp_path: Path) -> None:
+    array = np.arange(1024 * 1024, dtype=np.float32).reshape(1024, 1024)
+    sidecar = Sidecar(
+        gsd_m=1.0,
+        source_gsd_m=1.0,
+        datum="orthometric",
+        vertical_unit="m",
+        model_version="test-v1",
+        height_range_m=(0.0, float(array.max())),
+        tile_overlap_px=0,
+        dtm_source=None,
+    )
+    path = tmp_path / "large.tif"
+    write_elevation_cog(path, array, from_origin(0.0, 0.0, 1.0, 1.0), CRS.from_epsg(32643), sidecar)
+    import rasterio
+
+    with rasterio.open(path) as src:
+        assert src.tags(ns="IMAGE_STRUCTURE").get("LAYOUT") == "COG"
+        assert src.overviews(1)
+
+
 def test_nodata_becomes_nan(tmp_path: Path) -> None:
     array = np.array([[1.0, np.nan], [3.0, 4.0]], dtype=np.float32)
     transform = from_origin(0.0, 0.0, 2.0, 2.0)

@@ -86,10 +86,13 @@ def write_elevation_cog(
         raise ValueError(f"expected a 2D array, got shape {array.shape}")
 
     data = array.astype(np.float32, copy=False)
+    # GDAL's COG driver writes the IFD/tiles/overviews in the order required by
+    # the Cloud Optimized GeoTIFF layout. A tiled GTiff is not automatically a
+    # COG, even when it uses compression and 256 px blocks.
     with rasterio.open(
         path,
         "w",
-        driver="GTiff",
+        driver="COG",
         height=data.shape[0],
         width=data.shape[1],
         count=1,
@@ -97,11 +100,10 @@ def write_elevation_cog(
         crs=crs,
         transform=transform,
         nodata=np.nan,
-        tiled=True,
-        blockxsize=256,
-        blockysize=256,
-        compress="deflate",
+        blocksize=256,
+        compress="DEFLATE",
         predictor=3,
+        overview_resampling="AVERAGE",
     ) as dst:
         dst.write(data, 1)
 
