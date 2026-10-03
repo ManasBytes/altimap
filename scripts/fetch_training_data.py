@@ -5,8 +5,8 @@
 - ./synrs3d/<folder>/{opt,gt_nDSM,gt_ss_mask}: SynRS3D folders rich in high-rises
   and hilly terrain (the zips have no top-level folder, so each one is unpacked
   into its own directory; its name carries the GSD range the loader needs).
-- ./gamus/{images,heights,classes}/train: every GAMUS train tile (existing val and
-  test downloads are kept). Files already present are skipped.
+- ./gamus/{images,heights,classes}/{train,val,test}: requested GAMUS splits. Files
+  already present are skipped.
 
 Both run in parallel; failures are reported and skipped, never fatal, so the
 training that follows always starts with whatever arrived.
@@ -17,7 +17,7 @@ from __future__ import annotations
 import shutil
 import threading
 import zipfile
-from collections import defaultdict
+import argparse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -52,18 +52,26 @@ def fetch_synrs3d(out: Path = Path("synrs3d")) -> None:
             print("synrs3d: FAILED", name, exc, flush=True)
 
 
-def fetch_gamus_train(out: Path = Path("gamus")) -> None:
+def fetch_gamus(out: Path = Path("gamus"), splits: tuple[str, ...] = ("train",)) -> None:
+    """Download complete GAMUS triplets for the requested splits, skipping existing files."""
     repo = "earthflow/GAMUS"
-    paths = defaultdict(dict)
+    paths = {}
     for f in HfApi().list_repo_files(repo, repo_type="dataset"):
         parts = f.split("/")
         if (len(parts) == 3 and parts[0] in ("images", "heights", "classes")
-                and parts[1] == "train" and f.endswith(".h5")):
-            paths[parts[2].rsplit("_", 1)[0]][parts[0]] = f
-    want = [p for v in paths.values() if len(v) == 3 for p in v.values()]
-    print("gamus: train files", len(want), flush=True)
+                and parts[1] in splits and f.endswith(".h5")):
+            key = (parts[1], parts[2].rsplit("_", 1)[0])
+            paths.setdefault(key, {})[parts[0]] = f
+    complete = [v for v in paths.values() if len(v) == 3]
+    want = [p for v in complete for p in v.values()]
+    print(f"gamus: splits={','.join(splits)} complete_tiles={len(complete)} "
+          f"files={len(want)} incomplete_triplets={len(paths) - len(complete)}", flush=True)
 
     def get(p: str) -> None:
+        # Avoid a Hub HEAD request for files already downloaded. This is both
+        # faster on resume and prevents unauthenticated rate limiting.
+        if (out / p).is_file():
+            return
         err = None
         for _ in range(3):
             try:
@@ -74,13 +82,27 @@ def fetch_gamus_train(out: Path = Path("gamus")) -> None:
         print("gamus: FAILED", p, err, flush=True)
 
     with ThreadPoolExecutor(32) as ex:
-        for n, _ in enumerate(ex.map(get, want)):
-            if n % 1000 == 0:
+        for n, _ in enumerate(ex.map(get, want), 1):
+            if n == 1 or n % 250 == 0 or n == len(want):
                 print("gamus:", n, "/", len(want), flush=True)
     print("gamus: DONE", flush=True)
 
 
+def fetch_gamus_train(out: Path = Path("gamus")) -> None:
+    fetch_gamus(out, ("train",))
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gamus-only", action="store_true",
+                        help="download GAMUS only; do not fetch SynRS3D")
+    parser.add_argument("--gamus-root", type=Path, default=Path("gamus"))
+    parser.add_argument("--splits", nargs="+", choices=("train", "val", "test"),
+                        default=("train",))
+    args = parser.parse_args()
+    if args.gamus_only:
+        fetch_gamus(args.gamus_root, tuple(args.splits))
+        raise SystemExit(0)
     t = threading.Thread(target=fetch_gamus_train)
     t.start()
     fetch_synrs3d()
