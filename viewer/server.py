@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -104,6 +105,13 @@ def _height_ckpt() -> Path:
         if ckpt.exists():
             return ckpt
     raise HTTPException(503, f"no height checkpoint; expected one of {[str(c) for c in HEIGHT_CKPTS]}")
+
+
+# One upload on the height models at a time: they are shared, and estimate() moves v2 and CHMv2
+# onto the GPU and back in place, so two overlapping uploads pulled a model off the GPU in the
+# middle of the other's run ("Input type (c10::BFloat16) and bias type (float)"). A 6 GB GPU
+# can't hold two passes anyway. Uploads queue instead.
+_ESTIMATE_LOCK = threading.Lock()
 
 
 def _get_height_model() -> dict:
@@ -432,14 +440,16 @@ def estimate_progress(job: str):
 async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Form(None),
                             reference: UploadFile | None = File(None),
                             gcps: UploadFile | None = File(None),
-                            job: str | None = Form(None), tta: bool = Form(True)):
+                            job: str | None = Form(None), tta: bool = Form(True),
+                            base_dem: str = Form("glo30")):
     """Height model on an upload: metric nDSM always, absolute DSM for GeoTIFFs.
 
     Response keeps the classify-static shape (rgb/height/classes data URIs) so
     the terrain viewer consumes it unchanged, plus metres, GeoTIFF download
     paths, the 3D city model, ground relief for georeferenced input, and -- if a
     reference height map is attached -- RMSE/MAE/r against it. A `gcps` CSV (lon, lat,
-    height) corrects a GeoTIFF's absolute DSM. With a `job` id,
+    height) corrects a GeoTIFF's absolute DSM; `base_dem` ("glo30" or "srtm") picks the public DEM
+    it sits on, and the response scores it against both. With a `job` id,
     progress is readable at /api/progress/<job> while this request runs.
     """
     from starlette.concurrency import run_in_threadpool
@@ -458,6 +468,8 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
         raise HTTPException(422, "gsd must be between 0.01 and 100 metres per pixel")
     if job is not None and not JOB_ID.fullmatch(job):
         raise HTTPException(422, "bad job id")
+    if base_dem not in ("glo30", "srtm"):
+        raise HTTPException(422, "base_dem must be glo30 or srtm")
 
     scene_id = f"{_safe_stem(file.filename or 'upload')}__{uuid.uuid4().hex[:8]}"
     scene_dir = SCENES_DIR / scene_id
@@ -498,7 +510,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
         # Model inference is blocking: run it off the event loop so the server keeps
         # answering progress polls and static files meanwhile.
         payload = await run_in_threadpool(_run_estimate, staged, scene_dir, scene_id, gsd,
-                                          ref_path, report, tta, gcp_points)
+                                          ref_path, report, tta, gcp_points, base_dem)
     except HTTPException:
         raise
     except Exception as exc:
@@ -513,17 +525,25 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
 
 
 def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | None,
-                  ref_path: Path | None, report, tta: bool = True, gcps: list | None = None) -> dict:
+                  ref_path: Path | None, report, tta: bool = True, gcps: list | None = None,
+                  base_dem: str = "glo30") -> dict:
     from viewer.city_model import city_model
     from viewer.classify import classes_to_rgb
     from viewer.estimate import estimate
     from viewer.height_metrics import height_scores
     from viewer.height_model import GAMUS_GSD_M, clean_height
 
-    report("Loading height model", 0.01)
-    models = _get_height_model()
-    started = time.perf_counter()
-    out = estimate(staged, out_dir=scene_dir, gsd_m=gsd, tta=tta, report=report, gcps=gcps, **models)
+    if not _ESTIMATE_LOCK.acquire(blocking=False):
+        report("Waiting for another upload to finish", 0.0)
+        _ESTIMATE_LOCK.acquire()
+    try:
+        report("Loading height model", 0.01)
+        models = _get_height_model()
+        started = time.perf_counter()
+        out = estimate(staged, out_dir=scene_dir, gsd_m=gsd, tta=tta, report=report, gcps=gcps,
+                       base_dem=base_dem, **models)
+    finally:
+        _ESTIMATE_LOCK.release()
     validation, error_view = None, None
     if ref_path is not None:
         report("Scoring against reference", 0.88)

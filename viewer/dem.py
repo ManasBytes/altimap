@@ -190,14 +190,17 @@ class DemSource:
 
 
 GLO30_AWS = "https://copernicus-dem-30m.s3.amazonaws.com/{name}/{name}.tif"
+SRTM_OPENTOPO = "https://opentopography.s3.sdsc.edu/raster/SRTM_GL1/SRTM_GL1_srtm/{name}.tif"
 
 
-def _patch_cache_path(bounds, crs, shape: tuple[int, int]) -> Path:
+def _patch_cache_path(bounds, crs, shape: tuple[int, int], source: str = "glo30") -> Path:
     """Stable cache path for one complete reprojected DEM request."""
     root = Path(os.environ.get("ALTIMAP_DEM_CACHE",
                               Path(__file__).resolve().parent / "cache" / "dem"))
-    key = json.dumps([list(map(float, bounds)), str(crs), list(shape)],
-                     separators=(",", ":"), sort_keys=True).encode()
+    parts = [list(map(float, bounds)), str(crs), list(shape)]
+    if source != "glo30":  # GLO-30 keys predate the other sources; keep them valid
+        parts.append(source)
+    key = json.dumps(parts, separators=(",", ":"), sort_keys=True).encode()
     return root / f"{hashlib.sha256(key).hexdigest()}.npz"
 
 
@@ -233,45 +236,86 @@ def glo30_tile_urls(west: float, south: float, east: float, north: float) -> lis
     return urls
 
 
+def srtm_tile_urls(west: float, south: float, east: float, north: float) -> list[str]:
+    """SRTM GL1 1x1 degree tiles (OpenTopography's public copy) covering a lon/lat box, named
+    by their south-west corner: N27E088 covers 27..28 N, 88..89 E."""
+    import math
+
+    return [SRTM_OPENTOPO.format(name=f"{'N' if lat >= 0 else 'S'}{abs(lat):02d}"
+                                      f"{'E' if lon >= 0 else 'W'}{abs(lon):03d}")
+            for lat in range(math.floor(south), math.floor(north) + 1)
+            for lon in range(math.floor(west), math.floor(east) + 1)]
+
+
+def _read_tiles(urls: list[str], bounds, crs, shape: tuple[int, int]) -> np.ndarray | None:
+    """The tiles that exist, reprojected onto the grid; None unless every pixel resolved. An
+    unavailable tile stays unresolved: it is not ocean, so it never becomes 0 m."""
+    import rasterio
+
+    from viewer.geo import warp_to_grid
+
+    found = []
+    for url in urls:
+        try:
+            with rasterio.open(url):
+                found.append(url)
+        except rasterio.RasterioIOError:
+            pass
+    if not found:
+        return None
+    try:
+        dem = warp_to_grid(found, bounds, crs, shape).astype(np.float32)
+    except (OSError, rasterio.RasterioIOError, ValueError):
+        return None
+    return dem if np.isfinite(dem).all() else None
+
+
+def _cached(bounds, crs, shape: tuple[int, int], source: str, read) -> np.ndarray | None:
+    path = _patch_cache_path(bounds, crs, shape, source)
+    if path.exists():
+        cached = _read_cached_patch(path)
+        if cached is not None:
+            return cached
+    dem = read()
+    if dem is not None:
+        _cache_patch(path, dem)
+    return dem
+
+
 def glo30(bounds, crs, shape: tuple[int, int]) -> np.ndarray | None:
     """Copernicus GLO-30 (m, EGM2008) reprojected onto the grid `bounds` x `shape` in `crs`.
 
     From the AWS Open Data copy first: plain HTTPS, no catalogue search or URL signing (the
     same tiles as Planetary Computer's cop-dem-glo-30, byte for byte, but Planetary
-    Computer's token service stalled for 50-120 s at a time). An unavailable tile is
-    unresolved, not ocean; the caller receives None unless a complete fallback exists."""
-    import rasterio
+    Computer's token service stalled for 50-120 s at a time). The caller receives None
+    unless the request resolves completely, here or from the fallback."""
     from rasterio.warp import transform_bounds
 
-    from viewer.geo import warp_to_grid
-
-    cache_path = _patch_cache_path(bounds, crs, shape)
-    if cache_path.exists():
-        cached = _read_cached_patch(cache_path)
-        if cached is not None:
-            return cached
-
-    urls = []
-    for url in glo30_tile_urls(*transform_bounds(crs, "EPSG:4326", *bounds)):
-        try:
-            with rasterio.open(url):
-                urls.append(url)
-        except rasterio.RasterioIOError:
-            pass  # unavailable tile: keep it unresolved and let the fallback try
-    if urls:
-        try:
-            dem = warp_to_grid(urls, bounds, crs, shape).astype(np.float32)
-        except (OSError, rasterio.RasterioIOError, ValueError):
-            dem = None
-        if dem is not None and np.isfinite(dem).all():
-            _cache_patch(cache_path, dem)
+    def read():
+        dem = _read_tiles(glo30_tile_urls(*transform_bounds(crs, "EPSG:4326", *bounds)), bounds, crs, shape)
+        if dem is not None:
             return dem
+        # Planetary Computer is a complete-request fallback. DemSource preserves
+        # unresolved source pixels as NaN, so no missing land becomes sea level.
+        fallback = DemSource("cop-dem-glo-30").patch(list(bounds), str(crs), shape)
+        if fallback is not None and np.isfinite(fallback).all():
+            return np.asarray(fallback, np.float32)
+        return None
 
-    # Planetary Computer is a complete-request fallback. DemSource preserves
-    # unresolved source pixels as NaN, so no missing land becomes sea level.
-    fallback = DemSource("cop-dem-glo-30").patch(list(bounds), str(crs), shape)
-    if fallback is not None and np.isfinite(fallback).all():
-        fallback = np.asarray(fallback, np.float32)
-        _cache_patch(cache_path, fallback)
-        return fallback
-    return None
+    return _cached(bounds, crs, shape, "glo30", read)
+
+
+def srtm(bounds, crs, shape: tuple[int, int]) -> np.ndarray | None:
+    """SRTM GL1 (NASA/USGS Shuttle Radar Topography Mission, 1 arcsec, m above the EGM96
+    geoid) on the grid, from OpenTopography's public copy: plain HTTPS like glo30. None
+    outside SRTM's 60 N..56 S coverage or when any pixel is unresolved."""
+    from rasterio.warp import transform_bounds
+
+    return _cached(bounds, crs, shape, "srtm", lambda: _read_tiles(
+        srtm_tile_urls(*transform_bounds(crs, "EPSG:4326", *bounds)), bounds, crs, shape))
+
+
+BASE_DEMS = {  # name -> (reader, label, vertical datum)
+    "glo30": (glo30, "Copernicus GLO-30", "EGM2008"),
+    "srtm": (srtm, "SRTM GL1", "EGM96"),
+}

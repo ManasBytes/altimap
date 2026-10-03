@@ -18,6 +18,13 @@ this took footprint IoU 0.787 -> 0.841, edge F1 0.564 -> 0.655, height RMSE on
 buildings 3.15 -> 2.99 m, separate buildings 1281 -> 2372. Footprints come back as
 polygons in normalized image coordinates (u = column / width, v = row / height).
 
+Facades: an oblique view shows a tall building's facade beside its roof, and the model
+reads it (window rows and all) as a slope down from the roof, which banding into
+levels turned into a staircase. Wide slopes steeper than 45 degrees that hang below a
+roof are joined to that roof as wall and left out of its height. City-model RMSE
+against 3DEP LiDAR: downtown Philadelphia (leaning towers) 43.75 -> 43.35 m, Pittsburgh
+5.44 -> 5.54 m; GAMUS (near-nadir) building RMSE 2.85 -> 2.87 m, IoU 0.844 -> 0.843.
+
 Trees: one crown per local height peak inside the tree class, sized from the
 tree's height and the canopy extent, coloured from the photo.
 """
@@ -89,20 +96,25 @@ def _roof_segments(cm: np.ndarray, smooth: np.ndarray, gsd_m: float, min_px: int
     return np.where(cm, _nearest_fill(segs, good), 0) if good.any() else cm.astype(np.int32)
 
 
-def _component_parts(cm: np.ndarray, smooth: np.ndarray, min_px: int, edge_px: int,
+def _component_parts(cm: np.ndarray, smooth: np.ndarray, flat: np.ndarray, min_px: int, edge_px: int,
                      thin_px: int, vote_px: int, min_gap_m: float) -> np.ndarray:
-    """Local part labels (1..n) for one building component, 0 outside it."""
+    """Local part labels (1..n) for one building component, 0 outside it. Levels come from
+    its flat pixels only; steep ones (walls) join the nearest flat part."""
     interior = ndimage.binary_erosion(cm, iterations=edge_px)
     if interior.sum() < min_px:
         interior = cm
+    if (interior & flat).sum() >= min_px:
+        interior &= flat
+    else:
+        flat = cm  # all slope (a small or blurred roof): fall back to every pixel
     thresholds = _split_levels(smooth[interior], min_px, min_gap_m)
     if not thresholds:
         return cm.astype(np.int32)
 
     level = np.digitize(smooth, thresholds, right=True)  # h == t is the lower level, as in _split_levels
-    votes = [ndimage.uniform_filter(((level == lv) & cm).astype(np.float32), size=vote_px)
+    votes = [ndimage.uniform_filter(((level == lv) & cm & flat).astype(np.float32), size=vote_px)
              for lv in range(len(thresholds) + 1)]
-    level = np.where(cm, np.argmax(votes, axis=0), -1)  # majority vote removes speckle
+    level = np.where(cm & flat, np.argmax(votes, axis=0), -1)  # majority vote removes speckle
 
     parts = np.zeros(cm.shape, np.int32)
     n_parts = 0
@@ -122,7 +134,8 @@ def _component_parts(cm: np.ndarray, smooth: np.ndarray, min_px: int, edge_px: i
 
 
 def building_parts(ndsm: np.ndarray, classes: np.ndarray, gsd_m: float, min_gap_m: float = 2.5,
-                   min_area_m2: float = 20.0, min_height_m: float = 2.0):
+                   min_area_m2: float = 20.0, min_height_m: float = 2.0, max_slope: float = 1.0,
+                   wall_m: float = 8.0):
     """-> (parts: int32 HxW, 0 = no building; heights: {part_id: metres})."""
     min_px = max(4, int(round(min_area_m2 / gsd_m**2)))
     edge_px = max(1, int(round(3.0 / gsd_m)))  # the model's height ramp inside a wall, ~3 m
@@ -144,6 +157,15 @@ def building_parts(ndsm: np.ndarray, classes: np.ndarray, gsd_m: float, min_gap_
         return parts, heights
     smooth = ndimage.median_filter(raw, size=5)
     roof_smooth = ndimage.gaussian_filter(smooth, sigma=max(0.5, 0.66 / gsd_m))
+    # A slope steeper than `max_slope` (1 = 45 degrees) and wider than `wall_m` is no roof but a
+    # facade seen at an angle, its rows of windows averaged out over a storey. Cut into levels
+    # by height it would stand as a staircase, so it joins the roof it hangs from and never
+    # sets a height. A slope rising above the nearest roof is a building of its own and stays.
+    storey = ndimage.gaussian_filter(smooth, sigma=1.5 / gsd_m)
+    steep = np.hypot(*np.gradient(storey)) >= max_slope * gsd_m
+    wide = ndimage.binary_opening(steep, iterations=max(1, int(round(wall_m / 2 / gsd_m))))
+    roof = mask & ~wide
+    flat = ~(wide & (smooth <= _nearest_fill(smooth, roof))) if roof.any() else ~wide
     comps, _ = ndimage.label(mask)
     next_id = 1
     for cid, sl in enumerate(ndimage.find_objects(comps), start=1):
@@ -153,10 +175,11 @@ def building_parts(ndsm: np.ndarray, classes: np.ndarray, gsd_m: float, min_gap_
         roofs = _roof_segments(cm, roof_smooth[sl], gsd_m, min_px)
         for rid in np.unique(roofs[roofs > 0]):
             rm = roofs == rid
-            local = _component_parts(rm, smooth[sl], min_px, edge_px, thin_px, vote_px, min_gap_m)
+            local = _component_parts(rm, smooth[sl], flat[sl], min_px, edge_px, thin_px, vote_px, min_gap_m)
             for lid in np.unique(local[local > 0]):
                 m = local == lid
                 inner = ndimage.binary_erosion(m, iterations=edge_px)
+                inner = inner & flat[sl] if (inner & flat[sl]).sum() >= 4 else inner
                 h = float(np.median(raw[sl][inner if inner.sum() >= 4 else m]))
                 if m.sum() < min_px or h < min_height_m:  # speckle, or pavement labelled as roof
                     continue

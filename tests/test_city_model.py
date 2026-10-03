@@ -78,6 +78,18 @@ def test_soft_edge_ramps_do_not_become_terraces():
     assert len(parts) == 1 and 22 <= parts[0]["h"] <= 24
 
 
+def test_facade_seen_at_an_angle_stays_one_block_at_roof_height():
+    # An oblique view shows a tower's facade beside its roof; the model reads it as a slope
+    # (60 m -> 10 m over 25 m) with ripples at each row of windows. It used to stand as a
+    # three-step staircase (19, 41, 60 m).
+    ndsm, classes = _scene((140, 130))
+    _add(ndsm, classes, slice(20, 120), slice(20, 60), 60.0)
+    ndsm[20:120, 60:110] = np.linspace(60.0, 10.0, 50) + np.where(np.arange(50) % 6 < 3, 1.0, -1.0)
+    classes[20:120, 60:110] = BUILDING
+    parts = footprints(*building_parts(ndsm, classes, GSD), shape=ndsm.shape, gsd_m=GSD)
+    assert len(parts) == 1 and 58 <= parts[0]["h"] <= 61
+
+
 def test_touching_houses_of_different_height_become_separate_blocks():
     ndsm, classes = _scene()
     _add(ndsm, classes, slice(20, 60), slice(20, 50), 6.0)  # row houses sharing a wall,

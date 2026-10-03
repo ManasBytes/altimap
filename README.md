@@ -6,7 +6,7 @@ Built for SIH 2026 problem statement 26175, *DepthWizard* (ISRO). Brief: `docs/p
 | Input | Output |
 |---|---|
 | PNG / JPG (no coordinates) | **nDSM**: height above ground in metres, per pixel (a relative DSM: heights are metric, the ground datum is unknown) |
-| GeoTIFF (with CRS) | **nDSM** + **absolute DSM** = nDSM + bare-earth ground from Copernicus GLO-30, same CRS and grid as the input |
+| GeoTIFF (with CRS) | **nDSM** + **absolute DSM** on Copernicus GLO-30 (default) or SRTM, same CRS and grid as the input, scored against both DEMs |
 
 All elevation outputs are float32 Cloud-Optimized GeoTIFFs in metres, NaN nodata, with a JSON sidecar
 (GSD, vertical datum, height range, DEM source).
@@ -155,6 +155,9 @@ Soft routing was tested and not adopted because it did not provide a meaningful 
 
 ## Run it
 
+With Docker (weights included): `docker build -t altimap . && docker run --gpus all -p 8000:8000
+altimap`, then open http://localhost:8000 (SETUP.md has the requirements).
+
 Teammates setting up from scratch: follow **[SETUP.md](SETUP.md)** (every step, model
 downloads, troubleshooting). The short version:
 
@@ -221,7 +224,8 @@ Tests (no GPU, no network): `uv pip install -e ".[dev]"`, then `python -m pytest
   (ARCHITECTURE.md §5).
 - **Large scenes** run tile by tile at full resolution (no seams: ARCHITECTURE.md §9.5). They
   take minutes on a laptop GPU.
-- **Network**: GeoTIFFs need Copernicus GLO-30. It's read from AWS Open Data, with Microsoft
-  Planetary Computer as fallback; remote reads time out after 60 s and then return the nDSM only.
+- **Network**: GeoTIFFs need Copernicus GLO-30 (AWS Open Data, with Microsoft Planetary Computer as
+  fallback) and SRTM (OpenTopography); remote reads time out after 60 s and then return the nDSM
+  only.
 - **Licences**: RS3DAda weights are MIT (JTRNEO/RS3DAda), and so are our fine-tuned v1 weights.
   v2 is also trained on SynRS3D data (CC BY-NC 4.0): treat it as non-commercial.

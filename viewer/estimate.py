@@ -1,7 +1,7 @@
 """Image in, elevation GeoTIFFs out: the product the brief asks for.
 
     nDSM (always)  height above ground, metres, from the height model.
-    DSM (GeoTIFF)  nDSM + bare-earth ground from Copernicus GLO-30.
+    DSM (GeoTIFF)  nDSM on Copernicus GLO-30 (default) or SRTM GL1, DEM-consistent.
 
 The model was trained at GAMUS's 0.33 m ground sampling distance, so input
 with a known GSD is resampled to 0.33 m before inference and the result is
@@ -11,7 +11,7 @@ as-is unless the caller supplies one.
 Ground: GLO-30 is itself a surface model (it contains buildings and canopy),
 so a grey-scale morphological opening wider than any building approximates
 bare earth before the nDSM is added -- otherwise buildings are counted twice.
-Heights are orthometric (EGM2008 geoid), recorded as such in the sidecar.
+Heights are orthometric (GLO-30: EGM2008 geoid, SRTM: EGM96), recorded in the sidecar.
 
 Ground control points (lon, lat, height CSV) correct the DSM's vertical offset when it
 exceeds GLO-30's own accuracy (e.g. a datum mix-up).
@@ -104,7 +104,7 @@ def gcp_correction(ground: np.ndarray, transform, crs, gcps) -> tuple[np.ndarray
     info.update(offset_m=offset, rmse_before_m=rmse_none, rmse_left_out_m=left_out, points=used)
     if abs(offset) < GCP_MIN_OFFSET_M:
         note = (f"not applied: the points put the ground within {abs(offset):.1f} m of them on "
-                f"average, inside GLO-30's own ±{GCP_MIN_OFFSET_M:.0f} m accuracy")
+                f"average, under the {GCP_MIN_OFFSET_M:.0f} m threshold (Copernicus GLO-30's accuracy)")
     elif left_out is not None and left_out >= rmse_none:
         note = "not applied: the points don't agree on a common offset"
     else:
@@ -273,12 +273,12 @@ def _resize(arr: np.ndarray, shape: tuple[int, int], nearest: bool = False) -> n
 BARE_EARTH_PAD_M = 300.0  # margin around the image: the widest bare-earth opening below
 
 
-def padded_dem(geo: dict) -> tuple[np.ndarray | None, tuple[int, int]]:
-    """One GLO-30 read for the whole upload: the image extent plus BARE_EARTH_PAD_M on every
-    side, at the DEM's ~30 m posting -> (coarse array, (pad rows, pad cols) in image pixels).
-    The export DEM and the viewer's bare-earth ground both come from it (reading twice
-    doubled the upload's network time)."""
-    from viewer.dem import glo30
+def padded_dem(geo: dict, base_dem: str = "glo30") -> tuple[np.ndarray | None, tuple[int, int]]:
+    """One DEM read for the whole upload (`base_dem`: a viewer.dem.BASE_DEMS name): the image
+    extent plus BARE_EARTH_PAD_M on every side, at the DEM's ~30 m posting -> (coarse array,
+    (pad rows, pad cols) in image pixels). The export DEM and the viewer's bare-earth ground
+    both come from it (reading twice doubled the upload's network time)."""
+    from viewer.dem import BASE_DEMS
 
     gsd = gsd_metres(geo)
     w, s, e, n = geo["bounds"]
@@ -286,8 +286,33 @@ def padded_dem(geo: dict) -> tuple[np.ndarray | None, tuple[int, int]]:
     padded = [w - pad, s - pad, e + pad, n + pad]
     coarse = (max(3, math.ceil((n - s + 2 * pad) * gsd / geo["res_m"][1] / DEM_POSTING_M)),
               max(3, math.ceil((e - w + 2 * pad) * gsd / geo["res_m"][0] / DEM_POSTING_M)))
-    dem = glo30(padded, geo["crs"], coarse)
+    dem = BASE_DEMS[base_dem][0](padded, geo["crs"], coarse)
     return dem, (round(pad / geo["res_m"][1]), round(pad / geo["res_m"][0]))
+
+
+def dem_agreement(dsm: np.ndarray, geo: dict, shape: tuple[int, int], gsd_m: float,
+                  dems: dict[str, np.ndarray | None]) -> dict:
+    """How closely the DSM matches each public DEM, the way the FAQ scores GeoTIFFs ("values
+    must match DEM heights"): in the DEMs' own 30 m cells, and per pixel. `dems` maps a
+    BASE_DEMS name to that DEM on the image grid; a missing one is read here, and one that
+    can't be read is reported as None rather than failing the upload."""
+    from viewer.dem_check import compare
+
+    out = {}
+    for name in ("glo30", "srtm"):
+        ref = dems.get(name)
+        if ref is None:
+            try:
+                coarse, pad_px = padded_dem(geo, name)
+                ref = None if coarse is None else dem_on_image(coarse, pad_px, shape)
+            except Exception:  # network / coverage: the score is optional
+                ref = None
+        cell_px = max(1, round(DEM_POSTING_M / gsd_m))
+        if ref is None or min(shape) < cell_px:
+            out[name] = None
+            continue
+        out[name] = {k: round(v, 2) for k, v in compare(dsm, ref, cell_px).items()}
+    return out
 
 
 def dem_on_image(coarse: np.ndarray, pad_px: tuple[int, int], shape: tuple[int, int]) -> np.ndarray:
@@ -365,12 +390,14 @@ def _on(model, device: str):
 
 def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None = None,
              tta: bool = True, report=None, gcps: list | None = None,
-             building_model=None, canopy_model=None) -> dict:
+             building_model=None, canopy_model=None, base_dem: str = "glo30") -> dict:
     """Run the height model on `path`, write GeoTIFFs into `out_dir`, return arrays + a record.
 
     `gcps`: (lon, lat, height) control points that correct the DSM (georeferenced input only).
     `building_model`: a second height model blended at 75% on building pixels (`fuse_heights`).
     `canopy_model`: CHMv2 (viewer/canopy.py) for canopy heights in forest.
+    `base_dem`: the public DEM the absolute DSM sits on, "glo30" (Copernicus GLO-30) or
+    "srtm" (SRTM GL1); the organisers score against "SRTM/Copernicus".
     Both are kept on the CPU and moved to `device` only while they run. `load_pipeline()` loads
     all three the way the app does.
 
@@ -380,7 +407,10 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
     import rasterio
     from rasterio.transform import Affine
 
+    from viewer.dem import BASE_DEMS
     from viewer.geo import read_geo_meta
+
+    dem_label, dem_geoid = BASE_DEMS[base_dem][1:]
 
     out_dir.mkdir(parents=True, exist_ok=True)
     report("Reading image", 0.02)
@@ -457,12 +487,12 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
 
     ground, dsm = None, None  # ground: bare earth for the 3D view only; dsm: the export
     if geo.get("georeferenced") and not geospatial_warnings:
-        report("Fetching ground elevation (Copernicus GLO-30)", 0.78)
+        report(f"Fetching ground elevation ({dem_label})", 0.78)
         try:
-            coarse, pad_px = padded_dem(geo)
+            coarse, pad_px = padded_dem(geo, base_dem)
             dem = None if coarse is None else dem_on_image(coarse, pad_px, shape)
             if dem is None:
-                record["dsm_error"] = "no Copernicus GLO-30 coverage for this area"
+                record["dsm_error"] = f"no {dem_label} coverage for this area"
         except Exception as exc:  # network / coverage: the nDSM is still a valid product
             dem, record["dsm_error"] = None, f"{type(exc).__name__}: {exc}"
         if dem is not None:
@@ -487,7 +517,7 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
                 if fix is not None:
                     dsm = dsm + fix
                     ground = ground + fix  # the 3D view's terrain follows the corrected DSM
-            dem_note = (f"Copernicus GLO-30, DEM-consistent: model detail added with its "
+            dem_note = (f"{dem_label}, DEM-consistent: model detail added with its "
                         f"{DEM_POSTING_M:.0f} m mean removed")
             if fix is not None:
                 dem_note += f"; GCP offset {gcp_info['offset_m']:+.2f} m ({gcp_info['n_used']} points)"
@@ -501,8 +531,11 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
                              "ground_min_m": float(np.nanmin(ground)),
                              "ground_max_m": float(np.nanmax(ground)),
                              "display_ground": method,
-                             "datum": "orthometric (EGM2008)"}
+                             "base_dem": base_dem,
+                             "datum": f"orthometric ({dem_geoid})"}
             record["files"] += ["dsm.tif", "dsm.json"]
+            report("Checking the DSM against Copernicus and SRTM", 0.88)
+            record["dem_agreement"] = dem_agreement(dsm, geo, shape, gsd_out, {base_dem: dem})
     elif geo.get("georeferenced") and geospatial_warnings:
         record["dsm_error"] = "; ".join(geospatial_warnings)
 
@@ -554,6 +587,8 @@ def main() -> None:
     ap.add_argument("--no-tta", action="store_true", help="4x faster, slightly less accurate")
     ap.add_argument("--gcps", type=Path, default=None,
                     help="CSV of ground control points (lon, lat, height m) to correct the DSM")
+    ap.add_argument("--base-dem", choices=("glo30", "srtm"), default="glo30",
+                    help="public DEM under the absolute DSM (default Copernicus GLO-30)")
     args = ap.parse_args()
     gcps = read_gcps(args.gcps) if args.gcps else None
 
@@ -563,7 +598,8 @@ def main() -> None:
           + (" + CHMv2 for forest" if models["canopy_model"] is not None else ""))
     for path in args.images:
         out_dir = args.out / path.stem
-        result = estimate(path, out_dir=out_dir, gsd_m=args.gsd, tta=not args.no_tta, gcps=gcps, **models)
+        result = estimate(path, out_dir=out_dir, gsd_m=args.gsd, tta=not args.no_tta, gcps=gcps,
+                          base_dem=args.base_dem, **models)
         record = result["record"]
         (out_dir / "meta.json").write_text(json.dumps(record, indent=2))
         dsm = record["dsm"]

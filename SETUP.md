@@ -17,6 +17,26 @@ with an RTX 3050 6 GB laptop GPU; each step says what it is for, so you can tell
 | RAM | 16 GB recommended | the server holds ~5.5 GB with all three models loaded (two wait on the CPU while one runs on the GPU) |
 | Internet | first run | model downloads; GeoTIFF uploads fetch the Copernicus DEM live |
 
+## Quick start: Docker (one command, e.g. on a VM)
+
+The `Dockerfile` builds the whole app (viewer, API, all three models, weights baked in) into one
+image, so the container starts ready. Needs Docker with the NVIDIA container toolkit on the host
+(`nvidia-ctk`), a driver for CUDA 12.8, and **~35 GB free disk while building** (PyTorch with
+its CUDA libraries is 7 GB, the weights 4.3 GB, and Docker keeps a compressed copy plus build
+cache). The final image is ~12 GB.
+
+```bash
+git clone https://github.com/ManasBytes/altimap.git && cd altimap && git checkout dilavesh-new
+docker build -t altimap .                       # ~10 min; downloads PyTorch and the weights
+docker run --gpus all -p 8000:8000 altimap      # then open http://<host>:8000
+```
+
+Without `--gpus all` it runs on the CPU (a 1024 px tile took 86 s instead of ~16 s). Uploads
+live inside the container; add `-v altimap-uploads:/app/viewer/web/data-uploads` to keep them.
+Tested: GPU visible in the container, both DEM sources reachable, an upload through v1 + v2.
+
+The rest of this guide is the native install, for development.
+
 ## 1. Clone
 
 ```bash
@@ -95,7 +115,7 @@ is loaded, the viewer shows the required "Built with DINOv3" credit in the model
 The DINOv2 encoder code is fetched by `torch.hub` from GitHub the first time a model loads, then
 loaded from `~/.cache/torch/hub` without contacting GitHub. After that the app runs offline,
 except for GeoTIFF uploads, which read the Copernicus GLO-30 DEM from AWS Open Data (Microsoft
-Planetary Computer as fallback). Reprojected DEM patches are cached in `viewer/cache/dem/`;
+Planetary Computer as fallback) and SRTM GL1 from OpenTopography's public copy. Reprojected DEM patches are cached in `viewer/cache/dem/`;
 set `ALTIMAP_DEM_CACHE` to put that cache on another disk. If a DEM request is incomplete,
 the unresolved pixels remain nodata and the app returns the nDSM with a clear DSM warning;
 they are never silently converted to sea level.
@@ -201,7 +221,7 @@ Stop the server first on a 6 GB GPU: the server's model and an evaluation's mode
 .venv-da3/bin/python -m viewer.dsm_eval
 
 # India: Maxar Open Data satellite scenes of Sikkim (CC BY-NC 4.0), checked against the DEMs the
-# organisers score GeoTIFFs against (Copernicus GLO-30 and SRTM/NASADEM)
+# organisers score GeoTIFFs against (Copernicus GLO-30 and SRTM GL1); --base-dem srtm puts the DSM on SRTM
 .venv-da3/bin/python scripts/fetch_india_samples.py     # -> demo/india/*.tif (~40 MB each)
 .venv-da3/bin/python -m viewer.dem_check demo/india/*.tif
 

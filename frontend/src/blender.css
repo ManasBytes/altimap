@@ -120,14 +120,6 @@ header {
   top: 68px;
   left: 88px;
 }
-.compass {
-  top: 68px;
-  right: 370px;
-}
-.canvas-controls {
-  right: 370px;
-  bottom: 62px;
-}
 .flight-help {
   left: 88px;
   bottom: 62px;
@@ -379,13 +371,6 @@ footer {
   .canvas-badge {
     left: 74px;
   }
-  .compass {
-    right: 18px;
-    top: 150px;
-  }
-  .canvas-controls {
-    right: 18px;
-  }
   .flight-help {
     left: 74px;
   }
@@ -443,14 +428,6 @@ footer {
   .canvas-badge {
     top: 72px;
     left: 10px;
-  }
-  .compass {
-    top: 72px;
-    right: 14px;
-  }
-  .canvas-controls {
-    right: 14px;
-    bottom: 82px;
   }
   .flight-help {
     left: 10px;
@@ -701,7 +678,7 @@ footer {
 .building-card {
   position: absolute;
   z-index: 4;
-  right: 370px; /* left of the inspector panel, under the compass */
+  right: 370px; /* left of the inspector panel */
   top: 104px;
   width: 230px;
   padding: 12px 14px;
@@ -770,7 +747,7 @@ footer {
 }
 .walk-toggle {
   position: absolute;
-  bottom: 62px; /* same row as .flight-help / .canvas-controls, above the footer bar */
+  bottom: 62px; /* same row as .flight-help, above the footer bar */
   left: 50%;
   transform: translateX(-50%);
   display: flex;

@@ -43,7 +43,7 @@ flowchart LR
   subgraph Core["Elevation module"]
     EST["estimate.py<br/>read · resample · predict · compose"]
     HM["height_model.py<br/>RS3DAda sliding-window inference"]
-    DEM["dem.py<br/>Copernicus GLO-30<br/>(AWS Open Data, PC fallback)"]
+    DEM["dem.py<br/>Copernicus GLO-30 (AWS, PC fallback)<br/>or SRTM GL1 (OpenTopography)"]
     C["altimap/contract.py<br/>COG + sidecar writer"]
   end
   UI -- multipart upload --> API
@@ -71,7 +71,7 @@ Everything the elevation module produces goes through `src/altimap/contract.py`:
   floating-point predictor, **NaN as nodata** everywhere (never −9999, which silently corrupts
   statistics). Same grid (size, transform, CRS) as the input image.
 - **Sidecar** (`<name>.json` beside the raster, `Sidecar` dataclass): `gsd_m`, `source_gsd_m`,
-  `datum` (`"orthometric"` for the DSM, heights above the EGM2008 geoid like GLO-30/SRTM;
+  `datum` (`"orthometric"` for the DSM: heights above the EGM2008 geoid on GLO-30, EGM96 on SRTM;
   `"relative"` for the nDSM; `"ellipsoidal"` is reserved and never produced), `vertical_unit`
   (`"m"`, enforced), `model_version`, `height_range_m`, `tile_overlap_px`, `dtm_source` (which
   DEM, how it was combined, and whether GCPs corrected it).
@@ -147,6 +147,14 @@ named by their south-west corner, byte-identical to Planetary Computer's `cop-de
 Planetary Computer as fallback. Planetary Computer's URL-signing service stalled for 50–120 s at a
 time, which made uploads take 2–3 minutes; with AWS the DEM step takes about 5 s. Without
 coverage or network, the nDSM is still produced and the response carries `dsm_error`.
+
+**Base DEM.** The FAQ names both SRTM and Copernicus, and over the Himalaya they differ by
+5–14 m (§9.6). `base_dem="srtm"` (upload panel: *Base terrain*; CLI: `--base-dem srtm`) puts the
+DSM on SRTM GL1 instead (`viewer/dem.py:srtm`: 1 arcsec, EGM96, from OpenTopography's public copy
+over plain HTTPS, ~2 s a tile). The default stays GLO-30 (newer, and better in cities and forest).
+Every GeoTIFF upload is then scored against **both** DEMs (`estimate.dem_agreement`): the DSM
+averaged over each 30 m cell against that DEM, which is how GeoTIFF output is scored. The base DEM
+matches to about 1 m by construction; the other shows the gap a score against it would carry.
 
 The **3D view's terrain** is a separate, display-only bare-earth estimate. It is chosen by the
 predicted building share, following a rule measured against USGS LiDAR bare earth on four scenes:
@@ -274,7 +282,7 @@ The DSM's forest rule (§4.3) is independent of CHMv2 and applies even without i
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/estimate` | The main path. Multipart: `file` (PNG/JPG/TIFF, ≤ 200 MB), optional `gsd` (m/px, 0.01–100), `reference` (height map: `.tif`/`.png`/GAMUS `.h5`), `gcps` (CSV), `job` (progress id), `tta` (bool). Runs in a thread pool so the event loop keeps answering progress polls |
+| `POST /api/estimate` | The main path. Multipart: `file` (PNG/JPG/TIFF, ≤ 200 MB), optional `gsd` (m/px, 0.01–100), `reference` (height map: `.tif`/`.png`/GAMUS `.h5`), `gcps` (CSV), `job` (progress id), `tta` (bool), `base_dem` (`glo30`/`srtm`). Runs in a thread pool so the event loop keeps answering progress polls. Uploads run **one at a time** (`_ESTIMATE_LOCK`): the models are shared and v2/CHMv2 move between GPU and CPU in place, so overlapping uploads used to crash each other; a queued upload reports "Waiting for another upload to finish" |
 | `GET /api/progress/{job}` | `{stage, progress}` while an estimate runs; the UI polls it every 400 ms |
 | `GET /api/health` | Liveness |
 | `POST /api/upload`, `POST /api/classify-static`, `GET/DELETE /api/uploads` | Legacy paths (DA3 depth, static land-cover preview) used by the old dashboards |
@@ -284,8 +292,10 @@ Models load lazily on the first request, not at import. The height checkpoint is
 order: `ALTIMAP_HEIGHT_CKPT`, then `viewer/cache/best.pth`, then the stock RS3DAda weights.
 
 ### 6.2 `/api/estimate` response
-- **Record**: pixel size (and whether it was assumed), shape, nDSM max/p99, DSM range and
-  datum, `dsm_error`, `gcp` (points used, model, errors), timing, checkpoint, class pixel counts.
+- **Record**: pixel size (and whether it was assumed), shape, nDSM max/p99, DSM range,
+  `base_dem` and datum, `dsm_error`, `gcp` (points used, model, errors), `dem_agreement` (30 m
+  cell and per-pixel RMSE/bias/r against GLO-30 and SRTM, `null` for one that couldn't be read),
+  timing, checkpoint, class pixel counts. Form field `base_dem`: `glo30` (default) or `srtm`.
 - **Previews** (≤ 1024 px, data URIs): RGB, linear 8-bit height (`pixel/255 × max_m`), classes.
 - **`grids`**: nDSM, ground and DSM as **16-bit** values on the viewer's 1025×1025 mesh grid
   (`geo.encode_grid16`, value = lo + u16/65535 × span). 8-bit previews step 0.1–0.3 m, which
@@ -310,6 +320,14 @@ Built on a grid of up to 2048 px from the nDSM and classes:
 - **Height levels**: each roof splits into levels ≥ 2.5 m apart, found from interior pixels so
   the soft ramp at walls doesn't make terraces. Speckle, thin slivers and pavement-height blobs
   are dropped or merged.
+- **Facades**: in an oblique view a tall building's facade shows beside its roof. The model
+  reads it as a slope down from the roof, window rows included, and banding that slope into
+  levels made a staircase. A slope steeper than 45° (measured over a storey, ~1.5 m, so window
+  rows average out) and wider than 8 m that hangs below a roof joins that roof as wall and does
+  not count toward its height. A slope that rises above the nearest roof is a building of its
+  own and keeps its levels. The limit: where the model reads a facade as a *gentle* lower
+  roof (< 45°), it still shows as a step; nothing in the heights tells it from a real lower
+  wing.
 - **Outlines**: traced and simplified. `regularize` squares an outline off (rectangle or right
   angles) only when that moves ≤ 10 % of its area, because squaring everything cost footprint
   IoU 0.843 → 0.793.
@@ -365,9 +383,10 @@ Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `st
 
 ### 7.4 Upload and validation panel
 - **Inputs**: image, optional pixel size, optional reference heights, optional GCP CSV, quality
-  (High = 4-flip TTA, Fast = one pass).
+  (High = 4-flip TTA, Fast = one pass), base terrain for GeoTIFFs (Copernicus or SRTM).
 - **Progress**: a staged progress bar.
-- **Results**: timing, surface max, DSM range, GCP result, validation numbers, the scatter
+- **Results**: timing, surface max, DSM range, GCP result, the DSM's agreement with Copernicus
+  and SRTM in 30 m cells, validation numbers, the scatter
   (model vs reference, with the 1:1 line), the per-class error table, class shares, and download
   links.
 
@@ -376,6 +395,12 @@ Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `st
 - **One process**: `python -m viewer.server [--host 0.0.0.0] [--port 8000]` serves the built
   viewer and the API on the same origin. The frontend uses relative URLs, so the app works from
   any browser that can reach the server (a VM, an SSH tunnel).
+- **Docker**: the `Dockerfile` builds the same process into one image with all weights baked in
+  (`docker build -t altimap . && docker run --gpus all -p 8000:8000 altimap`). The frontend is
+  built in a Node stage; versions are pinned to the development environment; `.dockerignore` is
+  an allowlist (`src/`, `viewer/` without `cache/` and past uploads, `frontend/`). The image is
+  ~12 GB (PyTorch with CUDA 7 GB, weights 4.3 GB); building needs ~35 GB free. Checked on the RTX
+  3050 laptop: CUDA visible in the container, GLO-30 and SRTM reachable, an upload through v1 + v2.
 - **Development**: `npm run dev` on :5173 proxies `/api` and `/data-uploads` to :8000.
 - **Environments**, kept separate on purpose:
   - `.venv`: numpy/scipy/rasterio/pytest, no torch; all tests.
@@ -385,7 +410,8 @@ Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `st
   - The first model load fetches the DINOv2 code. After that it loads from `~/.cache/torch/hub`
     without contacting GitHub: `torch.hub` otherwise checks GitHub's default branch on every
     load, with no timeout, and that hung model loading on a slow network.
-  - GeoTIFF uploads read GLO-30 from AWS Open Data, falling back to Planetary Computer.
+  - GeoTIFF uploads read GLO-30 from AWS Open Data, falling back to Planetary Computer, and
+    SRTM GL1 from OpenTopography (for the base DEM or the agreement score).
   - The LiDAR benchmark reads 3DEP (cached after).
   - Every remote read times out after 60 s (GDAL HTTP options plus a default `requests` timeout,
     both set in `viewer/dem.py`), so a stalled Planetary Computer transfer ends as "Absolute
@@ -466,9 +492,13 @@ The app's pipeline (v1, v2 on buildings, CHMv2 in forest; §5), with v1 alone in
 | Metric | Value |
 |---|---|
 | Footprint IoU | 0.843 |
-| Edge F1 (within 1 m) | 0.660 |
-| Height RMSE on buildings (v1 + v2 fused) | 2.86 m (v1 alone 2.99) |
-| Separate buildings | 2376 |
+| Edge F1 (within 1 m) | 0.663 |
+| Height RMSE on buildings (v1 + 25/75 v2 fused) | 2.87 m (v1 alone 2.99) |
+| Separate buildings | 2434 |
+
+The facade rule (§6.3) cost 0.02 m here (2.85 → 2.87 m; these tiles are near-nadir) and
+moved the city model's RMSE against 3DEP LiDAR from 43.75 to 43.35 m in downtown
+Philadelphia (leaning towers) and from 5.44 to 5.54 m in Pittsburgh.
 
 Raw building masks: ours IoU 0.854, which beats every public model we tested:
 
@@ -523,14 +553,16 @@ no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
 - **Coarse imagery** (≳ 2 m): object heights fade and the DSM falls back to GLO-30 (§9.3). GLO-30
   is itself only 30 m, so the absolute level can't be better than that without GCPs or a finer
   DEM.
-- **Base DEM**: the DSM follows Copernicus GLO-30. Over the Himalaya that is 7–14 m above SRTM
-  (§9.6), so a score against SRTM would inherit the difference.
+- **Base DEM**: which DEM the organisers score against is unknown. The DSM follows GLO-30 by
+  default and SRTM on request (§4.3); over the Himalaya the two differ by 5–14 m (§9.6), and only
+  the chosen one is matched.
 - **Training domain**: aerial imagery of three US cities. Cartosat-2S at 0.6 m over India is out
   of domain. The Sikkim scenes behave plausibly, but without Indian LiDAR their accuracy is
   unmeasured.
 - **Speed**: two height-model passes per scene (plus CHMv2 in forests) roughly double the upload
   time on a 6 GB laptop GPU. Very large scenes run tile by tile and take minutes.
-- **Internet**: uncached GeoTIFF processing reads GLO-30 online (AWS, then Planetary Computer).
+- **Internet**: uncached GeoTIFF processing reads GLO-30 (AWS, then Planetary Computer) and SRTM
+  (OpenTopography) online.
   Complete reprojected patches are reusable from `viewer/cache/dem/` or `ALTIMAP_DEM_CACHE`.
 - **Non-georeferenced input**: without a pixel size, 0.33 m is an experimental assumption and is
   reported as such. Heights stay metric, but
@@ -548,9 +580,10 @@ no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
 | `viewer/dsm_eval.py` | LiDAR benchmark by landscape and pixel size |
 | `viewer/dem_check.py` | DSM vs Copernicus/SRTM for scenes without LiDAR (India) |
 | `viewer/canopy.py` | CHMv2 forest canopy heights (optional) |
-| `viewer/geo.py`, `dem.py` | Geo helpers (16-bit grids, reprojection), DEM reads |
+| `viewer/geo.py`, `dem.py` | Geo helpers (16-bit grids, reprojection), DEM reads (GLO-30, SRTM) |
 | `viewer/server.py` | FastAPI app: API + static app |
 | `frontend/` | React + three.js viewer |
+| `Dockerfile`, `.dockerignore` | The whole app as one image, weights included (§8) |
 | `scripts/` | Training-data download, the unattended v2 training run, Indian test scenes |
 | `tests/` | Synthetic-fixture test suite (no GPU, no network) |
 | `viewer/web/`, `viewer/export_*.py`, `refine*.py`, `validate.py`, `backend/` | Earlier DA3-based dashboards and exporters, the Django backend (legacy, kept working) |
@@ -558,8 +591,8 @@ no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
 
 ## 12. Hardening notes
 
-- `viewer/dem.py:glo30` caches complete reprojected patches in `viewer/cache/dem/` (or the
-  `ALTIMAP_DEM_CACHE` directory). A missing or partially readable tile remains unresolved; it is
+- `viewer/dem.py:glo30` and `srtm` cache complete reprojected patches in `viewer/cache/dem/` (or
+  the `ALTIMAP_DEM_CACHE` directory), keyed by source. A missing or partially readable tile remains unresolved; it is
   not converted to a zero-elevation surface.
 - `viewer/geo.py` reports rotated/sheared and materially non-square GeoTIFF grids. The absolute
   DSM path refuses those grids until a north-up reprojection path is added, avoiding incorrect

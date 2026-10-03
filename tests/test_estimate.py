@@ -286,3 +286,19 @@ def test_forest_is_extensive_canopy_not_a_tree_cluster():
     assert not forest[520, 500]  # the cluster isn't forest
     assert not forest[300, 450]  # open ground beside the forest
     assert not forest[cls != 6].any()
+
+
+def test_dem_agreement_scores_each_dem_in_30m_cells_and_survives_a_failed_read(monkeypatch):
+    import viewer.estimate as est
+
+    dem = np.full((120, 120), 500.0, np.float32)
+    dsm = dem.copy()
+    dsm[::2] += 4.0  # +-2 m detail around the DEM: every 30 m cell mean is DEM + 2
+
+    def no_network(geo, name):
+        raise OSError("SRTM unreachable")
+
+    monkeypatch.setattr(est, "padded_dem", no_network)
+    out = est.dem_agreement(dsm, {}, dsm.shape, gsd_m=1.0, dems={"glo30": dem})
+    assert out["srtm"] is None  # an unreadable DEM is reported, not raised
+    assert out["glo30"]["cell_rmse"] == 2.0 and out["glo30"]["cell_bias"] == 2.0

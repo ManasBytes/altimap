@@ -1,22 +1,17 @@
 import {
   Activity,
-  Compass,
   Download,
   Eye,
   FileImage,
   Layers3,
   Maximize2,
-  Minus,
   Mountain,
   Pause,
   Play,
-  Plus,
   RotateCcw,
   RotateCw,
   Ruler,
   Satellite,
-  Settings2,
-  SlidersHorizontal,
   Target,
   Trash2,
   Upload,
@@ -25,6 +20,8 @@ import {
   Diff,
   Waves,
   PersonStanding,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -2436,10 +2433,12 @@ function App() {
   const [uploadStatus, setUploadStatus] = useState("idle"); // idle | loading | error
   const [uploadError, setUploadError] = useState("");
   const [uploadMeta, setUploadMeta] = useState(null);
+  const geoid = uploadMeta?.dsm?.base_dem === "srtm" ? "EGM96" : "EGM2008"; // of the DSM's heights
   const [uploadGsd, setUploadGsd] = useState("");
   const [referenceFile, setReferenceFile] = useState(null);
   const [gcpFile, setGcpFile] = useState(null); // CSV lon, lat, height: corrects a GeoTIFF's DSM
   const [uploadQuality, setUploadQuality] = useState("high"); // high = 4-flip TTA
+  const [baseDem, setBaseDem] = useState("glo30"); // public DEM under a GeoTIFF's absolute DSM
   const [uploadProgress, setUploadProgress] = useState(null); // {stage, progress}
   const fileRef = useRef(null);
   const uploadFileRef = useRef(null);
@@ -2483,6 +2482,7 @@ function App() {
       if (uploadGsd.trim()) body.append("gsd", uploadGsd.trim());
       if (referenceFile) body.append("reference", referenceFile);
       if (gcpFile) body.append("gcps", gcpFile);
+      body.append("base_dem", baseDem);
       const res = await fetch(ESTIMATE_API_URL, { method: "POST", body });
       if (!res.ok) {
         const detail = await res.json().catch(() => null);
@@ -2554,6 +2554,7 @@ function App() {
         gsd_m: data.gsd_m,
         height_mode: data.height_mode,
         geospatial_warnings: data.geospatial_warnings,
+        dem_agreement: data.dem_agreement,
       });
       setProfileCleared(false);
       setWaypointCount(0);
@@ -2705,9 +2706,6 @@ function App() {
           >
             <Upload size={18} />
           </button>
-          <button onClick={() => notify("Analytics panel selected")}>
-            <Activity size={18} />
-          </button>
         </div>
         <div className="rail-bottom">
           <button
@@ -2715,11 +2713,10 @@ function App() {
               setTheme(theme === "dark" ? "light" : "dark");
               notify(`${theme === "dark" ? "Light" : "Dark"} mode enabled`);
             }}
-            title="Toggle light mode"
+            title={theme === "dark" ? "Light mode" : "Dark mode"}
           >
-            <Settings2 size={18} />
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
           </button>
-          <div className="avatar">MB</div>
         </div>
       </aside>
       <main>
@@ -2788,7 +2785,7 @@ function App() {
                     {pickedBuilding.roofElevation != null && (
                       <>
                         <dt>Roof elevation</dt>
-                        <dd>{pickedBuilding.roofElevation.toFixed(1)} m (EGM2008)</dd>
+                        <dd>{pickedBuilding.roofElevation.toFixed(1)} m ({geoid})</dd>
                       </>
                     )}
                   </dl>
@@ -2877,9 +2874,8 @@ function App() {
                 </button>
               )}
               <div className="canvas-badge">
-                <span className="pulse" /> LIVE PREVIEW <i />{" "}
                 {layer === "elevation"
-                  ? "rDSM surface"
+                  ? "Surface"
                   : layer === "depth"
                     ? "Height estimate"
                     : layer === "classes"
@@ -2889,27 +2885,6 @@ function App() {
                         : layer === "error"
                           ? "Error vs reference"
                           : "RGB texture"}
-              </div>
-              <div className="compass">
-                <Compass size={23} />
-                <span>N</span>
-              </div>
-              <div className="canvas-controls">
-                <button
-                  onClick={() =>
-                    setExaggeration(Math.max(0, exaggeration - 0.1))
-                  }
-                >
-                  <Minus size={15} />
-                </button>
-                <span>{exaggeration.toFixed(1)}×</span>
-                <button
-                  onClick={() =>
-                    setExaggeration(Math.min(3, exaggeration + 0.1))
-                  }
-                >
-                  <Plus size={15} />
-                </button>
               </div>
             </div>
             <div className="viewport-footer">
@@ -2965,13 +2940,376 @@ function App() {
                 <div className="eyebrow">Scene inspector</div>
                 <h2>Reconstruction</h2>
               </div>
-              <button
-                className="icon-btn"
-                onClick={() => notify("Inspector settings ready")}
-              >
-                <SlidersHorizontal size={16} />
-              </button>
             </div>
+            {view === "terrain" ? (
+            <div className="control-section scene-switcher">
+              <div className="label-row">
+                <label>Scene</label>
+                <span>
+                  {sceneIndex + 1} / {displayedScenes.length} ·{" "}
+                  {urbanScenes.length} urban
+                </span>
+              </div>
+              <div className="scene-preview">
+                {sample && (
+                  <img src={shown.thumb || shown.rgb} alt={shown.label} />
+                )}
+                <div>
+                  <strong>{shown.id}</strong>
+                  <small>
+                    {shown.urban ? "Building-rich · " : ""}
+                    {shown.label}
+                  </small>
+                </div>
+              </div>
+              <select
+                value={shown.id}
+                onChange={(event) =>
+                  selectScene(
+                    displayedScenes.find(
+                      (scene) => scene.id === event.target.value,
+                    ),
+                  )
+                }
+              >
+                <option value="" disabled>
+                  Choose a GAMUS preview scene…
+                </option>
+                <optgroup
+                  label={`Urban / building-rich (${urbanScenes.length})`}
+                >
+                  {urbanScenes.map((scene) => (
+                    <option key={`${scene.split}-${scene.id}`} value={scene.id}>
+                      {scene.id} — {scene.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label={`Other GAMUS tiles (${otherScenes.length})`}>
+                  {otherScenes.map((scene) => (
+                    <option key={`${scene.split}-${scene.id}`} value={scene.id}>
+                      {scene.id} — {scene.label}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+              <div className="photo-nav">
+                <button onClick={() => changeScene(-1)}>← Previous</button>
+                <button onClick={() => changeScene(1)}>Next →</button>
+              </div>
+            </div>
+            ) : (
+            <div className="control-section upload-switcher">
+              <div className="label-row">
+                <label>Upload imagery</label>
+                <span>PNG · JPG · GeoTIFF</span>
+              </div>
+              <p className="upload-copy">
+                A fine-tuned height model estimates metric height above
+                ground (nDSM) for every pixel. GeoTIFFs with coordinates also
+                get an absolute DSM on Copernicus GLO-30 or SRTM, scored
+                against both. Both download as GeoTIFF.
+              </p>
+              <div className="upload-options">
+                <label>
+                  <small>Pixel size (m/px, optional)</small>
+                  <input
+                    type="number"
+                    min="0.05"
+                    max="10"
+                    step="0.01"
+                    placeholder="from GeoTIFF, else 0.33"
+                    value={uploadGsd}
+                    onChange={(e) => setUploadGsd(e.target.value)}
+                  />
+                </label>
+                <input
+                  ref={referenceFileRef}
+                  type="file"
+                  accept=".tif,.tiff,.png,.h5"
+                  onChange={(e) => setReferenceFile(e.target.files?.[0] ?? null)}
+                  hidden
+                />
+                <div className="upload-reference-row">
+                  <button
+                    className="upload-reference"
+                    onClick={() => referenceFileRef.current?.click()}
+                  >
+                    {referenceFile
+                      ? `Reference: ${referenceFile.name}`
+                      : "Add reference heights (optional)"}
+                  </button>
+                  {referenceFile && (
+                    <button
+                      className="upload-reference-clear"
+                      title="Remove reference"
+                      onClick={() => {
+                        setReferenceFile(null);
+                        if (referenceFileRef.current) referenceFileRef.current.value = "";
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+                <input
+                  ref={gcpFileRef}
+                  type="file"
+                  accept=".csv,.txt"
+                  onChange={(e) => setGcpFile(e.target.files?.[0] ?? null)}
+                  hidden
+                />
+                <div className="upload-reference-row">
+                  <button
+                    className="upload-reference"
+                    title="CSV rows of lon, lat, height (m above sea level). Corrects the absolute DSM of a GeoTIFF."
+                    onClick={() => gcpFileRef.current?.click()}
+                  >
+                    {gcpFile
+                      ? `Control points: ${gcpFile.name}`
+                      : "Add ground control points (optional, GeoTIFF)"}
+                  </button>
+                  {gcpFile && (
+                    <button
+                      className="upload-reference-clear"
+                      title="Remove control points"
+                      onClick={() => {
+                        setGcpFile(null);
+                        if (gcpFileRef.current) gcpFileRef.current.value = "";
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+                <div className="quality-row">
+                  <small>Quality</small>
+                  <div className="segmented">
+                    <button
+                      className={uploadQuality === "high" ? "selected" : ""}
+                      onClick={() => setUploadQuality("high")}
+                      title="Averages 4 flipped predictions: most accurate"
+                    >
+                      High
+                    </button>
+                    <button
+                      className={uploadQuality === "fast" ? "selected" : ""}
+                      onClick={() => setUploadQuality("fast")}
+                      title="Single prediction: about 4x faster"
+                    >
+                      Fast
+                    </button>
+                  </div>
+                </div>
+                <div className="quality-row">
+                  <small>Base terrain (GeoTIFF)</small>
+                  <div className="segmented">
+                    <button
+                      className={baseDem === "glo30" ? "selected" : ""}
+                      onClick={() => setBaseDem("glo30")}
+                      title="Copernicus GLO-30 (2011-15, EGM2008)"
+                    >
+                      Copernicus
+                    </button>
+                    <button
+                      className={baseDem === "srtm" ? "selected" : ""}
+                      onClick={() => setBaseDem("srtm")}
+                      title="SRTM GL1 (2000, EGM96)"
+                    >
+                      SRTM
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <input
+                ref={uploadFileRef}
+                type="file"
+                accept=".png,.jpg,.jpeg,.tif,.tiff"
+                onChange={onPickUpload}
+                hidden
+              />
+              <button
+                className="upload-dropzone"
+                onClick={() => uploadFileRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={onDropFile}
+                disabled={uploadStatus === "loading"}
+              >
+                <Upload size={20} />
+                <span>
+                  {uploadStatus === "loading"
+                    ? `${uploadProgress?.stage ?? "Working"} · ${Math.round((uploadProgress?.progress ?? 0) * 100)}%`
+                    : uploadFileName
+                      ? `${uploadFileName} — drop or click to replace`
+                      : "Drop an image here, or click to choose"}
+                </span>
+                {uploadStatus === "loading" && (
+                  <i className="progress-track">
+                    <i
+                      className="progress-fill"
+                      style={{ width: `${Math.round((uploadProgress?.progress ?? 0) * 100)}%` }}
+                    />
+                  </i>
+                )}
+              </button>
+              {uploadStatus === "error" && (
+                <div className="upload-error">{uploadError}</div>
+              )}
+              {uploadMeta && (
+                <>
+                  <div className="metric-grid">
+                    <div>
+                      <small>Processed in</small>
+                      <strong>{uploadMeta.seconds.toFixed(2)}s</strong>
+                    </div>
+                    <div>
+                      <small>Tallest object</small>
+                      <strong>{uploadMeta.max_m.toFixed(1)} m</strong>
+                    </div>
+                    {uploadMeta.dsm && (
+                      <>
+                        <div>
+                          <small>Ground ({uploadMeta.dsm.base_dem === "srtm" ? "SRTM" : "GLO-30"})</small>
+                          <strong>
+                            {uploadMeta.dsm.ground_min_m.toFixed(0)}–
+                            {uploadMeta.dsm.ground_max_m.toFixed(0)} m
+                          </strong>
+                        </div>
+                        <div>
+                          <small>DSM range</small>
+                          <strong>
+                            {uploadMeta.dsm.min_m.toFixed(0)}–
+                            {uploadMeta.dsm.max_m.toFixed(0)} m
+                          </strong>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {uploadMeta.models && (
+                    <div className="models-line">
+                      Models: {uploadMeta.models.join(" · ")}
+                      {uploadMeta.height_mode === "assumed_gsd_experimental" &&
+                        " · unknown GSD: metric scale is experimental"}
+                      {uploadMeta.gsd_m && uploadMeta.work_gsd_m > 0.34 &&
+                        ` · processed at ${uploadMeta.work_gsd_m.toFixed(2)} m (very large scene)`}
+                      {uploadMeta.models.some((m) => m.startsWith("CHMv2")) && (
+                        <span className="dino-credit"> · Built with DINOv3</span>
+                      )}
+                    </div>
+                  )}
+                  {uploadMeta.dsm_error && (
+                    <div className="upload-error">
+                      Absolute DSM unavailable: {uploadMeta.dsm_error}
+                    </div>
+                  )}
+                  {uploadMeta.geospatial_warnings?.map((warning) => (
+                    <div className="upload-error" key={warning}>
+                      GeoTIFF warning: {warning}
+                    </div>
+                  ))}
+                  {uploadMeta.gcp &&
+                    (uploadMeta.gcp.error ? (
+                      <div className="upload-error">
+                        Control points not applied: {uploadMeta.gcp.error}
+                      </div>
+                    ) : uploadMeta.gcp.model === "none" ? (
+                      <div className="gcp-result">
+                        Control points: {uploadMeta.gcp.n_used} of {uploadMeta.gcp.n_given} inside
+                        the image · {uploadMeta.gcp.note}
+                      </div>
+                    ) : (
+                      <div className="gcp-result">
+                        Control points: {uploadMeta.gcp.n_used} of {uploadMeta.gcp.n_given} inside
+                        the image · DSM shifted {uploadMeta.gcp.offset_m >= 0 ? "+" : ""}
+                        {uploadMeta.gcp.offset_m.toFixed(2)} m · ground error at them{" "}
+                        {uploadMeta.gcp.rmse_before_m.toFixed(2)} →{" "}
+                        {uploadMeta.gcp.rmse_after_m.toFixed(2)} m
+                        {uploadMeta.gcp.rmse_left_out_m != null &&
+                          ` (${uploadMeta.gcp.rmse_left_out_m.toFixed(2)} m on left-out points)`}
+                      </div>
+                    ))}
+                  {uploadMeta.dem_agreement && (
+                    <div
+                      className="gcp-result"
+                      title="The DSM averaged over each 30 m DEM cell and compared with that DEM, the way GeoTIFF output is scored"
+                    >
+                      DSM vs public DEMs (30 m cells)
+                      {[["glo30", "Copernicus GLO-30"], ["srtm", "SRTM"]].map(([key, label]) => {
+                        const a = uploadMeta.dem_agreement[key];
+                        return (
+                          <div key={key}>
+                            {label}
+                            {uploadMeta.dsm?.base_dem === key ? " (base)" : ""}:{" "}
+                            {a
+                              ? `RMSE ${a.cell_rmse.toFixed(2)} m · bias ${a.cell_bias >= 0 ? "+" : ""}${a.cell_bias.toFixed(2)} m`
+                              : "unavailable"}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {uploadMeta.validation && (
+                    <div className="metric-grid validation-grid">
+                      <div>
+                        <small>RMSE vs reference</small>
+                        <strong>{uploadMeta.validation.rmse?.toFixed(2)} m</strong>
+                      </div>
+                      <div>
+                        <small>MAE</small>
+                        <strong>{uploadMeta.validation.mae?.toFixed(2)} m</strong>
+                      </div>
+                      <div>
+                        <small>Correlation r</small>
+                        <strong>
+                          {uploadMeta.validation.pearson?.toFixed(3) ?? "n/a"}
+                        </strong>
+                      </div>
+                      <div>
+                        <small>Building RMSE</small>
+                        <strong>
+                          {uploadMeta.validation.building_rmse != null
+                            ? `${uploadMeta.validation.building_rmse.toFixed(2)} m`
+                            : "n/a"}
+                        </strong>
+                      </div>
+                    </div>
+                  )}
+                  {uploadMeta.validation?.scatter && (
+                    <ValidationDetail v={uploadMeta.validation} />
+                  )}
+                  <div className="download-row">
+                    {Object.entries(uploadMeta.downloads ?? {})
+                      .filter(([name]) => name.endsWith(".tif") || name.endsWith(".geojson"))
+                      .map(([name, path]) => (
+                        <a key={name} href={`${API_BASE}${path}`} download>
+                          ⬇{" "}
+                          {name === "dsm.tif"
+                            ? "Absolute DSM (GeoTIFF)"
+                            : name === "ndsm.tif"
+                              ? "nDSM (GeoTIFF)"
+                              : "3D buildings (GeoJSON)"}
+                        </a>
+                      ))}
+                  </div>
+                  <div className="class-breakdown">
+                    {CLASSIFY_CLASS_LABELS.map((name) => {
+                      const count = uploadMeta.class_pixel_counts?.[name] ?? 0;
+                      const total = uploadMeta.width * uploadMeta.height_px;
+                      const pct = total
+                        ? ((count / total) * 100).toFixed(1)
+                        : "0.0";
+                      return (
+                        <div key={name} className="class-breakdown-row">
+                          <i className={`class-dot ${CLASS_DOT_STYLE[name]}`} />
+                          <span>{name.replace("_", " ")}</span>
+                          <strong>{pct}%</strong>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+            )}
             <div className="metric-grid">
               <div>
                 <small>Surface max</small>
@@ -3180,336 +3518,6 @@ function App() {
                 )}
               </div>
             </div>
-            {view === "terrain" ? (
-            <div className="control-section scene-switcher">
-              <div className="label-row">
-                <label>Scene</label>
-                <span>
-                  {sceneIndex + 1} / {displayedScenes.length} ·{" "}
-                  {urbanScenes.length} urban
-                </span>
-              </div>
-              <div className="scene-preview">
-                {sample && (
-                  <img src={shown.thumb || shown.rgb} alt={shown.label} />
-                )}
-                <div>
-                  <strong>{shown.id}</strong>
-                  <small>
-                    {shown.urban ? "Building-rich · " : ""}
-                    {shown.label}
-                  </small>
-                </div>
-              </div>
-              <select
-                value={shown.id}
-                onChange={(event) =>
-                  selectScene(
-                    displayedScenes.find(
-                      (scene) => scene.id === event.target.value,
-                    ),
-                  )
-                }
-              >
-                <option value="" disabled>
-                  Choose a GAMUS preview scene…
-                </option>
-                <optgroup
-                  label={`Urban / building-rich (${urbanScenes.length})`}
-                >
-                  {urbanScenes.map((scene) => (
-                    <option key={`${scene.split}-${scene.id}`} value={scene.id}>
-                      {scene.id} — {scene.label}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label={`Other GAMUS tiles (${otherScenes.length})`}>
-                  {otherScenes.map((scene) => (
-                    <option key={`${scene.split}-${scene.id}`} value={scene.id}>
-                      {scene.id} — {scene.label}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
-              <div className="photo-nav">
-                <button onClick={() => changeScene(-1)}>← Previous</button>
-                <button onClick={() => changeScene(1)}>Next →</button>
-              </div>
-            </div>
-            ) : (
-            <div className="control-section upload-switcher">
-              <div className="label-row">
-                <label>Upload imagery</label>
-                <span>PNG · JPG · GeoTIFF</span>
-              </div>
-              <p className="upload-copy">
-                A fine-tuned height model estimates metric height above
-                ground (nDSM) for every pixel. GeoTIFFs with coordinates also
-                get an absolute DSM: nDSM + Copernicus GLO-30 bare-earth
-                ground. Both download as GeoTIFF.
-              </p>
-              <div className="upload-options">
-                <label>
-                  <small>Pixel size (m/px, optional)</small>
-                  <input
-                    type="number"
-                    min="0.05"
-                    max="10"
-                    step="0.01"
-                    placeholder="from GeoTIFF, else 0.33"
-                    value={uploadGsd}
-                    onChange={(e) => setUploadGsd(e.target.value)}
-                  />
-                </label>
-                <input
-                  ref={referenceFileRef}
-                  type="file"
-                  accept=".tif,.tiff,.png,.h5"
-                  onChange={(e) => setReferenceFile(e.target.files?.[0] ?? null)}
-                  hidden
-                />
-                <div className="upload-reference-row">
-                  <button
-                    className="upload-reference"
-                    onClick={() => referenceFileRef.current?.click()}
-                  >
-                    {referenceFile
-                      ? `Reference: ${referenceFile.name}`
-                      : "Add reference heights (optional)"}
-                  </button>
-                  {referenceFile && (
-                    <button
-                      className="upload-reference-clear"
-                      title="Remove reference"
-                      onClick={() => {
-                        setReferenceFile(null);
-                        if (referenceFileRef.current) referenceFileRef.current.value = "";
-                      }}
-                    >
-                      <X size={13} />
-                    </button>
-                  )}
-                </div>
-                <input
-                  ref={gcpFileRef}
-                  type="file"
-                  accept=".csv,.txt"
-                  onChange={(e) => setGcpFile(e.target.files?.[0] ?? null)}
-                  hidden
-                />
-                <div className="upload-reference-row">
-                  <button
-                    className="upload-reference"
-                    title="CSV rows of lon, lat, height (m above sea level). Corrects the absolute DSM of a GeoTIFF."
-                    onClick={() => gcpFileRef.current?.click()}
-                  >
-                    {gcpFile
-                      ? `Control points: ${gcpFile.name}`
-                      : "Add ground control points (optional, GeoTIFF)"}
-                  </button>
-                  {gcpFile && (
-                    <button
-                      className="upload-reference-clear"
-                      title="Remove control points"
-                      onClick={() => {
-                        setGcpFile(null);
-                        if (gcpFileRef.current) gcpFileRef.current.value = "";
-                      }}
-                    >
-                      <X size={13} />
-                    </button>
-                  )}
-                </div>
-                <div className="quality-row">
-                  <small>Quality</small>
-                  <div className="segmented">
-                    <button
-                      className={uploadQuality === "high" ? "selected" : ""}
-                      onClick={() => setUploadQuality("high")}
-                      title="Averages 4 flipped predictions: most accurate"
-                    >
-                      High
-                    </button>
-                    <button
-                      className={uploadQuality === "fast" ? "selected" : ""}
-                      onClick={() => setUploadQuality("fast")}
-                      title="Single prediction: about 4x faster"
-                    >
-                      Fast
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <input
-                ref={uploadFileRef}
-                type="file"
-                accept=".png,.jpg,.jpeg,.tif,.tiff"
-                onChange={onPickUpload}
-                hidden
-              />
-              <button
-                className="upload-dropzone"
-                onClick={() => uploadFileRef.current?.click()}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={onDropFile}
-                disabled={uploadStatus === "loading"}
-              >
-                <Upload size={20} />
-                <span>
-                  {uploadStatus === "loading"
-                    ? `${uploadProgress?.stage ?? "Working"} · ${Math.round((uploadProgress?.progress ?? 0) * 100)}%`
-                    : uploadFileName
-                      ? `${uploadFileName} — drop or click to replace`
-                      : "Drop an image here, or click to choose"}
-                </span>
-                {uploadStatus === "loading" && (
-                  <i className="progress-track">
-                    <i
-                      className="progress-fill"
-                      style={{ width: `${Math.round((uploadProgress?.progress ?? 0) * 100)}%` }}
-                    />
-                  </i>
-                )}
-              </button>
-              {uploadStatus === "error" && (
-                <div className="upload-error">{uploadError}</div>
-              )}
-              {uploadMeta && (
-                <>
-                  <div className="metric-grid">
-                    <div>
-                      <small>Processed in</small>
-                      <strong>{uploadMeta.seconds.toFixed(2)}s</strong>
-                    </div>
-                    <div>
-                      <small>Tallest object</small>
-                      <strong>{uploadMeta.max_m.toFixed(1)} m</strong>
-                    </div>
-                    {uploadMeta.dsm && (
-                      <>
-                        <div>
-                          <small>Ground (GLO-30)</small>
-                          <strong>
-                            {uploadMeta.dsm.ground_min_m.toFixed(0)}–
-                            {uploadMeta.dsm.ground_max_m.toFixed(0)} m
-                          </strong>
-                        </div>
-                        <div>
-                          <small>DSM range</small>
-                          <strong>
-                            {uploadMeta.dsm.min_m.toFixed(0)}–
-                            {uploadMeta.dsm.max_m.toFixed(0)} m
-                          </strong>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                  {uploadMeta.models && (
-                    <div className="models-line">
-                      Models: {uploadMeta.models.join(" · ")}
-                      {uploadMeta.height_mode === "assumed_gsd_experimental" &&
-                        " · unknown GSD: metric scale is experimental"}
-                      {uploadMeta.gsd_m && uploadMeta.work_gsd_m > 0.34 &&
-                        ` · processed at ${uploadMeta.work_gsd_m.toFixed(2)} m (very large scene)`}
-                      {uploadMeta.models.some((m) => m.startsWith("CHMv2")) && (
-                        <span className="dino-credit"> · Built with DINOv3</span>
-                      )}
-                    </div>
-                  )}
-                  {uploadMeta.dsm_error && (
-                    <div className="upload-error">
-                      Absolute DSM unavailable: {uploadMeta.dsm_error}
-                    </div>
-                  )}
-                  {uploadMeta.geospatial_warnings?.map((warning) => (
-                    <div className="upload-error" key={warning}>
-                      GeoTIFF warning: {warning}
-                    </div>
-                  ))}
-                  {uploadMeta.gcp &&
-                    (uploadMeta.gcp.error ? (
-                      <div className="upload-error">
-                        Control points not applied: {uploadMeta.gcp.error}
-                      </div>
-                    ) : uploadMeta.gcp.model === "none" ? (
-                      <div className="gcp-result">
-                        Control points: {uploadMeta.gcp.n_used} of {uploadMeta.gcp.n_given} inside
-                        the image · {uploadMeta.gcp.note}
-                      </div>
-                    ) : (
-                      <div className="gcp-result">
-                        Control points: {uploadMeta.gcp.n_used} of {uploadMeta.gcp.n_given} inside
-                        the image · DSM shifted {uploadMeta.gcp.offset_m >= 0 ? "+" : ""}
-                        {uploadMeta.gcp.offset_m.toFixed(2)} m · ground error at them{" "}
-                        {uploadMeta.gcp.rmse_before_m.toFixed(2)} →{" "}
-                        {uploadMeta.gcp.rmse_after_m.toFixed(2)} m
-                        {uploadMeta.gcp.rmse_left_out_m != null &&
-                          ` (${uploadMeta.gcp.rmse_left_out_m.toFixed(2)} m on left-out points)`}
-                      </div>
-                    ))}
-                  {uploadMeta.validation && (
-                    <div className="metric-grid validation-grid">
-                      <div>
-                        <small>RMSE vs reference</small>
-                        <strong>{uploadMeta.validation.rmse?.toFixed(2)} m</strong>
-                      </div>
-                      <div>
-                        <small>MAE</small>
-                        <strong>{uploadMeta.validation.mae?.toFixed(2)} m</strong>
-                      </div>
-                      <div>
-                        <small>Correlation r</small>
-                        <strong>
-                          {uploadMeta.validation.pearson?.toFixed(3) ?? "n/a"}
-                        </strong>
-                      </div>
-                      <div>
-                        <small>Building RMSE</small>
-                        <strong>
-                          {uploadMeta.validation.building_rmse != null
-                            ? `${uploadMeta.validation.building_rmse.toFixed(2)} m`
-                            : "n/a"}
-                        </strong>
-                      </div>
-                    </div>
-                  )}
-                  {uploadMeta.validation?.scatter && (
-                    <ValidationDetail v={uploadMeta.validation} />
-                  )}
-                  <div className="download-row">
-                    {Object.entries(uploadMeta.downloads ?? {})
-                      .filter(([name]) => name.endsWith(".tif") || name.endsWith(".geojson"))
-                      .map(([name, path]) => (
-                        <a key={name} href={`${API_BASE}${path}`} download>
-                          ⬇{" "}
-                          {name === "dsm.tif"
-                            ? "Absolute DSM (GeoTIFF)"
-                            : name === "ndsm.tif"
-                              ? "nDSM (GeoTIFF)"
-                              : "3D buildings (GeoJSON)"}
-                        </a>
-                      ))}
-                  </div>
-                  <div className="class-breakdown">
-                    {CLASSIFY_CLASS_LABELS.map((name) => {
-                      const count = uploadMeta.class_pixel_counts?.[name] ?? 0;
-                      const total = uploadMeta.width * uploadMeta.height_px;
-                      const pct = total
-                        ? ((count / total) * 100).toFixed(1)
-                        : "0.0";
-                      return (
-                        <div key={name} className="class-breakdown-row">
-                          <i className={`class-dot ${CLASS_DOT_STYLE[name]}`} />
-                          <span>{name.replace("_", " ")}</span>
-                          <strong>{pct}%</strong>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
-            )}
             <div className="control-section waypoint-panel">
               <div className="label-row">
                 <label>Camera route</label>
@@ -3597,7 +3605,7 @@ function App() {
           {!measurePoint
             ? "Double-click the terrain to read height and slope"
             : measurePoint.metric
-              ? `Height ${measurePoint.height.toFixed(1)} m above ground${measurePoint.elevation != null ? ` · elevation ${measurePoint.elevation.toFixed(1)} m (EGM2008)` : ""} · slope ${measurePoint.slopeDeg.toFixed(0)}° · pixel (${measurePoint.col}, ${measurePoint.row})`
+              ? `Height ${measurePoint.height.toFixed(1)} m above ground${measurePoint.elevation != null ? ` · elevation ${measurePoint.elevation.toFixed(1)} m (${geoid})` : ""} · slope ${measurePoint.slopeDeg.toFixed(0)}° · pixel (${measurePoint.col}, ${measurePoint.row})`
               : `Relative height ${(measurePoint.height * 100).toFixed(0)}% · preview tile, upload imagery for metric heights`}{" "}
           <X
             size={14}

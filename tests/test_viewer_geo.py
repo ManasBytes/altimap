@@ -209,3 +209,16 @@ def test_glo30_does_not_turn_an_unresolved_tile_into_zero(monkeypatch, tmp_path)
     monkeypatch.setattr(geo, "warp_to_grid", lambda *args: np.array([[100.0, np.nan]], np.float32))
     monkeypatch.setattr(dem, "DemSource", NoFallback)
     assert dem.glo30((0.0, 0.0, 1.0, 1.0), "EPSG:4326", (1, 2)) is None
+
+
+def test_srtm_tiles_follow_the_south_west_corner_and_cache_apart_from_glo30(monkeypatch, tmp_path):
+    from viewer.dem import _patch_cache_path, srtm_tile_urls
+
+    names = [u.rsplit("/", 1)[1] for u in srtm_tile_urls(88.3, 27.1, 88.4, 27.2)]  # Namchi, Sikkim
+    assert names == ["N27E088.tif"]
+    names = [u.rsplit("/", 1)[1] for u in srtm_tile_urls(-0.5, -0.5, 0.5, 0.5)]
+    assert names == ["S01W001.tif", "S01E000.tif", "N00W001.tif", "N00E000.tif"]
+    monkeypatch.setenv("ALTIMAP_DEM_CACHE", str(tmp_path))
+    box = ((0.0, 0.0, 1.0, 1.0), "EPSG:4326", (2, 2))
+    assert _patch_cache_path(*box) == _patch_cache_path(*box, "glo30")  # existing GLO-30 caches stay valid
+    assert _patch_cache_path(*box, "srtm") != _patch_cache_path(*box)  # never served GLO-30 for SRTM
