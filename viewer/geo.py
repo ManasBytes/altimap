@@ -10,6 +10,7 @@ numpy + scipy + rasterio only. No torch -- see viewer/metrics.py for why.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -207,6 +208,49 @@ def geo_meta_from_dataset(src) -> dict:
             "partial_hints": {"gcps": has_gcps, "rpcs": has_rpcs},
         }
 
+    # Measure the two pixel vectors in metres. For geographic CRSs this uses
+    # geodesic distances at the raster centre instead of treating degrees as m.
+    col = (float(src.transform.a), float(src.transform.d))
+    row = (float(src.transform.b), float(src.transform.e))
+    x0, y0 = src.transform * (src.width / 2.0, src.height / 2.0)
+    x1, y1 = src.transform * (src.width / 2.0 + 1.0, src.height / 2.0)
+    x2, y2 = src.transform * (src.width / 2.0, src.height / 2.0 + 1.0)
+    try:
+        from rasterio.crs import CRS
+
+        geographic = CRS.from_user_input(src.crs).is_geographic
+    except Exception:
+        geographic = False
+    if geographic:
+        try:
+            from pyproj import Geod
+
+            geod = Geod(ellps="WGS84")
+            _, _, col_m = geod.inv(x0, y0, x1, y1)
+            _, _, row_m = geod.inv(x0, y0, x2, y2)
+        except Exception:
+            lat = float(y0)
+            col_m = abs(x1 - x0) * 111_320.0 * math.cos(math.radians(lat))
+            row_m = abs(y2 - y0) * 111_320.0
+    else:
+        col_m = float(np.hypot(*col))
+        row_m = float(np.hypot(*row))
+    metric_res = (abs(float(col_m)), abs(float(row_m)))
+    # Rotation/shear coefficients are expressed in the CRS' native units, so
+    # compare them with the affine diagonal before converting to metres.
+    transform_scale = max(abs(float(src.transform.a)), abs(float(src.transform.e)), 1e-12)
+    rotated = (abs(float(src.transform.b)) > transform_scale * 1e-7 or
+               abs(float(src.transform.d)) > transform_scale * 1e-7)
+    anisotropic = min(metric_res) > 0 and max(metric_res) / min(metric_res) > 1.05
+    geospatial_warnings = []
+    if rotated:
+        geospatial_warnings.append(
+            "rotated/sheared affine transform: absolute DSM is disabled for this upload"
+        )
+    if anisotropic:
+        geospatial_warnings.append(
+            "non-square pixel size: absolute DSM is disabled for this upload"
+        )
     res = (abs(src.res[0]), abs(src.res[1]))
     return {
         **base,
@@ -214,5 +258,7 @@ def geo_meta_from_dataset(src) -> dict:
         "crs": str(src.crs),
         "bounds": list(src.bounds),
         "res_m": list(res),
-        "ground_m": list(ground_size_m(src.width, src.height, res)),
+        "res_metric_m": list(metric_res),
+        "ground_m": list(ground_size_m(src.width, src.height, metric_res)),
+        "geospatial_warnings": geospatial_warnings,
     }

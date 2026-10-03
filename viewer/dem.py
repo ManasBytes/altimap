@@ -15,7 +15,10 @@ constrains terrain level, not building height.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+from pathlib import Path
 
 import numpy as np
 
@@ -167,10 +170,15 @@ class DemSource:
 
         if not np.isfinite(arr).any():
             return None
-        # Fill before resampling: ndimage.zoom would smear NaNs across the patch.
-        if not np.isfinite(arr).all():
-            arr = np.where(np.isfinite(arr), arr, np.nanmean(arr))
-        return resample_to(arr, shape)
+        # Fill only for interpolation, then restore the source's unknown area.
+        # Missing data must not become a valid mean elevation.
+        valid = np.isfinite(arr)
+        if not valid.all():
+            arr = np.where(valid, arr, np.nanmean(arr))
+        result = resample_to(arr, shape)
+        valid_out = resample_to(valid.astype(np.float64), shape) >= 0.5
+        result[~valid_out] = np.nan
+        return result
 
     def close(self) -> None:
         if self._handle is not None:
@@ -182,6 +190,33 @@ class DemSource:
 
 
 GLO30_AWS = "https://copernicus-dem-30m.s3.amazonaws.com/{name}/{name}.tif"
+
+
+def _patch_cache_path(bounds, crs, shape: tuple[int, int]) -> Path:
+    """Stable cache path for one complete reprojected DEM request."""
+    root = Path(os.environ.get("ALTIMAP_DEM_CACHE",
+                              Path(__file__).resolve().parent / "cache" / "dem"))
+    key = json.dumps([list(map(float, bounds)), str(crs), list(shape)],
+                     separators=(",", ":"), sort_keys=True).encode()
+    return root / f"{hashlib.sha256(key).hexdigest()}.npz"
+
+
+def _read_cached_patch(path: Path) -> np.ndarray | None:
+    try:
+        with np.load(path) as saved:
+            dem = np.asarray(saved["dem"], dtype=np.float32)
+        return dem if dem.ndim == 2 and np.isfinite(dem).all() else None
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def _cache_patch(path: Path, dem: np.ndarray) -> None:
+    if not np.isfinite(dem).all():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".part.npz")
+    np.savez_compressed(temporary, dem=np.asarray(dem, np.float32))
+    os.replace(temporary, path)
 
 
 def glo30_tile_urls(west: float, south: float, east: float, north: float) -> list[str]:
@@ -203,12 +238,18 @@ def glo30(bounds, crs, shape: tuple[int, int]) -> np.ndarray | None:
 
     From the AWS Open Data copy first: plain HTTPS, no catalogue search or URL signing (the
     same tiles as Planetary Computer's cop-dem-glo-30, byte for byte, but Planetary
-    Computer's token service stalled for 50-120 s at a time). Tiles missing on AWS are open
-    ocean, filled with 0 m as GLO-30 does at sea. Falls back to Planetary Computer."""
+    Computer's token service stalled for 50-120 s at a time). An unavailable tile is
+    unresolved, not ocean; the caller receives None unless a complete fallback exists."""
     import rasterio
     from rasterio.warp import transform_bounds
 
     from viewer.geo import warp_to_grid
+
+    cache_path = _patch_cache_path(bounds, crs, shape)
+    if cache_path.exists():
+        cached = _read_cached_patch(cache_path)
+        if cached is not None:
+            return cached
 
     urls = []
     for url in glo30_tile_urls(*transform_bounds(crs, "EPSG:4326", *bounds)):
@@ -216,8 +257,21 @@ def glo30(bounds, crs, shape: tuple[int, int]) -> np.ndarray | None:
             with rasterio.open(url):
                 urls.append(url)
         except rasterio.RasterioIOError:
-            pass  # no tile here: all sea (or AWS unreachable -> fallback below)
+            pass  # unavailable tile: keep it unresolved and let the fallback try
     if urls:
-        dem = warp_to_grid(urls, bounds, crs, shape).astype(np.float64)
-        return np.where(np.isfinite(dem), dem, 0.0)
-    return DemSource("cop-dem-glo-30").patch(list(bounds), str(crs), shape)
+        try:
+            dem = warp_to_grid(urls, bounds, crs, shape).astype(np.float32)
+        except (OSError, rasterio.RasterioIOError, ValueError):
+            dem = None
+        if dem is not None and np.isfinite(dem).all():
+            _cache_patch(cache_path, dem)
+            return dem
+
+    # Planetary Computer is a complete-request fallback. DemSource preserves
+    # unresolved source pixels as NaN, so no missing land becomes sea level.
+    fallback = DemSource("cop-dem-glo-30").patch(list(bounds), str(crs), shape)
+    if fallback is not None and np.isfinite(fallback).all():
+        fallback = np.asarray(fallback, np.float32)
+        _cache_patch(cache_path, fallback)
+        return fallback
+    return None

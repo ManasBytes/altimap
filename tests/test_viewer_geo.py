@@ -177,3 +177,35 @@ def test_glo30_tile_names_follow_the_south_west_corner():
     assert names == ["Copernicus_DSM_COG_10_N12_00_E077_00_DEM.tif", "Copernicus_DSM_COG_10_N12_00_E078_00_DEM.tif",
                      "Copernicus_DSM_COG_10_N13_00_E077_00_DEM.tif", "Copernicus_DSM_COG_10_N13_00_E078_00_DEM.tif"]
     assert glo30_tile_urls(-0.5, -0.5, -0.4, -0.4)[0].rsplit("/", 1)[1] == "Copernicus_DSM_COG_10_S01_00_W001_00_DEM.tif"
+
+
+def test_glo30_does_not_turn_an_unresolved_tile_into_zero(monkeypatch, tmp_path):
+    import rasterio
+    import viewer.dem as dem
+    import viewer.geo as geo
+
+    class OpenSource:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_open(url, *args, **kwargs):
+        if url == "missing":
+            raise rasterio.errors.RasterioIOError("unavailable")
+        return OpenSource()
+
+    class NoFallback:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def patch(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setenv("ALTIMAP_DEM_CACHE", str(tmp_path / "dem-cache"))
+    monkeypatch.setattr(dem, "glo30_tile_urls", lambda *args: ["available", "missing"])
+    monkeypatch.setattr(rasterio, "open", fake_open)
+    monkeypatch.setattr(geo, "warp_to_grid", lambda *args: np.array([[100.0, np.nan]], np.float32))
+    monkeypatch.setattr(dem, "DemSource", NoFallback)
+    assert dem.glo30((0.0, 0.0, 1.0, 1.0), "EPSG:4326", (1, 2)) is None
