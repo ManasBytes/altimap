@@ -3,7 +3,7 @@ import math
 import numpy as np
 
 from tests.conftest import make_synthetic_ndsm
-from viewer.height_metrics import ScoreAccumulator, height_scores
+from viewer.height_metrics import ScoreAccumulator, height_bin_scores, height_scores
 
 
 def test_perfect_prediction_scores_zero_error() -> None:
@@ -40,6 +40,7 @@ def test_building_rmse_uses_only_building_pixels() -> None:
     pred[0, :] = 2.0  # 2 m error on buildings only
     s = height_scores(pred, ref, classes)
     assert math.isclose(s["building_rmse"], 2.0)
+    assert math.isclose(s["building_bias"], 2.0)
     assert math.isclose(s["rmse"], 1.0)  # sqrt(4 * 4 / 16)
 
 
@@ -47,6 +48,18 @@ def test_building_rmse_is_nan_without_buildings() -> None:
     ref = make_synthetic_ndsm()
     s = height_scores(ref.copy(), ref, np.zeros(ref.shape, np.uint8))
     assert math.isnan(s["building_rmse"])
+    assert math.isnan(s["building_mae"])
+    assert math.isnan(s["building_bias"])
+
+
+def test_height_bins_use_reference_heights_and_keep_empty_bins_nan() -> None:
+    ref = np.array([[0.0, 1.99, 2.0, 49.99, 50.0, np.nan]], np.float32)
+    pred = ref.copy()
+    pred[0, :5] += 1.0
+    rows = height_bin_scores(pred, ref)
+    assert [row["n"] for row in rows] == [2, 1, 0, 0, 1, 1]
+    assert rows[0]["bias"] == 1.0
+    assert math.isnan(rows[2]["rmse"])
 
 
 def test_accumulator_pooled_over_tiles_matches_one_shot() -> None:
@@ -57,13 +70,21 @@ def test_accumulator_pooled_over_tiles_matches_one_shot() -> None:
     acc.add(pred[:32], ref[:32], classes[:32])
     acc.add(pred[32:], ref[32:], classes[32:])
     pooled, whole = acc.result(), height_scores(pred, ref, classes)
-    for key in ("rmse", "mae", "pearson", "building_rmse"):
+    for key in ("rmse", "mae", "bias", "pearson", "building_rmse", "building_mae", "building_bias"):
         assert math.isclose(pooled[key], whole[key], rel_tol=1e-9)
     assert pooled["n"] == whole["n"]
 
 
 def test_empty_accumulator_is_nan() -> None:
     assert math.isnan(ScoreAccumulator().result()["rmse"])
+
+
+def test_accumulator_can_skip_pearson_for_height_bins() -> None:
+    ref = np.array([0.0, 1.0, 2.0], np.float32)
+    acc = ScoreAccumulator(pearson=False)
+    acc.add(ref + 1.0, ref)
+    result = acc.result()
+    assert result["rmse"] == 1.0 and math.isnan(result["pearson"])
 
 
 def test_all_nan_input_returns_nan_not_raise() -> None:

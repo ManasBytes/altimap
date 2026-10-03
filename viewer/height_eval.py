@@ -20,8 +20,9 @@ from pathlib import Path
 import numpy as np
 
 from viewer.gamus_dataset import find_tiles, load_tile
-from viewer.height_metrics import ScoreAccumulator
+from viewer.height_metrics import HEIGHT_BINS, HEIGHT_BIN_NAMES, ScoreAccumulator
 from viewer.height_model import OEM_TO_GAMUS, clean_height, load_model, predict
+from viewer.fusion_eval import _add_group_metrics
 
 DATA = Path(os.environ.get("ALTIMAP_DATA", Path.home() / "altimap-data"))
 
@@ -39,6 +40,10 @@ def train_mean_height(tiles, n: int = 100) -> float:
 
 def evaluate(model, device, tiles, mean_h: float, tta: bool = False) -> dict:
     accs = defaultdict(lambda: {k: ScoreAccumulator() for k in ("model", "zero", "train-mean")})
+    bin_accs = defaultdict(lambda: {
+        method: {name: ScoreAccumulator(pearson=False) for name in HEIGHT_BIN_NAMES}
+        for method in ("model", "zero", "train-mean")
+    })
     seg = {"labelled": 0, "correct": 0, "buildings": 0, "buildings_hit": 0}
     started = time.time()
     for i, tile in enumerate(tiles):
@@ -46,9 +51,11 @@ def evaluate(model, device, tiles, mean_h: float, tta: bool = False) -> dict:
         ref = clean_height(ref)
         pred, oem = predict(model, rgb, device, tta=tta)
         for group in (city_of(tile.scene_id), "ALL"):
-            accs[group]["model"].add(pred, ref, cls)
-            accs[group]["zero"].add(np.zeros_like(ref), ref, cls)
-            accs[group]["train-mean"].add(np.full_like(ref, mean_h), ref, cls)
+            predictions = {"model": pred, "zero": np.zeros_like(ref),
+                           "train-mean": np.full_like(ref, mean_h)}
+            for method, candidate in predictions.items():
+                _add_group_metrics(accs[group][method], bin_accs[group][method],
+                                   candidate, ref, cls)
         labelled = cls > 0
         seg["labelled"] += int(labelled.sum())
         seg["correct"] += int((OEM_TO_GAMUS[oem] == cls)[labelled].sum())
@@ -57,13 +64,61 @@ def evaluate(model, device, tiles, mean_h: float, tta: bool = False) -> dict:
         if (i + 1) % 25 == 0:
             rate = (i + 1) / (time.time() - started)
             print(f"  {i + 1}/{len(tiles)} tiles, {rate:.2f} tiles/s", flush=True)
+    scores = {g: {k: a.result() for k, a in d.items()} for g, d in accs.items()}
+    for group, methods in bin_accs.items():
+        for method, bins in methods.items():
+            scores[group][method]["height_bins"] = [
+                {"bin": name, **bins[name].result()} for name in HEIGHT_BIN_NAMES
+            ]
     return {
-        "scores": {g: {k: a.result() for k, a in d.items()} for g, d in accs.items()},
+        "scores": scores,
         "segmentation": {
             "pixel_accuracy": seg["correct"] / max(seg["labelled"], 1),
             "building_recall": seg["buildings_hit"] / max(seg["buildings"], 1),
         },
     }
+
+
+def evaluate_cache(tiles, cache: Path, mean_h: float) -> dict:
+    """Evaluate v1 predictions already cached by viewer.fusion_eval."""
+    accs = defaultdict(lambda: {k: ScoreAccumulator() for k in ("model", "zero", "train-mean")})
+    bin_accs = defaultdict(lambda: {
+        method: {name: ScoreAccumulator(pearson=False) for name in HEIGHT_BIN_NAMES}
+        for method in ("model", "zero", "train-mean")
+    })
+    seg = {"labelled": 0, "correct": 0, "buildings": 0, "buildings_hit": 0}
+    for i, tile in enumerate(tiles, 1):
+        path = cache / f"{tile.split}__{tile.scene_id}.npz"
+        if not path.exists():
+            raise FileNotFoundError(f"missing cached prediction: {path}")
+        with np.load(path) as data:
+            pred = data["h1"]
+            ref = clean_height(data["reference"])
+            cls = data["truth_classes"]
+            oem = data["predicted_oem"]
+        for group in (city_of(tile.scene_id), "ALL"):
+            predictions = {"model": pred, "zero": np.zeros_like(ref),
+                           "train-mean": np.full_like(ref, mean_h)}
+            for method, candidate in predictions.items():
+                _add_group_metrics(accs[group][method], bin_accs[group][method],
+                                   candidate, ref, cls)
+        labelled = cls > 0
+        seg["labelled"] += int(labelled.sum())
+        seg["correct"] += int((OEM_TO_GAMUS[oem] == cls)[labelled].sum())
+        seg["buildings"] += int((cls == 3).sum())
+        seg["buildings_hit"] += int(((cls == 3) & (oem == 7)).sum())
+        if i == 1 or i % 100 == 0 or i == len(tiles):
+            print(f"  {i}/{len(tiles)} cached tiles", flush=True)
+    scores = {g: {k: a.result() for k, a in d.items()} for g, d in accs.items()}
+    for group, methods in bin_accs.items():
+        for method, bins in methods.items():
+            scores[group][method]["height_bins"] = [
+                {"bin": name, **bins[name].result()} for name in HEIGHT_BIN_NAMES
+            ]
+    return {"scores": scores, "segmentation": {
+        "pixel_accuracy": seg["correct"] / max(seg["labelled"], 1),
+        "building_recall": seg["buildings_hit"] / max(seg["buildings"], 1),
+    }}
 
 
 def print_table(result: dict) -> None:
@@ -86,6 +141,8 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=0, help="0 = all tiles in the split")
     ap.add_argument("--tta", action="store_true")
     ap.add_argument("--out", type=Path, default=Path("eval.json"))
+    ap.add_argument("--cache", type=Path, default=None,
+                    help="reuse v1 predictions produced by viewer.fusion_eval")
     args = ap.parse_args()
 
     tiles = find_tiles((args.gamus,))
@@ -95,8 +152,11 @@ def main() -> None:
     mean_h = train_mean_height(tiles)
     print(f"{len(split)} {args.split} tiles, train-mean height {mean_h:.2f} m, ckpt {args.ckpt.name}")
 
-    model, device = load_model(args.ckpt, args.synrs3d)
-    result = evaluate(model, device, split, mean_h, tta=args.tta)
+    if args.cache:
+        result = evaluate_cache(split, args.cache, mean_h)
+    else:
+        model, device = load_model(args.ckpt, args.synrs3d)
+        result = evaluate(model, device, split, mean_h, tta=args.tta)
     result.update(ckpt=str(args.ckpt), split=args.split, tiles=len(split), tta=args.tta,
                   train_mean_m=mean_h)
     print_table(result)

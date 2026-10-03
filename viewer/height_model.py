@@ -107,7 +107,7 @@ def _forward(model, batch, device):
     import torch.nn.functional as F
 
     use_amp = device.startswith("cuda")
-    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
         out = model(batch.to(device))
     h, w = batch.shape[-2:]
     height, seg = out["regression"].float(), out["segmentation"].float()
@@ -118,13 +118,15 @@ def _forward(model, batch, device):
 
 
 def predict(model, rgb: np.ndarray, device: str, patch: int = PATCH, tta: bool = False,
-            batch_size: int = 2, progress=None) -> tuple[np.ndarray, np.ndarray]:
+            batch_size: int = 2, progress=None,
+            return_building_probability: bool = False):
     """HxWx3 uint8 -> (height metres float32 HxW, OEM class uint8 HxW).
 
     `progress`, if given, is called with the fraction of windows done (0..1].
 
     Sliding windows at half-patch stride, feather-blended. Height is clamped
-    at 0: height above ground is non-negative by definition.
+    at 0: height above ground is non-negative by definition. When requested,
+    a third return value is the softmax probability of the OEM building class.
     """
     import torch
 
@@ -163,6 +165,12 @@ def predict(model, rgb: np.ndarray, device: str, patch: int = PATCH, tta: bool =
         if progress:
             progress(min(1.0, (i + len(chunk)) / len(boxes)))
 
-    height = np.maximum(acc_h / acc_w, 0.0)[:h0, :w0]
-    classes = np.argmax(acc_s, axis=0).astype(np.uint8)[:h0, :w0]
-    return height.astype(np.float32), classes
+    height = np.maximum(acc_h / acc_w, 0.0)[:h0, :w0].astype(np.float32)
+    blended = acc_s / np.maximum(acc_w[None, ...], 1e-8)
+    classes = np.argmax(blended, axis=0).astype(np.uint8)[:h0, :w0]
+    if not return_building_probability:
+        return height, classes
+    shifted = blended - np.max(blended, axis=0, keepdims=True)
+    exp = np.exp(np.clip(shifted, -80.0, 0.0))
+    probability = (exp[7] / np.maximum(exp.sum(axis=0), 1e-8))[:h0, :w0]
+    return height, classes, probability.astype(np.float32)
