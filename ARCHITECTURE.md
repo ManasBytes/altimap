@@ -100,7 +100,8 @@ sidecar always says which one a file holds.
   it in the reference slot instead.
 
 Pixel size comes from the GeoTIFF: metres, or degrees converted at the scene's latitude. The
-user can also type it in. With neither, 0.33 m is assumed and reported as assumed.
+user can also type it in. With neither, 0.33 m is assumed and reported as experimental; the
+viewer does not present that scale as known physical truth.
 
 ### 4.2 Height model inference
 - **Resampling and tiling** (`predict_scene`):
@@ -119,7 +120,8 @@ user can also type it in. With neither, 0.33 m is assumed and reported as assume
   8 OpenEarthMap classes, mapped to GAMUS's 7.
 - **Three models, by land cover** (`load_pipeline`, §5):
   - Height v1 everywhere.
-  - Building pixels: the average of v1 and v2 (`fuse_heights`).
+  - Building pixels: 25% v1 + 75% v2 (`fuse_heights`), selected on full GAMUS validation and
+    confirmed on the untouched test split plus a focused TTA check.
   - Tree pixels inside extensive forest: Meta CHMv2 canopy heights. "Forest" is ≥ 80 % canopy
     within 150 m (`forest_mask`).
   - v2 and CHMv2 are optional and kept on the CPU. They move to the GPU only while they run,
@@ -229,7 +231,21 @@ the 40 GAMUS val tiles (`viewer/dsm_eval.py`, one pass).
   | Tallest objects, hills | 53 m | 28 m | 52 m |
   | Building bias, city | — | −22 m | −0.4 m |
 
-- **Averaging the two on building pixels** (v1 elsewhere) gives the best building error:
+- **Current building fusion is 25% v1 + 75% v2** on predicted building pixels, with v1
+  elsewhere. It was selected after correcting GAMUS `-5 m` no-data masking and comparing fixed
+  weights plus soft routing on all 859 validation tiles. Against the former 50/50 route:
+
+  | Split / mode | 50/50 overall RMSE | 25/75 overall RMSE | 50/50 building RMSE | 25/75 building RMSE |
+  |---|---:|---:|---:|---:|
+  | Validation, 859 tiles | 2.7511 m | **2.7402 m** | 3.3352 m | **3.2763 m** |
+  | Untouched test, 2,861 tiles | 3.7573 m | **3.6972 m** | 5.2308 m | **4.9934 m** |
+  | Focused TTA, 24 tiles | 3.1690 m | **3.0916 m** | 5.1284 m | **4.9140 m** |
+
+  The TTA ordinary-scene subset regressed only 0.04% overall, below the predeclared 2% stop rule.
+  Soft probability routing did not beat the fixed rule strongly enough to justify production
+  complexity.
+
+- **The earlier 50/50 external LiDAR run** established why fusion is safer than v2 alone:
 
   | Building RMSE | v1 | Fused |
   |---|---|---|
@@ -238,8 +254,9 @@ the 40 GAMUS val tiles (`viewer/dsm_eval.py`, one pass).
   | Suburb | 2.87 m | 2.82 m |
   | GAMUS val | 2.57 m | 2.40 m |
 
-  Tallest objects rise to 104 m in the city and 40 m in the hills. The city's overall nDSM is
-  0.3 m worse; the hills improve (3.68 → 3.47 m).
+  In that historical run, tallest objects rose to 104 m in the city and 40 m in the hills. The
+  city's overall nDSM was 0.3 m worse; the hills improved (3.68 → 3.47 m). These exact external
+  scene numbers have not been rerun with 75%, so they are not presented as current 25/75 metrics.
 - **Meta CHMv2** (DINOv3 satellite backbone, March 2026; `facebook/dinov3-vitl16-chmv2-dpt-head`,
   or its byte-identical public mirror `WEO-SAS/chm-meta-v2`; DINOv3 licence) reads forest canopy
   better than our model: tree-pixel RMSE 18.1 → 13.0 m, bias −15 → −7 m. It is worse on
@@ -397,6 +414,9 @@ All scripts are in `viewer/`, and their numbers are reproducible.
 
 ### 9.2 By landscape, against USGS 3DEP airborne LiDAR (`dsm_eval.py`, one pass, no TTA)
 
+This table is the historical external benchmark with the former 50/50 building blend. It remains
+domain-gap evidence; do not quote it as a rerun of the current 25/75 route.
+
 | Scene (pixel size) | nDSM RMSE (predict-0 baseline) | nDSM bias | DSM RMSE (GLO-30 alone) | DSM r (GLO-30 alone) |
 |---|---|---|---|---|
 The app's pipeline (v1, v2 on buildings, CHMv2 in forest; §5), with v1 alone in brackets:
@@ -410,9 +430,9 @@ The app's pipeline (v1, v2 on buildings, CHMv2 in forest; §5), with v1 alone in
 
 - **Where the model helps**: it beats the predict-0 baseline everywhere. It improves the absolute
   DSM over GLO-30 alone in the city, suburb and hills, and in the forest it is within 0.2 m of it.
-- **Tall buildings**: the city's tallest objects (99.9th percentile) went from 66 m (v1) to 104 m;
-  LiDAR says 151 m. The city's all-pixel error is 0.3 m worse: taller towers slightly out of place
-  (NAIP's relief displacement) cost more than they gain.
+- **Tall buildings in the historical 50/50 run**: the city's tallest objects (99.9th percentile)
+  went from 66 m (v1) to 104 m; LiDAR says 151 m. The city's all-pixel error was 0.3 m worse:
+  taller towers slightly out of place (NAIP's relief displacement) cost more than they gained.
 - **Forest**: canopy bias went from −15.9 to −10.8 m, and the DSM came to within 0.2 m of GLO-30
   alone (it was 0.5 m worse).
 - **GCPs** (8 LiDAR bare-ground points, scored on all other pixels): GLO-30 has no real vertical
@@ -436,7 +456,8 @@ The app's pipeline (v1, v2 on buildings, CHMv2 in forest; §5), with v1 alone in
 - **The DSM stays within 0.1 m of GLO-30 alone at 5–10 m**, because the export is
   DEM-consistent and the model's detail averages out within each 30 m cell. Its gain over GLO-30
   shrinks from 0.6 m to 5 m.
-- **Unknown pixel size**: a 0.6 m image uploaded as a PNG and treated as 0.33 m changed nDSM RMSE
+- **Unknown pixel size**: a 0.6 m image uploaded as a PNG uses the explicitly labelled experimental
+  0.33 m assumption and changed nDSM RMSE
   by −0.7 to +1.0 m (suburb 4.47 → 3.78, hills 3.68 → 4.06, forest 18.5 → 19.5 m), a modest
   effect.
 
@@ -494,8 +515,9 @@ no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
 
 ## 10. Known limits
 
-- **Very tall structures** still read low: the city's tallest objects come out at 104 m against
-  151 m. v2 reaches 145 m, but alone it over-reads everything else (§5).
+- **Very tall structures** were still low in the historical 50/50 external run: 104 m against
+  151 m. v2 reached 145 m but over-read other land cover. The 25/75 route should help, but the
+  external scene must be rerun before claiming a new tower value (§5).
 - **Forest canopy** still reads ~11 m low after CHMv2. The forest DSM stays 0.2 m worse than GLO-30
   alone, since GLO-30 already holds the canopy surface.
 - **Coarse imagery** (≳ 2 m): object heights fade and the DSM falls back to GLO-30 (§9.3). GLO-30
@@ -508,9 +530,10 @@ no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
   unmeasured.
 - **Speed**: two height-model passes per scene (plus CHMv2 in forests) roughly double the upload
   time on a 6 GB laptop GPU. Very large scenes run tile by tile and take minutes.
-- **Internet**: GeoTIFF processing reads GLO-30 online (AWS, then Planetary Computer); there's
-  no offline DEM option.
-- **Non-georeferenced input**: without a pixel size, 0.33 m is assumed. Heights stay metric, but
+- **Internet**: uncached GeoTIFF processing reads GLO-30 online (AWS, then Planetary Computer).
+  Complete reprojected patches are reusable from `viewer/cache/dem/` or `ALTIMAP_DEM_CACHE`.
+- **Non-georeferenced input**: without a pixel size, 0.33 m is an experimental assumption and is
+  reported as such. Heights stay metric, but
   footprint areas scale with the assumption.
 
 ## 11. Repository map
@@ -532,3 +555,14 @@ no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
 | `tests/` | Synthetic-fixture test suite (no GPU, no network) |
 | `viewer/web/`, `viewer/export_*.py`, `refine*.py`, `validate.py`, `backend/` | Earlier DA3-based dashboards and exporters, the Django backend (legacy, kept working) |
 | `docs/` | Problem statement, model card, design specs, plans, spikes |
+
+## 12. Hardening notes
+
+- `viewer/dem.py:glo30` caches complete reprojected patches in `viewer/cache/dem/` (or the
+  `ALTIMAP_DEM_CACHE` directory). A missing or partially readable tile remains unresolved; it is
+  not converted to a zero-elevation surface.
+- `viewer/geo.py` reports rotated/sheared and materially non-square GeoTIFF grids. The absolute
+  DSM path refuses those grids until a north-up reprojection path is added, avoiding incorrect
+  geospatial output.
+- `viewer/height_eval.py` reports pooled reference-height bins. `viewer/fusion_eval.py` provides
+  the v1/v2 hard-weight and soft-building-routing ablation without changing production behavior.

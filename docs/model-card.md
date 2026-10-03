@@ -54,18 +54,22 @@ v2 wins on GAMUS but generalises worse to other imagery: against USGS airborne L
 scenes it over-reads trees and ground. On buildings, though, it is right where v1 isn't. So the app
 combines three models by land cover:
 - **v1** gives heights everywhere.
-- **Building pixels** take the mean of v1 and v2. Building RMSE: city 44.5 → 41.9 m, hills
-  5.2 → 4.4 m, GAMUS val 2.57 → 2.40 m. The city's tallest objects rise from 66 to 104 m
-  (LiDAR 151 m).
+- **Building pixels** use 25% v1 + 75% v2. This fixed blend was selected on all 859 GAMUS
+  validation tiles, confirmed once on all 2,861 untouched test tiles, and retained under a focused
+  24-tile four-flip TTA check. Against the former 50/50 route, corrected validation overall/building
+  RMSE changed 2.7511/3.3352 → 2.7402/3.2763 m; untouched test changed
+  3.7573/5.2308 → 3.6972/4.9934 m. The TTA subset changed
+  3.1690/5.1284 → 3.0916/4.9140 m, with only a 0.04% ordinary-scene overall regression.
 - **Tree pixels in extensive forest** (≥ 80 % canopy within 150 m) come from Meta's CHMv2 canopy
   model.
 
 
 ## Limitations (measured, not guessed)
 
-- **Out of domain, by landscape** (NAIP aerial RGB vs USGS 3DEP airborne LiDAR, one pass, the
-  app's three-model pipeline; v1 alone in brackets). Absolute DSM = these heights on Copernicus
-  GLO-30, DEM-consistent:
+- **Out of domain, by landscape** (NAIP aerial RGB vs USGS 3DEP airborne LiDAR, one pass). This
+  table is the historical external run with the former 50/50 building blend; v1 alone is in
+  brackets. It remains useful domain-gap evidence but has not been rerun for the current 25/75
+  blend. Absolute DSM = these heights on Copernicus GLO-30, DEM-consistent:
 
   | Scene | nDSM RMSE (predict 0) | nDSM bias | DSM RMSE (GLO-30 alone) |
   |---|---|---|---|
@@ -74,9 +78,11 @@ combines three models by land cover:
   | Hilly town (0.6 m) | 3.5 m (6.5) [3.7] | −0.4 m [−0.7] | 5.02 m (5.53) [5.04] |
   | Forest (0.6 m) | 15.7 m (24.7) [18.5] | −10.8 m [−15.9] | 8.75 m (8.53) [9.03] |
 
-  Very tall towers still read low (104 m vs 151 m), and forest canopy reads ~11 m low. Object
-  heights hold up to ~1–2 m pixels and fade to flat by 5–10 m. ISRO's evaluation imagery is 0.6 m
-  Cartosat-2S over India, outside the training domain (aerial imagery of US cities).
+  In that historical run, very tall towers still read low (104 m vs 151 m), and forest canopy read
+  ~11 m low. The 75% route is expected to help towers but that exact external scene has not been
+  rerun, so no replacement tower number is claimed. Object heights hold up to ~1–2 m pixels and
+  fade to flat by 5–10 m. ISRO's evaluation imagery is 0.6 m Cartosat-2S over India, outside the
+  training domain (aerial imagery of US cities).
 - Heights are **above ground**. Absolute elevation needs a terrain model; AltiMap adds Copernicus
   GLO-30 ground for georeferenced inputs.
 

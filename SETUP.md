@@ -75,8 +75,9 @@ snapshot_download('WEO-SAS/chm-meta-v2', allow_patterns=['*.json', 'model.safete
 
 What each model does (all measured against USGS LiDAR, see ARCHITECTURE.md §5):
 - `best.pth` gives the heights everywhere.
-- `best_v2.pth` is averaged in on building pixels. It reads tall buildings at nearer their true
-  height; alone it over-reads trees and ground on unfamiliar imagery.
+- `best_v2.pth` contributes 75% of the result on building pixels; `best.pth` contributes 25%.
+  This blend was selected on full GAMUS validation and confirmed on the untouched test split.
+  v2 alone over-reads trees and ground on unfamiliar imagery.
 - CHMv2 replaces canopy heights inside extensive forest, where the main model reads trees
   ~16 m low.
 - The last two are optional: without them the app runs with `best.pth` alone and says so in
@@ -87,20 +88,23 @@ The server uses `viewer/cache/best.pth` if it exists, else the stock weights. It
 vs 7.25 m zero-shot, see README), so don't run on the fallback. The model card at
 https://huggingface.co/Dilavesh/altimap-height has the architecture, results, known limitations
 and licences; its source is `docs/model-card.md`. v1 is MIT. v2 is also trained on SynRS3D data
-(CC BY-NC 4.0), so treat it as non-commercial. CHMv2 is under Meta's DINOv3 licence, which asks
-for "Built with DINOv3" in the product. The app doesn't show it at the moment; add it back before
-distributing the app with CHMv2.
+(CC BY-NC 4.0), so treat it as non-commercial. CHMv2 is under Meta's DINOv3 licence; when CHMv2
+is loaded, the viewer shows the required "Built with DINOv3" credit in the model list. Review
+`THIRD_PARTY_NOTICES.md` before distributing model weights.
 
 The DINOv2 encoder code is fetched by `torch.hub` from GitHub the first time a model loads, then
 loaded from `~/.cache/torch/hub` without contacting GitHub. After that the app runs offline,
 except for GeoTIFF uploads, which read the Copernicus GLO-30 DEM from AWS Open Data (Microsoft
-Planetary Computer as fallback).
+Planetary Computer as fallback). Reprojected DEM patches are cached in `viewer/cache/dem/`;
+set `ALTIMAP_DEM_CACHE` to put that cache on another disk. If a DEM request is incomplete,
+the unresolved pixels remain nodata and the app returns the nDSM with a clear DSM warning;
+they are never silently converted to sea level.
 
 ## 4. Frontend
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run build
 cd ..
 ```
@@ -126,8 +130,11 @@ server on :8000, see `frontend/vite.config.js`. Rebuild with `npm run build` for
 Open the app, click **Import** (or drop a file on the viewport):
 
 - **PNG / JPG** gives heights above ground (nDSM) and a 3D city model on flat ground. Enter the
-  pixel size in metres if you know it (otherwise 0.33 m is assumed; it sets the footprint scale).
-- **GeoTIFF** also gives an absolute DSM (metres above sea level, EGM2008) on real terrain.
+  pixel size in metres if you know it. Without one, the app uses an explicitly reported
+  experimental 0.33 m/pixel assumption for the footprint scale; it is not known physical truth.
+- **GeoTIFF** also gives an absolute DSM (metres above sea level, EGM2008) on real terrain when
+  its CRS and grid are north-up and square. Rotated/sheared or strongly non-square inputs are
+  rejected for absolute DSM export with a warning instead of silently producing wrong geometry.
 - **Add reference heights** (optional): a single-band height map, either height above ground
   or an absolute DSM (the app works out which). A georeferenced reference is reprojected onto
   the image by its coordinates; any other is assumed to cover the same area. The app scores the
@@ -201,6 +208,12 @@ Stop the server first on a 6 GB GPU: the server's model and an evaluation's mode
 # Height model per city against baselines (needs GAMUS under $ALTIMAP_DATA/gamus, default ~/altimap-data)
 .venv-da3/bin/python -m viewer.height_eval --split test --ckpt viewer/cache/best.pth \
     --synrs3d viewer/cache/SynRS3D --tta --out test.json
+
+# Building fusion ablation: prepare model predictions once, then compare on CPU.
+.venv-da3/bin/python -m viewer.fusion_eval --prepare --gamus "$ALTIMAP_DATA/gamus" \
+    --synrs3d viewer/cache/SynRS3D --v1 viewer/cache/best.pth --v2 viewer/cache/best_v2.pth
+.venv-da3/bin/python -m viewer.fusion_eval --report --gamus "$ALTIMAP_DATA/gamus" \
+    --synrs3d viewer/cache/SynRS3D --v1 viewer/cache/best.pth --v2 viewer/cache/best_v2.pth
 
 # Fine-tuning (24 GB GPU, ~8 h): fetch the data, then train
 .venv-da3/bin/python scripts/fetch_training_data.py

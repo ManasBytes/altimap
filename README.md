@@ -25,9 +25,9 @@ part works, data formats, API, models, measured results and limits), [model card
 2. **Three models, by land cover.** Each was measured against USGS airborne LiDAR
    (ARCHITECTURE.md §5):
    - **Fine-tune v1**: heights everywhere.
-   - **v2** (8 encoder blocks, height-weighted loss, SynRS3D high-rises): averaged in on building
-     pixels. It reads tall buildings at nearer their true height; alone it over-reads trees and
-     ground on imagery it wasn't trained on.
+   - **v2** (8 encoder blocks, height-weighted loss, SynRS3D high-rises): contributes 75% of the
+     height on building pixels (v1 contributes 25%), selected on full GAMUS validation and confirmed
+     on the untouched test split. Alone it over-reads trees and ground on unfamiliar imagery.
    - **Meta's CHMv2 canopy model**: tree heights inside extensive forest (≥ 80 % canopy within
      150 m), where the main model reads trees ~16 m low. It is worse than ours outside forests.
    - The last two are optional downloads.
@@ -116,7 +116,9 @@ split used for checkpoint selection covered DC and Philadelphia only.
 
 Four NAIP scenes covering the brief's landscape types, scored as the app produces them
 (`python -m viewer.dsm_eval`, one pass without flip averaging). *DSM* is the exported absolute
-DSM; *GLO-30 alone* is what you'd get with no model at all.
+DSM; *GLO-30 alone* is what you'd get with no model at all. This table is the historical external
+run with the former 50/50 building blend. It remains useful domain-gap evidence but has not been
+rerun for the current 25/75 blend.
 
 | Scene (pixel size) | nDSM RMSE (predict 0) | nDSM bias | DSM RMSE (GLO-30 alone) | DSM r (GLO-30 alone) |
 |---|---|---|---|---|
@@ -127,12 +129,12 @@ DSM; *GLO-30 alone* is what you'd get with no model at all.
 
 - **Where it helps**: the model improves the absolute DSM over Copernicus in the city, suburb and
   hills, and in the forest it stays within 0.2 m of it.
-- **What the three-model pipeline fixed** (vs the first model alone):
+- **What that historical three-model run fixed** (vs the first model alone):
   - the city's tallest objects: 66 m → 104 m (LiDAR 151 m);
   - forest canopy bias: −15.9 → −10.8 m;
   - forest DSM: 9.03 → 8.75 m.
 
-  Remaining weak spots: very tall towers and forest canopy still read low.
+  Remaining weak spots in that run: very tall towers and forest canopy still read low.
 - **India** (Sikkim, Maxar satellite scenes, `viewer/dem_check.py`): the DSM matches Copernicus
   to ~1 m. Copernicus itself sits 7–14 m above SRTM in the Himalaya, so the choice of reference
   DEM matters (ARCHITECTURE.md §9.6).
@@ -141,6 +143,15 @@ DSM; *GLO-30 alone* is what you'd get with no model at all.
   0.1 m of GLO-30 alone there.
 
 Full breakdown in [ARCHITECTURE.md](ARCHITECTURE.md) §9.
+
+### Current building-fusion evidence
+
+The active building rule is **25% v1 + 75% v2**, with v1 unchanged elsewhere. After fixing invalid
+GAMUS `-5 m` reference masking, it beat the former 50/50 route on all 859 validation tiles
+(overall/building RMSE 2.7511/3.3352 → 2.7402/3.2763 m) and all 2,861 untouched test tiles
+(3.7573/5.2308 → 3.6972/4.9934 m). A 24-tile High-quality/TTA check also improved both pooled
+metrics (3.1690/5.1284 → 3.0916/4.9140 m); the ordinary-scene overall regression was only 0.04%.
+Soft routing was tested and not adopted because it did not provide a meaningful enough gain.
 
 ## Run it
 
@@ -174,7 +185,7 @@ git clone https://github.com/JTRNEO/SynRS3D.git viewer/cache/SynRS3D
 .venv-da3/bin/python -m viewer.estimate scene.tif --gcps points.csv --out results/
 
 # 3b. Interactive app: build the viewer once, then one server serves app + API
-(cd frontend && npm install && npm run build)
+(cd frontend && npm ci && npm run build)
 .venv-da3/bin/python -m viewer.server            # open http://127.0.0.1:8000
 .venv-da3/bin/python -m viewer.server --host 0.0.0.0   # on a VM, reachable from other machines
 ```
@@ -196,15 +207,18 @@ Tests (no GPU, no network): `uv pip install -e ".[dev]"`, then `python -m pytest
 - **Training domain.** GAMUS is 0.33 m aerial imagery from three US cities. On imagery that differs a
   lot in resolution, off-nadir angle or landscape (hilly, forested, rural India), accuracy will drop.
   Supplying the true GSD matters most.
-- **PNG/JPG without a GSD** is assumed to be 0.33 m/pixel. Measured on the 0.6 m NAIP scenes
+- **PNG/JPG without a GSD** uses an explicitly reported experimental 0.33 m/pixel assumption.
+  Measured on the 0.6 m NAIP scenes
   uploaded as plain PNGs, the wrong assumption moved nDSM RMSE by −0.7 to +1.0 m (better in the
   suburb, worse in the hills and forest). Pass `--gsd` (or fill the UI field) when it's known.
 - **Absolute DSM accuracy is bounded by GLO-30** (30 m posting, ~2–4 m vertical accuracy) for the
   ground component. Hilly terrain relief comes from the DEM, not the model.
 - **Vertical datum** is orthometric (EGM2008). Comparing against ellipsoidal references needs a
   geoid correction.
-- **Very tall buildings and forest canopy** still read low (towers ~104 m where LiDAR says 151 m;
-  canopy ~11 m low), even after fusing v2 and Meta's CHMv2 (ARCHITECTURE.md §5).
+- **Very tall buildings and forest canopy** remained low in the historical 50/50 external run
+  (towers ~104 m where LiDAR says 151 m; canopy ~11 m low). The 25/75 route should improve towers,
+  but that external scene has not been rerun, so no replacement value is claimed
+  (ARCHITECTURE.md §5).
 - **Large scenes** run tile by tile at full resolution (no seams: ARCHITECTURE.md §9.5). They
   take minutes on a laptop GPU.
 - **Network**: GeoTIFFs need Copernicus GLO-30. It's read from AWS Open Data, with Microsoft
