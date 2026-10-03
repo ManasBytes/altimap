@@ -2495,7 +2495,7 @@ function App() {
       const data = await res.json();
       const gsdText = data.gsd_m
         ? `${data.gsd_m.toFixed(2)} m/px`
-        : "GSD unknown (0.33 m assumed)";
+        : "GSD unknown (0.33 m/px assumption; experimental metric)";
       // Reuses the exact same `sample` shape as a catalog scene (rgb/height/
       // classes URLs + label/coord/max) so every existing viewer feature --
       // layer switching, waypoints, measuring -- works on it unmodified.
@@ -2552,6 +2552,8 @@ function App() {
         models: data.models,
         work_gsd_m: data.work_gsd_m,
         gsd_m: data.gsd_m,
+        height_mode: data.height_mode,
+        geospatial_warnings: data.geospatial_warnings,
       });
       setProfileCleared(false);
       setWaypointCount(0);
@@ -2986,7 +2988,7 @@ function App() {
                     : "—"}
                 </strong>
                 <em className="neutral">
-                  {shown.gsdAssumed ? "GSD assumed 0.33 m" : "ground area"}
+                  {shown.gsdAssumed ? "GSD experimental 0.33 m" : "ground area"}
                 </em>
               </div>
             </div>
@@ -3405,8 +3407,13 @@ function App() {
                   {uploadMeta.models && (
                     <div className="models-line">
                       Models: {uploadMeta.models.join(" · ")}
+                      {uploadMeta.height_mode === "assumed_gsd_experimental" &&
+                        " · unknown GSD: metric scale is experimental"}
                       {uploadMeta.gsd_m && uploadMeta.work_gsd_m > 0.34 &&
                         ` · processed at ${uploadMeta.work_gsd_m.toFixed(2)} m (very large scene)`}
+                      {uploadMeta.models.some((m) => m.startsWith("CHMv2")) && (
+                        <span className="dino-credit"> · Built with DINOv3</span>
+                      )}
                     </div>
                   )}
                   {uploadMeta.dsm_error && (
@@ -3414,6 +3421,11 @@ function App() {
                       Absolute DSM unavailable: {uploadMeta.dsm_error}
                     </div>
                   )}
+                  {uploadMeta.geospatial_warnings?.map((warning) => (
+                    <div className="upload-error" key={warning}>
+                      GeoTIFF warning: {warning}
+                    </div>
+                  ))}
                   {uploadMeta.gcp &&
                     (uploadMeta.gcp.error ? (
                       <div className="upload-error">
