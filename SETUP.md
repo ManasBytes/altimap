@@ -155,15 +155,16 @@ profiles and camera routes, **Accuracy** shows validation, and **Context** lists
 
 - **PNG / JPG** gives heights above ground (nDSM) and a 3D city model on flat ground. Enter the
   pixel size in metres if you know it. Without one, the app uses an explicitly reported
-  experimental 0.33 m/pixel assumption for the footprint scale; it is not known physical truth.
-- **GeoTIFF** also gives an absolute DSM (metres above sea level, EGM2008) on real terrain when
-  its CRS and grid are north-up and square. Rotated/sheared or strongly non-square inputs are
+  experimental 0.33 m/pixel assumption for resampling, heights and footprint scale;
+  it is not known physical truth.
+- **GeoTIFF** also gives an absolute DSM (orthometric metres: EGM96 on SRTM, EGM2008 on GLO-30)
+  on real terrain when its CRS and grid are north-up and square. Rotated/sheared or strongly non-square inputs are
   rejected for absolute DSM export with a warning instead of silently producing wrong geometry.
 - **Add reference heights** (optional): a single-band height map, either height above ground
   or an absolute DSM. Select **Reference heights represent** to match your file:
   **Height above ground** for GAMUS AGL/nDSM, **Absolute elevation** for LiDAR DSM.
-  Auto-detect is available, but can guess incorrectly near sea level. A georeferenced reference is reprojected onto
-  the image by its coordinates; any other is assumed to cover the same area. The app scores the
+  Auto-detect is available, but can guess incorrectly near sea level. A georeferenced reference
+  is reprojected onto the image by its coordinates; any other is assumed to cover the same area. The app scores the
   model (RMSE, MAE, correlation, bias, per land-cover class, a scatter plot) and adds an
   **Error** layer showing where the model reads high or low.
 - **Add ground control points** (optional, GeoTIFF only): a CSV of `lon, lat, height` (WGS84
@@ -171,8 +172,8 @@ profiles and camera routes, **Accuracy** shows validation, and **Context** lists
   columns is fine). They are compared with the bare-earth ground. The DSM is shifted by their
   mean difference only if that is at least 4 m (beyond GLO-30's own accuracy) and consistent
   across the points; otherwise nothing changes, and the panel says why. That's for real vertical
-  offsets: e.g. GPS (ellipsoidal) heights vs EGM2008 differ by tens of metres over India. On our
-  LiDAR test scenes the DEM had no such offset, so nothing was applied.
+  offsets: e.g. GPS (ellipsoidal) heights vs EGM2008 differ by tens of metres over India.
+  The current SRTM Philadelphia check applies an offset and reduces held-out-pixel DSM RMSE from 38.87 to 37.18 m; suburb/hills and the GLO-30 checks decline correction.
 - **Quality**: *High* averages 4 flipped passes (~3x slower), *Fast* runs one pass.
 - **Time**: a 2000 px GeoTIFF takes about 1.5–2 minutes on *Fast* with an RTX 3050 laptop GPU
   (two height-model passes, plus CHMv2 in forests). Scenes wider than ~1 km are processed in
@@ -191,15 +192,16 @@ In the viewer:
 - The 3D mesh detail follows the GPU: full detail on dedicated GPUs, half on integrated or
   software graphics. Add `?detail=high` or `?detail=standard` to the address to force either.
 
-Test images: `demo/` is not in git (195 MB); ask for it. It holds:
-- 3 GAMUS tiles (PNG) and 4 NAIP GeoTIFFs: city centre, suburb, hills, forest;
+Test images: `demo/` is supplied locally and is not in git. It holds:
+- 3 GAMUS tiles (PNG) and NAIP GeoTIFFs covering city, suburb, hills, forest, bridges and a levee;
 - `reference_heights/`: their LiDAR heights. Use these in the reference box, **not** as the
   image;
 - `gcps/`: sample control-point CSVs for the NAIP scenes;
 - `india/`: three Sikkim satellite scenes. `scripts/fetch_india_samples.py` downloads these
   itself.
 
-Any RGB aerial or satellite image works too.
+Other RGB aerial or satellite images can be uploaded; accuracy depends on their domain and GSD.
+For a recording walkthrough, use [docs/DEMO_VIDEO_SCRIPT.md](docs/DEMO_VIDEO_SCRIPT.md).
 
 Batch use without the viewer:
 

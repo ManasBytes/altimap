@@ -48,7 +48,7 @@ ROS's pytest plugins break the run. There is no lint script: match the surroundi
 Prettier is installed in `frontend/`.
 
 ```bash
-# Tests (.venv: no GPU, no network, ~120 tests in a few seconds)
+# Tests (.venv: no GPU, no network, 136 passing tests plus one skipped network test (2026-10-04))
 .venv/bin/python -m pytest -q
 .venv/bin/python -m pytest tests/test_estimate.py -k gcp -v          # one file / matching tests
 
@@ -139,11 +139,11 @@ absolute level from a public DEM, rather than recovering absolute scale from the
    30 m cells against both GLO-30 and SRTM; the UI shows it.
 7. **Embankments** (`viewer/embankments.py`, GeoTIFF only): levees, embankments, dams and weirs
    from OpenStreetMap. The bare-earth opening erases them (Baton Rouge levee crest 3.2–5.6 m
-   low), so the ground keeps raw GLO-30 within 25 m of each line (crest error → 1.97 m, the rest
-   of the scene unchanged). Crest elevations go to `record["flood_defences"]`.
+   low), so the ground keeps the selected raw base DEM within 25 m of each line. The GLO-30
+   measurement reduced crest error to 1.97 m, with the rest of the scene unchanged. Crest elevations go to `record["flood_defences"]`.
    **Bridges** (`viewer/bridges.py`, GeoTIFF only): the model reads decks as ground and calls
    most of them water, so OpenStreetMap places them (Overpass, several mirrors, 60 s budget,
-   cached per area under the DEM cache). Each deck is interpolated between the raw GLO-30
+   cached per area under the DEM cache). Each deck is interpolated between the selected raw base DEM
    elevation at its land ends (connected ways are one structure) and laid over the finished
    DSM; the nDSM gets its height above the bare earth. Deck RMSE vs 3DEP LiDAR 16.6 → 9.0 m
    (downtown Pittsburgh). A failed fetch only means no bridges (`record["bridges"]`).
@@ -170,7 +170,8 @@ overlapping uploads crashed each other); `GET /api/progress/{job}` serves its pr
 
 How `_validate` treats the reference:
 - georeferenced references are reprojected by coordinates (`geo.warp_to_grid`);
-- it is compared with the DSM or the nDSM, whichever it matches by median distance;
+- `reference_kind=ndsm` or `dsm` explicitly chooses the comparison; the UI defaults to nDSM;
+- older API clients default to `auto` (median-distance guess), which can be wrong near sea level;
 - `clean_height` is applied only to nDSM references, since it would drop real elevations above
   1000 m;
 - outputs: per-class errors, a scatter sample, and a signed error-map PNG.
@@ -203,7 +204,9 @@ It never feeds the GeoTIFFs; regularising heights costs RMSE. Changes to it are 
 
 ### Viewer (`frontend/`, React + Vite + three.js from npm)
 
-Almost all of it is one file, `src/main.jsx`.
+Almost all of it is one file, `src/main.jsx`. `src/theme.css` supplies the docked workstation
+layout and bundled Barlow typography. The five tabs are Image, View, Measure, Accuracy and
+Context; resizing must mark the renderer dirty so a stationary scene is redrawn.
 
 **Uploads vs catalog scenes**:
 - Uploads are drawn faithfully, in metres at true scale, from the 16-bit grids.
@@ -275,8 +278,11 @@ the named evaluator before changing any of these:
     suburb.
 - **No forest detail in the DSM** (`dsm_eval`): including it made the forest DSM worse than
   GLO-30 alone.
-- **GCP rule** (`dsm_eval`): every looser fit made the DSM worse on the LiDAR scenes. GLO-30 had
-  no real offset there, and street points don't represent roofs.
+- **GCP rule** (`dsm_eval`): looser fits worsened the historical GLO-30 checks. The current
+  SRTM city check accepts an offset (DSM RMSE 38.87 → 37.18 m on other pixels); suburb/hills
+  and GLO-30 decline correction. Points are compared with ground, not roofs.
+- **Current external benchmark**: all four NAIP scenes rerun on SRTM and GLO-30 with the 25/75
+  route, no TTA; results and limitations in `docs/evaluation/landscapes-2026-10-04.md`.
 - **Outlines stay traced** (`city_eval`): squaring every outline cost IoU 0.843 → 0.793.
 - **Street trees** (GAMUS truth, registered): 82 % of street-tree pixels are classed tree, median
   height 7.7 vs 8.6 m; city crowns cover ~50 % of truth crowns at 88 % precision (dense canopy

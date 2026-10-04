@@ -22,7 +22,7 @@ Single-image height estimation for aerial and satellite RGB imagery: for every p
 Hackathon 2026, problem statement 26175 (ISRO, "DepthWizard"), as the model behind
 [AltiMap](https://github.com/ManasBytes/altimap), which turns one image into metric elevation
 GeoTIFFs and a 3D city model. Setup and usage: the repo's
-[SETUP.md](https://github.com/ManasBytes/altimap/blob/dilavesh-new/SETUP.md).
+[SETUP.md](../SETUP.md).
 
 ## Model
 
@@ -66,25 +66,27 @@ combines three models by land cover:
 
 ## Limitations (measured, not guessed)
 
-- **Out of domain, by landscape** (NAIP aerial RGB vs USGS 3DEP airborne LiDAR, one pass). This
-  table is the historical external run with the former 50/50 building blend; v1 alone is in
-  brackets. It remains useful domain-gap evidence but has not been rerun for the current 25/75
-  blend. Absolute DSM = these heights on Copernicus GLO-30, DEM-consistent:
+- **Out of domain, by landscape** (NAIP RGB vs USGS 3DEP, single pass): the current
+  25/75 building-fusion pipeline was rerun on 2026-10-04. All-valid-pixel RMSE is in metres;
+  parentheses show the corresponding zero-height or DEM-alone baseline.
 
-  | Scene | nDSM RMSE (predict 0) | nDSM bias | DSM RMSE (GLO-30 alone) |
+  | Scene | nDSM RMSE (predict 0) | SRTM DSM RMSE (DEM alone) | GLO-30 DSM RMSE (DEM alone) |
   |---|---|---|---|
-  | Dense city (0.3 m) | 30.1 m (42.4) [29.8] | −1.2 m [−6.8] | 35.0 m (36.3) [34.7] |
-  | Suburb (0.6 m) | 4.5 m (6.5) [4.5] | +1.4 m [+1.3] | 3.97 m (4.02) [3.99] |
-  | Hilly town (0.6 m) | 3.5 m (6.5) [3.7] | −0.4 m [−0.7] | 5.02 m (5.53) [5.04] |
-  | Forest (0.6 m) | 15.7 m (24.7) [18.5] | −10.8 m [−15.9] | 8.75 m (8.53) [9.03] |
+  | Dense city (0.3 m) | 31.58 (42.35) | 38.87 (40.56) | 34.36 (36.26) |
+  | Suburb (0.6 m) | 4.47 (6.48) | 4.28 (4.71) | 3.62 (4.02) |
+  | Hilly town (0.6 m) | 3.55 (6.48) | 6.24 (7.26) | 4.75 (5.53) |
+  | Forest (0.6 m) | 15.67 (24.66) | 7.44 (7.13) | 8.75 (8.53) |
 
-  In that historical run, very tall towers still read low (104 m vs 151 m), and forest canopy read
-  ~11 m low. The 75% route is expected to help towers but that exact external scene has not been
-  rerun, so no replacement tower number is claimed. Object heights hold up to ~1–2 m pixels and
-  fade to flat by 5–10 m. ISRO's evaluation imagery is 0.6 m Cartosat-2S over India, outside the
-  training domain (aerial imagery of US cities).
-- Heights are **above ground**. Absolute elevation needs a terrain model; AltiMap adds Copernicus
-  GLO-30 ground for georeferenced inputs.
+  The model improves DSM RMSE over both base DEMs in city/suburb/hills; forest remains
+  slightly worse than DEM alone. Canopy bias is −10.75 m. A historical tower percentile
+  was 104 m against 151 m LiDAR; the current evaluator does not remeasure that percentile.
+  Full MAE, correlation, scope and datum notes are in the
+  [current report](evaluation/landscapes-2026-10-04.md).
+- Object heights hold up to about 1–2 m pixels and fade to flat by 5–10 m in the historical
+  resolution sweep. Cartosat-2S imagery over India is outside the US aerial training domain;
+  performance there needs independent reference validation.
+- Model heights are **above ground**. The pipeline uses SRTM by default or Copernicus GLO-30
+  for georeferenced absolute elevation, using EGM96 or EGM2008 respectively.
 
 ## Usage
 

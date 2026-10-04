@@ -17,9 +17,9 @@ gives the short tour. [`CLAUDE.md`](CLAUDE.md) holds the working notes for contr
 | Requirement (brief / FAQ) | Where it is met |
 |---|---|
 | PNG/JPG input → relative DSM (rDSM) | `viewer/estimate.py`: metric nDSM (height above ground) for any image; for non-georeferenced input it is the relative product |
-| GeoTIFF input → absolute metric DSM | `viewer/estimate.py`: nDSM + Copernicus GLO-30 ground, DEM-consistent (§4.3), written as a COG GeoTIFF |
+| GeoTIFF input → absolute metric DSM | `viewer/estimate.py`: nDSM + SRTM (default) or Copernicus GLO-30, DEM-consistent (§4.3), written as a COG GeoTIFF |
 | Pre-trained monocular depth backbone | RS3DAda: DINOv2 ViT-L encoder + DPT decoder (§5), fine-tuned by us on GAMUS |
-| Scale calibration: low-res DEM, GCPs, scene statistics, semantic priors | Metric heights come from the model itself; the absolute level comes from GLO-30 (§4.3); optional ground control points correct vertical offsets (§4.4) |
+| Scale calibration: low-res DEM, GCPs, scene statistics, semantic priors | Metric heights come from the model itself; the absolute level comes from the selected base DEM (§4.3); optional ground control points correct vertical offsets (§4.4) |
 | DSM in a standard geospatial format | Float32 Cloud-Optimized GeoTIFF + JSON sidecar (§3) |
 | Optical image draped on a 3D mesh, rendered with three.js | `frontend/` (React + three.js), §7 |
 | First-person navigation; height and slope analysis from any viewpoint | Orbit/fly/walk modes, probe, two-point profile, slope layer, contours (§7.3) |
@@ -85,7 +85,7 @@ sidecar always says which one a file holds.
 
 ## 4. Elevation module (`viewer/estimate.py`)
 
-`estimate(path, model, device, out_dir, gsd_m=None, tta=True, report=None, gcps=None)`:
+`estimate(path, model, device, out_dir, gsd_m=None, tta=True, report=None, gcps=None, building_model=None, canopy_model=None, base_dem="srtm")`:
 
 ### 4.1 Reading the image
 `read_image` opens anything GDAL reads (PIL as fallback):
@@ -162,17 +162,18 @@ tile); `base_dem="glo30"` (upload panel: *Base terrain*; CLI: `--base-dem glo30`
 GLO-30 instead. Where SRTM has no coverage (beyond 60 N / 56 S) or cannot be read, the upload falls
 back to GLO-30 and says so (`base_dem_fallback`).
 Every GeoTIFF upload is then scored against **both** DEMs (`estimate.dem_agreement`): the DSM
-averaged over each 30 m cell against that DEM, which is how GeoTIFF output is scored. The base DEM
-matches to about 1 m by construction; the other shows the gap a score against it would carry.
+averaged over each 30 m cell against that DEM, which is how GeoTIFF output is scored. The cell-mean composition matches the base before the bare-earth floor, bridge additions and
+GCP corrections. Those changes can increase the cell error (the current city upload has 3.77 m
+cell RMSE on SRTM). The other DEM shows the gap a score against it would carry.
 
 The **3D view's terrain** is a separate, display-only bare-earth estimate. It is chosen by the
 predicted building share, following a rule measured against USGS LiDAR bare earth on four scenes:
 
 | Predicted building share | Bare-earth method for the view |
 |---|---|
-| ≥ 40 % | grey morphological opening of GLO-30, 300 m |
+| ≥ 40 % | grey morphological opening of the selected base DEM, 300 m |
 | ≥ 10 % | the same opening, 150 m (keeps hills) |
-| < 10 % | GLO-30 minus the model's heights |
+| < 10 % | Selected base DEM minus the model's heights |
 
 **Bridges** (`viewer/bridges.py`, GeoTIFF input). The height model reads bridge decks as ground
 (downtown Pittsburgh: 7.6 m LiDAR decks read as 0.1 m), and the land-cover map calls two thirds
@@ -183,11 +184,11 @@ ways tagged `bridge=*`:
   offline. No answer means no bridges, never a failed upload.
 - **Deck**: width from the `width` tag, else lanes × 3.5 m + 1.5 m, else a default per road
   type. Ways that share an end node are one structure, and its open ends are where it lands.
-  Each deck pixel takes the inverse-distance blend of the raw GLO-30 elevation at those ends;
+  Each deck pixel takes the inverse-distance blend of the selected raw base DEM at those ends;
   where decks cross, the higher one is the visible surface.
 - **Use**: laid over the finished DSM, and its height above the bare earth goes into the nDSM.
 - **Measured** on 47,800 m² of deck in downtown Pittsburgh (`scripts/fetch_naip_scene.py`) against
-  3DEP LiDAR: deck RMSE 16.6 m (bias −12.7) → 9.0 m (bias −5.9); the whole scene 25.34 → 25.19 m.
+  3DEP LiDAR with the GLO-30 base: deck RMSE 16.6 m (bias −12.7) → 9.0 m (bias −5.9); the whole scene 25.34 → 25.19 m.
   Raw GLO-30 at the ends beat the LiDAR ground at the ends (11.2 m): OSM bridge ways often stop
   where a raised approach continues. Adding the decks before the DEM-consistent step instead
   let the cell means pull them back toward the water (13.4 m). The remaining low bias is the
@@ -200,7 +201,8 @@ the 150/300 m openings read the crest 3.2/5.6 m low and raw GLO-30 1.95 m low. W
 mapped line (feathered over 20 m) the ground keeps raw GLO-30: crest RMSE 3.33/5.64 → 1.97 m, the
 whole corridor 2.13/3.75 → 1.53/1.62 m, the other 97 % of the scene unchanged. The DSM's floor
 rises with it. Each line's crest elevation (median raw GLO-30 along it) is reported in
-`flood_defences` and drawn in 3D as a cyan band.
+`flood_defences` and drawn in 3D as a cyan band. Those measurements used GLO-30;
+the current pipeline preserves and samples the selected base DEM, including SRTM.
 
 ### 4.4 Ground control points (optional)
 `read_gcps` parses a CSV of lon, lat, height. A header row may name the columns in any order;
@@ -300,8 +302,8 @@ the 40 GAMUS val tiles (`viewer/dsm_eval.py`, one pass).
   | GAMUS val | 2.57 m | 2.40 m |
 
   In that historical run, tallest objects rose to 104 m in the city and 40 m in the hills. The
-  city's overall nDSM was 0.3 m worse; the hills improved (3.68 → 3.47 m). These exact external
-  scene numbers have not been rerun with 75%, so they are not presented as current 25/75 metrics.
+  city's overall nDSM was 0.3 m worse; the hills improved (3.68 → 3.47 m). These are historical building-specific and tower-percentile figures; the current 25/75
+  all-pixel external rerun is reported separately in §9.2.
 - **Meta CHMv2** (DINOv3 satellite backbone, March 2026; `facebook/dinov3-vitl16-chmv2-dpt-head`,
   or its byte-identical public mirror `WEO-SAS/chm-meta-v2`; DINOv3 licence) reads forest canopy
   better than our model: tree-pixel RMSE 18.1 → 13.0 m, bias −15 → −7 m. It is worse on
@@ -319,7 +321,7 @@ The DSM's forest rule (§4.3) is independent of CHMv2 and applies even without i
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/estimate` | The main path. Multipart: `file` (PNG/JPG/TIFF, ≤ 200 MB), optional `gsd` (m/px, 0.01–100), `reference` (height map: `.tif`/`.png`/GAMUS `.h5`), `gcps` (CSV), `job` (progress id), `tta` (bool), `base_dem` (`glo30`/`srtm`). Runs in a thread pool so the event loop keeps answering progress polls. Uploads run **one at a time** (`_ESTIMATE_LOCK`): the models are shared and v2/CHMv2 move between GPU and CPU in place, so overlapping uploads used to crash each other; a queued upload reports "Waiting for another upload to finish" |
+| `POST /api/estimate` | The main path. Multipart: `file` (PNG/JPG/TIFF, ≤ 200 MB), optional `gsd` (m/px, 0.01–100), `reference` (height map: `.tif`/`.png`/GAMUS `.h5`), `reference_kind` (`ndsm`/`dsm`/`auto`, API default `auto`), `gcps` (CSV), `job` (progress id), `tta` (bool), `base_dem` (`srtm` default / `glo30`). Runs in a thread pool so the event loop keeps answering progress polls. Uploads run **one at a time** (`_ESTIMATE_LOCK`): the models are shared and v2/CHMv2 move between GPU and CPU in place, so overlapping uploads used to crash each other; a queued upload reports "Waiting for another upload to finish" |
 | `GET /api/progress/{job}` | `{stage, progress}` while an estimate runs; the UI polls it every 400 ms |
 | `GET /api/health` | Liveness |
 | `POST /api/upload`, `POST /api/classify-static`, `GET/DELETE /api/uploads` | Legacy paths (DA3 depth, static land-cover preview) used by the old dashboards |
@@ -332,7 +334,7 @@ order: `ALTIMAP_HEIGHT_CKPT`, then `viewer/cache/best.pth`, then the stock RS3DA
 - **Record**: pixel size (and whether it was assumed), shape, nDSM max/p99, DSM range,
   `base_dem` and datum, `dsm_error`, `gcp` (points used, model, errors), `dem_agreement` (30 m
   cell and per-pixel RMSE/bias/r against GLO-30 and SRTM, `null` for one that couldn't be read),
-  timing, checkpoint, class pixel counts. Form field `base_dem`: `glo30` (default) or `srtm`.
+  timing, checkpoint, class pixel counts. Form field `base_dem`: `srtm` (default) or `glo30`.
 - **Previews** (≤ 1024 px, data URIs): RGB, linear 8-bit height (`pixel/255 × max_m`), classes.
 - **`grids`**: nDSM, ground and DSM as **16-bit** values on the viewer's 1025×1025 mesh grid
   (`geo.encode_grid16`, value = lo + u16/65535 × span). 8-bit previews step 0.1–0.3 m, which
@@ -427,13 +429,29 @@ Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `st
 - **Orbit**; **fly** with WASD/QE; **waypoint routes** that play as flythroughs.
 - **Walk**: first person at 1.7 m on the ground (under canopy in Exact mode). WASD at 6 m/s,
   Shift ×4, drag to look; building cells block and you slide along walls.
-- **Probe** (Measure + double-click): height above ground, elevation (EGM2008) and slope. A
+- **Probe** (Measure + double-click): height above ground, elevation (EGM96 on SRTM, EGM2008 on GLO-30) and slope. A
   second double-click draws the **A→B height profile** with its length.
 - **Building card** (click a building): height, ~floors (3.2 m each), footprint m², volume m³,
   roof elevation.
 - **GLB export** of the whole scene, in metres.
 
-### 7.4 Upload and validation panel
+### 7.4 Workstation and inspector tabs
+
+The docked workstation uses bundled Barlow fonts, graphite/amber controls, light/dark themes,
+and five keyboard-navigable tabs. Arrow keys, Home and End move between tabs. On narrow screens
+(< 1001 px), the viewport sits above the scrollable inspector; stationary scenes redraw on resize.
+
+| Tab | Controls and results |
+|---|---|
+| Image | Upload or GAMUS reference scenes; GSD, reference type, GCP file, quality, base DEM; progress and raster/GeoJSON downloads |
+| View | City model / Exact DSM, layers, contours, vertical exaggeration and coverage |
+| Measure | Height probe, A→B profile, PNG scale reprocessing and waypoint routes |
+| Accuracy | RMSE/MAE/correlation, scatter, class errors, DEM agreement and GCP outcome |
+| Context | OpenStreetMap bridges, flood defences and facilities, with empty/error messages |
+
+**Open image** and **Export** are in the top bar. Uploads start at 1× vertical scale. The
+OpenStreetMap results belong to the current upload; selecting a catalog scene clears them.
+
 - **Inputs**: image, optional pixel size, optional reference heights, optional GCP CSV, quality
   (High = 4-flip TTA, Fast = one pass), base terrain for GeoTIFFs (Copernicus or SRTM).
 - **Progress**: a staged progress bar.
@@ -589,8 +607,10 @@ edges are indistinguishable.
 
 ### 9.6 India: Sikkim, Maxar WorldView-2/3 (`viewer/dem_check.py`)
 
-Three 1.2 km scenes, 0.37–0.49 m, 13–26° off-nadir, from `scripts/fetch_india_samples.py`. There is
-no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
+Historical GLO-30-base checks on three 1.2 km scenes, 0.37–0.49 m, 13–26° off-nadir, from `scripts/fetch_india_samples.py`. There is
+no Indian LiDAR in this check, so the DSM is compared with the two public DEMs. These historical
+SRTM comparisons used NASADEM; the current reader is SRTM GL1, so these figures are not a
+rerun of the present SRTM route:
 
 | Scene | vs Copernicus GLO-30, 30 m cells | vs SRTM (NASADEM), 30 m cells |
 |---|---|---|
@@ -611,13 +631,14 @@ no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
 ## 10. Known limits
 
 - **Very tall structures** were still low in the historical 50/50 external run: 104 m against
-  151 m. v2 reached 145 m but over-read other land cover. The 25/75 route should help, but the
-  external scene must be rerun before claiming a new tower value (§5).
+  151 m. v2 reached 145 m but over-read other land cover. The 25/75 external scene has now
+  been rerun (§9.2), with city nDSM RMSE 31.58 m.
+  Its tower percentile was not remeasured, so no new tower-height value is claimed.
 - **Forest canopy** still reads ~11 m low after CHMv2. The forest DSM stays 0.2 m worse than GLO-30
   alone, since GLO-30 already holds the canopy surface.
-- **Coarse imagery** (≳ 2 m): object heights fade and the DSM falls back to GLO-30 (§9.3). GLO-30
-  is itself only 30 m, so the absolute level can't be better than that without GCPs or a finer
-  DEM.
+- **Coarse imagery** (≳ 2 m): object heights fade and the model adds little detail to the selected base DEM
+  (historical GLO-30 sweep in §9.3). The 30 m base limits terrain detail and absolute-level accuracy; GCPs can correct an offset,
+  while a finer reference DEM is needed for finer terrain detail.
 - **Base DEM**: the DSM follows SRTM by default (the brief's example DEM) and GLO-30 on request
   (§4.3). Over the Himalaya the two differ by 5–14 m (§9.6), and only the chosen one is matched,
   so a score against the other would carry that gap.

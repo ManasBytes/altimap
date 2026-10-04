@@ -12,7 +12,7 @@ All elevation outputs are float32 Cloud-Optimized GeoTIFFs in metres, NaN nodata
 (GSD, vertical datum, height range, DEM source).
 
 Docs: **[SETUP.md](SETUP.md)** (install and run), **[ARCHITECTURE.md](ARCHITECTURE.md)** (how every
-part works, data formats, API, models, measured results and limits), [model card](https://huggingface.co/Dilavesh/altimap-height).
+part works, data formats, API, models, measured results and limits), [model card](docs/model-card.md), and [demo video script](docs/DEMO_VIDEO_SCRIPT.md).
 
 ## How it works
 
@@ -46,7 +46,7 @@ part works, data formats, API, models, measured results and limits), [model card
    earth. In extensive forest the fine detail is left out (both models place it poorly under closed
    canopy), so the DSM there is the DEM's own surface.
 5. **Terrain in the 3D view.** A bare-earth estimate chosen by scene type (measured against USGS
-   LiDAR on four scenes): a 300 m morphological opening of GLO-30 for dense cities, 150 m for towns
+   LiDAR on four scenes): a 300 m morphological opening of the selected base DEM for dense cities, 150 m for towns
    (keeps hills), model subtraction for forest and farmland. Display only.
 6. **3D city model (display).** From the same prediction, `viewer/city_model.py` builds an LoD1
    city: each building complex cut into roofs where the roof height steps or dips (touching row
@@ -170,8 +170,8 @@ Teammates setting up from scratch: follow **[SETUP.md](SETUP.md)** (every step, 
 downloads, troubleshooting). The short version:
 
 Needs Python 3.12, Node 20+, an NVIDIA GPU (6 GB is enough for inference; CPU works, slowly), and
-internet on first run (DINOv2 model code from GitHub, then cached; GLO-30 ground from Microsoft
-Planetary Computer for GeoTIFF inputs).
+internet for initial model downloads and uncached GeoTIFF context (SRTM from OpenTopography,
+GLO-30 from AWS Open Data with Planetary Computer fallback, and OpenStreetMap queries).
 
 ```bash
 # 1. Python environment

@@ -1,18 +1,50 @@
-# GAMUS Terrain Studio
+# AltiMap viewer
 
-Static frontend prototype for the AltiMap / SlashCompact concept. It uses aligned GAMUS RGB, AGL-height, semantic-class, and height-preview layers extracted from the downloaded HDF5 triplets. The Three.js terrain mesh supports flythrough playback, WASD/QE camera navigation, RGB/Surface/Height/Classes switching, semantic class inspection, 512 × 512 interactive terrain segments, vertical exaggeration, scene switching, waypoint routes, height profile, calibration confidence, slope, and export feedback. The scene browser exposes all 150 aligned GAMUS tiles plus the 15 curated preview tiles.
+React + Three.js frontend for the single-image elevation pipeline. The production build is
+served by `viewer.server` alongside the inference API. See [SETUP.md](../SETUP.md) for Python
+and checkpoint setup, and [ARCHITECTURE.md](../ARCHITECTURE.md) for the data contracts.
 
 ## Run
 
+Requires Node.js 20+ and the inference environment described in SETUP.md.
+
 ```bash
-npm install
-npm run dev
+npm ci
+npm run build
+# From the repository root:
+.venv-da3/bin/python -m viewer.server
 ```
 
-The original 50-per-split source triplets remain in `/home/biplab-dev/GAMUS_50_each`. An additional 15 aligned triplets (45 HDF5 files) are in `/home/biplab-dev/GAMUS_extra_15`. The demo keeps native 1024-pixel JPEG previews in `public/`, including an indexed semantic class render for every tile, so the browser stays responsive while loading dense geometry.
+Open http://127.0.0.1:8000. For frontend development, `npm run dev` starts Vite;
+`vite.config.js` proxies `/api` and `/data-uploads` to the local server on port 8000.
 
-The full-height scene stage uses a compact floating inspector panel. Use the scene switcher in the inspector to move through all available locations; building-rich tiles are grouped at the top. RGB, AGL-height, depth, and semantic-class previews are aligned per tile. The class map is also used during mesh construction: buildings retain a slightly stronger profile, while tree and low-vegetation canopy heights are reduced to keep the terrain proportional. The interactive mesh samples the height grid at 513 × 513 for smooth navigation.
+## Workstation
 
-RGB texture mode and `0.5×` vertical exaggeration are the defaults. The exaggeration control ranges from `0×` (flat) to `3×`. During manual flight, use `W/A/S/D` to move horizontally and `Q/E` to lower or raise the camera. Movement is slow, time-based, and eased; the scene remains draggable with Three.js OrbitControls when no flight key is pressed.
+- **Image:** upload PNG/JPG/GeoTIFF or choose a GAMUS reference scene; set GSD, quality,
+  reference type, GCPs and base DEM. Raster/GeoJSON downloads appear here.
+- **View:** City model / Exact DSM, RGB/Surface/Height/Classes/Slope/Error layers,
+  contours and vertical exaggeration.
+- **Measure:** point height/slope, A→B profiles, PNG scale reprocessing and waypoint routes.
+- **Accuracy:** reference metrics, scatter, per-class errors, DEM agreement and GCP results.
+- **Context:** OpenStreetMap bridges, flood defences and critical facilities for GeoTIFFs.
 
-For a waypoint route, enable **Set points**, click two or more terrain positions, and press **Play**. Click an existing marker to attach Three.js X/Y/Z transform arrows and move it along any axis. The camera follows a smooth Catmull–Rom path through the edited points without rotating the terrain. While the route position advances absolutely along the path, dragging the viewport changes the camera yaw and pitch independently.
+The top bar contains Open image, GLB Export, route playback, fullscreen and theme controls.
+Inspector tabs support arrow keys, Home and End. On mobile, the viewport sits above the
+scrollable inspector. Fonts are bundled locally.
+
+## Navigation and scene data
+
+Orbit by dragging; fly with WASD/QE. Walk follows the ground using WASD and Shift to run.
+In Measure, double-click A and B for a height profile. For a route, enable Set points, click at
+least two terrain positions, then Play; markers can be selected and moved with transform arrows.
+
+Uploads show model estimates at 1× vertical scale. SRTM is the default absolute-elevation base;
+Copernicus is selectable. PNG/JPG without a known GSD use an explicitly reported experimental
+0.33 m/pixel assumption. Select the reference type explicitly: nDSM/AGL is height above ground,
+while DSM is absolute elevation. Auto-detect can misclassify references near sea level.
+
+Catalog images in `public/` are GAMUS LiDAR reference previews, not model predictions. They
+start at 0.5× exaggeration and are labelled accordingly. The mesh uses 1025² vertices on capable
+GPUs or 513² on integrated/software/mobile graphics; `?detail=high|standard` overrides this.
+
+Recording guide: [demo video script](../docs/DEMO_VIDEO_SCRIPT.md).
