@@ -347,8 +347,10 @@ order: `ALTIMAP_HEIGHT_CKPT`, then `viewer/cache/best.pth`, then the stock RS3DA
 - **`validation`** + **`error`** (when a reference is attached):
   - Reference placement: reprojected onto the image grid by coordinates when both are
     georeferenced (`geo.warp_to_grid`), otherwise resampled.
-  - What it's compared with: the absolute DSM or the nDSM, whichever it matches by median
-    distance.
+  - What it's compared with: `reference_kind=ndsm` or `dsm` explicitly selects height
+    above ground or absolute elevation. The viewer defaults to nDSM and exposes the choice
+    beside the reference file. Older API clients default to `auto` (median-distance guess);
+    this can be wrong near sea level. Absolute validation requires an available absolute DSM.
   - Scores: RMSE, MAE, Pearson r, building RMSE, bias, coverage, and RMSE/MAE/bias per
     land-cover class.
   - For the viewer: 1500 scatter pairs, and a signed error map PNG (blue = model low, red =
@@ -491,11 +493,21 @@ All scripts are in `viewer/`, and their numbers are reproducible.
 
 ### 9.2 By landscape, against USGS 3DEP airborne LiDAR (`dsm_eval.py`, one pass, no TTA)
 
+**Current pipeline, rerun 2026-10-04:** the 25/75 building blend, CHMv2 forest routing and
+current DSM rules were scored on all four scenes with both bases. SRTM DSM RMSE is
+38.87 / 4.28 / 6.24 / 7.44 m (city / suburb / hills / forest); GLO-30 DSM RMSE is
+34.36 / 3.62 / 4.75 / 8.75 m. Both improve on DEM alone in the first three scenes;
+forest remains slightly worse. SRTM city correction using eight LiDAR ground points
+reduces held-out-pixel DSM RMSE to 37.18 m; other sites decline correction or lack
+bare-ground points. Full RMSE, MAE, correlation, bias, scope and datum notes are in the
+[current report](docs/evaluation/landscapes-2026-10-04.md) and
+[raw metrics](docs/evaluation/landscapes-2026-10-04.json).
+
+**Historical comparison:**
+
 This table is the historical external benchmark with the former 50/50 building blend. It remains
 domain-gap evidence; do not quote it as a rerun of the current 25/75 route.
 
-| Scene (pixel size) | nDSM RMSE (predict-0 baseline) | nDSM bias | DSM RMSE (GLO-30 alone) | DSM r (GLO-30 alone) |
-|---|---|---|---|---|
 The app's pipeline (v1, v2 on buildings, CHMv2 in forest; §5), with v1 alone in brackets:
 
 | Scene (pixel size) | nDSM RMSE (predict-0 baseline) [v1] | nDSM bias [v1] | DSM RMSE (GLO-30 alone) [v1] | DSM r (GLO-30 alone) |

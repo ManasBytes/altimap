@@ -24,6 +24,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -384,21 +385,18 @@ def _error_png(err: np.ndarray, size: tuple[int, int]) -> tuple[str, float]:
     return _png_data_uri(square(rgb.astype(np.uint8), (90, 90, 90))), float(limit)
 
 
-def _validate(out: dict, ref_path: Path, scene_dir: Path) -> tuple[dict, dict]:
+def _validate(out: dict, ref_path: Path, scene_dir: Path,
+              reference_kind: str = "auto") -> tuple[dict, dict]:
     """Score against a reference: height above ground (vs the nDSM) or an absolute DSM
-    (vs the exported DSM), whichever it matches; plus per-class errors, an error map and
-    a scatter sample for the viewer."""
-    from viewer.height_metrics import class_scores, height_scores
+    (vs the exported DSM), explicitly selected or auto-detected for older clients; plus
+    per-class errors, an error map and a scatter sample for the viewer."""
+    from viewer.height_metrics import class_scores, height_scores, select_reference_kind
     from viewer.height_model import clean_height
 
     ndsm, dsm = out["ndsm"], out["dsm"]
     ref, reprojected = _reference_on_grid(ref_path, scene_dir, ndsm.shape)
     ref = np.where(ref < -1e4, np.nan, ref).astype(np.float32)
-    kind = "ndsm"
-    if dsm is not None:
-        d_dsm = np.nanmedian(np.abs(ref - dsm))
-        d_ndsm = np.nanmedian(np.abs(ref - ndsm))
-        kind = "dsm" if d_dsm < d_ndsm else "ndsm"
+    kind = select_reference_kind(ndsm, dsm, ref, reference_kind)
     if kind == "ndsm":
         ref = clean_height(ref)  # height above ground: drop impossible values
     pred = dsm if kind == "dsm" else ndsm
@@ -443,6 +441,7 @@ def estimate_progress(job: str):
 @app.post("/api/estimate")
 async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Form(None),
                             reference: UploadFile | None = File(None),
+                            reference_kind: Literal["auto", "ndsm", "dsm"] = Form("auto"),
                             gcps: UploadFile | None = File(None),
                             job: str | None = Form(None), tta: bool = Form(True),
                             base_dem: str = Form("srtm")):
@@ -451,8 +450,10 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
     Response keeps the classify-static shape (rgb/height/classes data URIs) so
     the terrain viewer consumes it unchanged, plus metres, GeoTIFF download
     paths, the 3D city model, ground relief for georeferenced input, and -- if a
-    reference height map is attached -- RMSE/MAE/r against it. A `gcps` CSV (lon, lat,
-    height) corrects a GeoTIFF's absolute DSM; `base_dem` ("glo30" or "srtm") picks the public DEM
+    reference height map is attached -- RMSE/MAE/r against it. `reference_kind` selects
+    "ndsm" (above ground), "dsm" (absolute elevation), or "auto" (legacy proximity guess).
+    A `gcps` CSV (lon, lat, height) corrects a GeoTIFF's absolute DSM;
+    `base_dem` ("glo30" or "srtm") picks the public DEM
     it sits on, and the response scores it against both. With a `job` id,
     progress is readable at /api/progress/<job> while this request runs.
     """
@@ -514,7 +515,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
         # Model inference is blocking: run it off the event loop so the server keeps
         # answering progress polls and static files meanwhile.
         payload = await run_in_threadpool(_run_estimate, staged, scene_dir, scene_id, gsd,
-                                          ref_path, report, tta, gcp_points, base_dem)
+                                          ref_path, report, tta, gcp_points, base_dem, reference_kind)
     except HTTPException:
         raise
     except Exception as exc:
@@ -531,7 +532,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
 
 def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | None,
                   ref_path: Path | None, report, tta: bool = True, gcps: list | None = None,
-                  base_dem: str = "srtm") -> dict:
+                  base_dem: str = "srtm", reference_kind: str = "auto") -> dict:
     from viewer.city_model import bridges, city_model
     from viewer.classify import classes_to_rgb
     from viewer.estimate import estimate
@@ -552,7 +553,7 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
     validation, error_view = None, None
     if ref_path is not None:
         report("Scoring against reference", 0.88)
-        validation, error_view = _validate(out, ref_path, scene_dir)
+        validation, error_view = _validate(out, ref_path, scene_dir, reference_kind)
 
     report("Building 3D city model", 0.92)
     record = out["record"]

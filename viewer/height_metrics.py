@@ -15,6 +15,22 @@ HEIGHT_BINS = ((0.0, 2.0), (2.0, 5.0), (5.0, 10.0), (10.0, 20.0),
 HEIGHT_BIN_NAMES = ("0-2m", "2-5m", "5-10m", "10-20m", "20-50m", ">50m")
 
 
+def select_reference_kind(ndsm: np.ndarray, dsm: np.ndarray | None,
+                          reference: np.ndarray, requested: str = "auto") -> str:
+    """Honor the reference datum; retain the proximity heuristic for older clients."""
+    if requested not in {"auto", "ndsm", "dsm"}:
+        raise ValueError("reference_kind must be auto, ndsm or dsm")
+    if requested == "dsm" and dsm is None:
+        raise ValueError("absolute DSM validation needs an image with coordinates and a base DEM")
+    if requested != "auto":
+        return requested
+    if dsm is None:
+        return "ndsm"
+    d_dsm = np.nanmedian(np.abs(reference - dsm))
+    d_ndsm = np.nanmedian(np.abs(reference - ndsm))
+    return "dsm" if d_dsm < d_ndsm else "ndsm"
+
+
 def _summary(pred: np.ndarray, ref: np.ndarray) -> dict:
     """Metrics for already-filtered, finite arrays."""
     if pred.size == 0:

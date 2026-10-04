@@ -1,0 +1,628 @@
+/* AltiMap workstation theme: a survey instrument, not a dashboard. Graphite chrome docked
+   around the viewport; amber (the colour of contour index lines and survey marks) for what
+   you can act on, survey blue for reference and information. Loaded last: it restyles the
+   older sheets rather than replacing them. */
+
+.app {
+  --bg: #161c22;
+  --panel: #1d242c;
+  --raised: #262f39;
+  --rule: #33404c;
+  --ink: #e7ebee;
+  --ink-2: #a3aeb8;
+  --ink-3: #96a2ad;
+  --signal: #f0b13f;
+  --signal-ink: #221704;
+  --info: #5aa9dc;
+  --danger: #ec7a6f;
+  --top-h: 54px;
+  --status-h: 34px;
+  --panel-w: 372px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Barlow", system-ui, sans-serif;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.app.theme-light {
+  --bg: #e9edf0;
+  --panel: #ffffff;
+  --raised: #f2f4f6;
+  --rule: #d5dce2;
+  --ink: #1b232b;
+  --ink-2: #4f5c68;
+  --ink-3: #64717d;
+  --signal: #b97a07;
+  --signal-ink: #ffffff;
+  --info: #1d6aa3;
+  --danger: #b4392e;
+}
+/* One family everywhere: the older sheets set IBM Plex Mono on small labels, which was never
+   loaded and fell back to whatever monospace the system had. */
+.app *:not(svg):not(svg *):not(kbd) {
+  font-family: inherit !important;
+  letter-spacing: normal;
+}
+.app .eyebrow,
+.app .split-list strong {
+  text-transform: none;
+}
+
+/* ---------- Docked layout: title bar, viewport, inspector, status bar ---------- */
+.app .workspace .viewport-card {
+  inset: var(--top-h) var(--panel-w) var(--status-h) 0;
+  width: auto;
+  height: auto;
+  background: var(--bg);
+}
+.app,
+.app .workspace {
+  min-height: 100dvh;
+}
+.app .workspace {
+  height: 100dvh;
+}
+.app .canvas-wrap {
+  background: var(--bg);
+}
+.app .workspace .viewport-top {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--top-h);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 14px 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  background: var(--panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.app .brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-right: 18px;
+  border-right: 1px solid var(--rule);
+  font-family: "Barlow Condensed", "Barlow", sans-serif !important;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.app .brand-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+.app .scene-title {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+  flex: 1;
+}
+.app .scene-title strong {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 36%;
+}
+.app .scene-facts {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.app .scene-facts span {
+  padding: 2px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 99px;
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.app .view-actions {
+  gap: 6px;
+  flex-shrink: 0;
+}
+.app .view-actions button {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.app .view-actions button:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+.app .view-actions .primary-action {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: var(--signal-ink);
+  font-weight: 600;
+}
+.app .view-actions .primary-action:hover {
+  color: var(--signal-ink);
+  filter: brightness(1.06);
+}
+
+.app .workspace .inspector {
+  position: fixed;
+  top: var(--top-h);
+  right: 0;
+  bottom: var(--status-h);
+  width: var(--panel-w);
+  padding: 0 0 24px;
+  border: 0;
+  border-left: 1px solid var(--rule);
+  border-radius: 0;
+  background: var(--panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+.app .workspace .viewport-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--status-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--ink-2);
+  font-size: 12px;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Overlays now sit inside the viewport instead of under floating bars. */
+.app .canvas-badge {
+  top: 12px;
+  left: 12px;
+  border-radius: 5px;
+  border: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.app .flight-help {
+  left: 12px;
+  bottom: 12px;
+  font-size: 12px;
+}
+.app .walk-toggle {
+  bottom: 12px;
+}
+.app .building-card {
+  right: 12px;
+  top: 12px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  color: var(--ink);
+}
+.app .building-card dt {
+  color: var(--ink-2);
+}
+.app .empty-viewport {
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.app .empty-viewport strong {
+  color: var(--ink);
+  font-size: 18px;
+}
+.app .empty-viewport button {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: var(--signal-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.app .profile-values,
+.app .profile-values strong,
+.app .range-labels,
+.app .waypoint-panel p,
+.app .class-breakdown-row span {
+  color: var(--ink-2);
+}
+.app .validation-note {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.app .class-errors {
+  color: var(--ink);
+  font-size: 12px;
+}
+.app .class-errors th {
+  color: var(--ink-2);
+}
+.app .class-errors th,
+.app .class-errors td {
+  border-color: var(--rule);
+  padding: 6px 2px;
+}
+.app .scatter .scatter-frame {
+  fill: var(--bg);
+  stroke: var(--rule);
+}
+.app .scatter circle {
+  fill: var(--info);
+  opacity: 0.6;
+}
+.app .scatter text {
+  fill: var(--ink-2);
+}
+.app .scatter .scatter-diag {
+  stroke: var(--signal);
+}
+.app .scene-switcher select,
+.app .reference-kind select,
+.app .photo-nav button,
+.app .split-list button {
+  background: var(--bg);
+  border-color: var(--rule);
+  color: var(--ink);
+}
+.app .reference-kind select {
+  width: 100%;
+  min-height: 36px;
+  margin: 4px 0 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+.app button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.app .measure-hint {
+  left: 12px;
+  right: calc(var(--panel-w) + 12px);
+  bottom: calc(var(--status-h) + 52px);
+  max-width: none;
+  background: var(--panel);
+  border-color: var(--rule);
+  color: var(--ink);
+}
+
+/* ---------- Inspector: tabs and sections ---------- */
+.app .inspector-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+}
+.app .inspector-tabs button {
+  position: relative;
+  flex: 1;
+  height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--ink-3);
+  font-size: 14px;
+  font-weight: 500;
+}
+.app .inspector-tabs button:hover {
+  color: var(--ink);
+}
+.app .inspector-tabs button.selected {
+  color: var(--ink);
+  border-bottom-color: var(--signal);
+}
+.app .tab-dot {
+  position: absolute;
+  top: 11px;
+  margin-left: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--info);
+}
+.app .tab-panel {
+  padding: 4px 16px 0;
+}
+.app .tab-empty {
+  margin: 22px 2px;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.app .source-switch {
+  margin: 14px 0 4px;
+}
+.app .inspector .control-section {
+  padding: 16px 0;
+  border-top: 1px solid var(--rule);
+}
+.app .inspector .tab-panel > .control-section:first-of-type,
+.app .inspector .source-switch + .control-section {
+  border-top: 0;
+}
+.app .inspector label,
+.app .inspector .label-row label {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.app .inspector .label-row span {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.app .inspector small,
+.app .upload-options small,
+.app .quality-row small {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.app .upload-copy {
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Segmented controls: neutral; the selected segment is raised, not coloured. */
+.app .segmented {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  padding: 3px;
+  gap: 3px;
+}
+.app .segmented button,
+.app .quality-row .segmented button {
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 10px;
+}
+.app .segmented button.selected,
+.app .quality-row .segmented button.selected {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+.app .segmented button:disabled {
+  opacity: 0.4;
+}
+
+/* Stats read as instrument readouts: big condensed figures, no boxes. */
+.app .inspector .metric-grid {
+  gap: 0;
+  margin: 8px 0 14px;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.app .inspector .metric-grid > div {
+  padding: 10px 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.app .inspector .metric-grid > div:nth-child(odd) {
+  padding-right: 12px;
+  border-right: 1px solid var(--rule);
+}
+.app .inspector .metric-grid > div:nth-child(even) {
+  padding-left: 14px;
+}
+.app .inspector .metric-grid > div:nth-child(n + 3) {
+  border-top: 1px solid var(--rule);
+}
+.app .inspector .metric-grid strong {
+  margin: 4px 0 2px;
+  font-family: "Barlow Condensed", "Barlow", sans-serif !important;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.05;
+  color: var(--ink);
+}
+.app .inspector .metric-grid em,
+.app .inspector .metric-grid em.neutral {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+/* Results: each a short block with a rule on the left, not a card. */
+.app .gcp-result,
+.app .models-line {
+  margin: 12px 0;
+  padding: 2px 0 2px 12px;
+  border: 0;
+  border-left: 2px solid var(--rule);
+  border-radius: 0;
+  background: none;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.app .gcp-result > div {
+  color: var(--ink);
+}
+.app .upload-error {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 0;
+  border-left: 2px solid var(--danger);
+  border-radius: 0 5px 5px 0;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+/* The drop zone is the start of everything: generous, quiet until hovered. */
+.app .upload-dropzone {
+  min-height: 104px;
+  margin: 14px 0 6px;
+  border: 1.5px dashed var(--rule);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.app .upload-dropzone:hover:not(:disabled) {
+  border-color: var(--signal);
+  color: var(--ink);
+}
+.app .progress-fill {
+  background: var(--signal);
+}
+.app .upload-options input[type="number"],
+.app .scale-row input {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  border-radius: 6px;
+}
+.app .upload-reference {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.app .download-row a {
+  display: block;
+  margin: 6px 0;
+  padding: 9px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  color: var(--info);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.app .download-row a:hover {
+  border-color: var(--info);
+}
+
+/* Tools */
+.app .tool-row button,
+.app .waypoint-actions button,
+.app .scale-row button {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.app .tool-row button.tool-active,
+.app .waypoint-actions button.tool-active {
+  background: color-mix(in srgb, var(--signal) 18%, transparent);
+  border-color: var(--signal);
+  color: var(--ink);
+}
+.app input[type="range"] {
+  accent-color: var(--signal);
+}
+.app .sparkline {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.app .toast {
+  background: var(--ink);
+  color: var(--panel);
+  font-size: 13px;
+}
+.app :focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+/* ---------- Narrow screens: viewport on top, inspector below ---------- */
+@media (max-width: 1000px) {
+  .app {
+    --panel-w: 0px;
+  }
+  .app .workspace .viewport-card {
+    inset: var(--top-h) 0 46vh 0;
+  }
+  .app .workspace .inspector {
+    top: auto;
+    left: 0;
+    width: auto;
+    height: 46vh;
+    bottom: 0;
+    border-left: 0;
+    border-top: 1px solid var(--rule);
+    max-height: none;
+  }
+  .app .workspace .viewport-footer {
+    display: none;
+  }
+  .app .scene-facts,
+  .app .brand {
+    display: none;
+  }
+  .app .scene-title strong {
+    max-width: 100%;
+  }
+  .app .measure-hint {
+    right: 12px;
+    bottom: calc(46vh + 44px);
+  }
+}
+@media (max-width: 640px) {
+  .app {
+    --top-h: 96px;
+  }
+  .app .workspace .viewport-top {
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+  .app .scene-title {
+    flex-basis: 100%;
+  }
+  .app .view-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .app .view-actions button {
+    padding: 0 6px;
+    font-size: 12px;
+  }
+  .app .flight-help {
+    max-width: calc(100% - 24px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

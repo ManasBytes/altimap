@@ -1,0 +1,331 @@
+{
+  "date": "2026-10-04",
+  "pipeline_commit": "de3b9e5",
+  "pipeline": "v1 + 75% v2 on building pixels; CHMv2 in extensive forest; DEM-consistent absolute DSM",
+  "tta": false,
+  "scope": "All valid pixels on each scene grid; GCP scores exclude the eight calibration pixels.",
+  "reference": "USGS 3DEP DSM; 3DEP LiDAR DTM/HAG where available, otherwise 3DEP seamless DTM and DSM minus DTM. NAVD88 reference vs EGM96 (SRTM) or EGM2008 (GLO-30); residual datum differences retained.",
+  "results": [
+    {
+      "scene": "naip_philadelphia_cityhall.tif",
+      "landscape": "dense city",
+      "gsd_m": 0.3,
+      "base_dem": "srtm",
+      "dtm_source": "3dep-seamless",
+      "ndsm": {
+        "rmse": 31.57688661771338,
+        "mae": 17.61678760609969,
+        "bias": 1.5934696563998987,
+        "r": 0.5539127604126298
+      },
+      "ndsm_zero": {
+        "rmse": 42.347410697294364,
+        "mae": 21.898724381602733,
+        "bias": -21.898724381602733,
+        "r": null
+      },
+      "dsm": {
+        "rmse": 38.86863711110435,
+        "mae": 30.410123825628943,
+        "bias": 11.347957598284665,
+        "r": 0.2428398842838829
+      },
+      "dem_only": {
+        "rmse": 40.5648429778087,
+        "mae": 32.18518672491655,
+        "bias": 10.180880040096326,
+        "r": 0.10667735263504931
+      },
+      "gcp8": {
+        "model": "offset",
+        "before": {
+          "rmse": 38.86860858332716,
+          "mae": 30.410092556676048,
+          "bias": 11.347784929162517,
+          "r": 0.24284179722379023
+        },
+        "after": {
+          "rmse": 37.178858056282095,
+          "mae": 26.182138720296578,
+          "bias": -0.5205684329453298,
+          "r": 0.24284179784192675
+        }
+      }
+    },
+    {
+      "scene": "naip_dc_suburbs_chevychase.tif",
+      "landscape": "suburb (sparse)",
+      "gsd_m": 0.6,
+      "base_dem": "srtm",
+      "dtm_source": "3dep-seamless",
+      "ndsm": {
+        "rmse": 4.4745526690754875,
+        "mae": 3.212910195317256,
+        "bias": 1.4206636331026168,
+        "r": 0.6124807316005902
+      },
+      "ndsm_zero": {
+        "rmse": 6.480949758993333,
+        "mae": 4.9062319534394305,
+        "bias": -4.9062319534394305,
+        "r": null
+      },
+      "dsm": {
+        "rmse": 4.284465648231919,
+        "mae": 3.3460623114552512,
+        "bias": 0.7610646242051613,
+        "r": 0.7744140241467642
+      },
+      "dem_only": {
+        "rmse": 4.707565360143067,
+        "mae": 3.7132750699157224,
+        "bias": -0.27546565188202743,
+        "r": 0.7059823334882102
+      },
+      "gcp8": {
+        "model": "none",
+        "before": {
+          "rmse": 4.284466957516645,
+          "mae": 3.34606206050722,
+          "bias": 0.7610612632300843,
+          "r": 0.774414046009654
+        },
+        "after": null
+      }
+    },
+    {
+      "scene": "naip_pittsburgh_hills.tif",
+      "landscape": "hilly town",
+      "gsd_m": 0.6,
+      "base_dem": "srtm",
+      "dtm_source": "3dep-seamless",
+      "ndsm": {
+        "rmse": 3.5467972035787345,
+        "mae": 1.6635613920431789,
+        "bias": -0.14430554535094203,
+        "r": 0.781986456220108
+      },
+      "ndsm_zero": {
+        "rmse": 6.48344691566377,
+        "mae": 3.4746857607415786,
+        "bias": -3.4746857607415786,
+        "r": null
+      },
+      "dsm": {
+        "rmse": 6.2394048424159605,
+        "mae": 4.620597743965986,
+        "bias": -3.45264760619244,
+        "r": 0.9170062327531058
+      },
+      "dem_only": {
+        "rmse": 7.256790594832992,
+        "mae": 5.373407393192682,
+        "bias": -4.099633412123073,
+        "r": 0.8890157412605025
+      },
+      "gcp8": {
+        "model": "none",
+        "before": {
+          "rmse": 6.2394097645292215,
+          "mae": 4.620602228974379,
+          "bias": -3.4526586990759816,
+          "r": 0.9170062395575488
+        },
+        "after": null
+      }
+    },
+    {
+      "scene": "naip_smoky_mountains_forest.tif",
+      "landscape": "forest",
+      "gsd_m": 0.6,
+      "base_dem": "srtm",
+      "dtm_source": "3dep-lidar",
+      "ndsm": {
+        "rmse": 15.67255114113364,
+        "mae": 12.938927198114717,
+        "bias": -10.751504076045668,
+        "r": 0.36208182539405365
+      },
+      "ndsm_zero": {
+        "rmse": 24.661511129823694,
+        "mae": 22.762692671820275,
+        "bias": -22.762692671820275,
+        "r": null
+      },
+      "dsm": {
+        "rmse": 7.438840741560898,
+        "mae": 5.869067415085738,
+        "bias": 3.723787806040491,
+        "r": 0.9925917061308159
+      },
+      "dem_only": {
+        "rmse": 7.128526545758477,
+        "mae": 5.549419828632381,
+        "bias": 3.738201732194284,
+        "r": 0.9934081241344325
+      },
+      "gcp8": {
+        "model": null,
+        "note": "only 0 bare-ground LiDAR pixels (closed canopy)"
+      }
+    },
+    {
+      "scene": "naip_philadelphia_cityhall.tif",
+      "landscape": "dense city",
+      "gsd_m": 0.3,
+      "base_dem": "glo30",
+      "dtm_source": "3dep-seamless",
+      "ndsm": {
+        "rmse": 31.57688661771338,
+        "mae": 17.61678760609969,
+        "bias": 1.5934696563998987,
+        "r": 0.5539127604126298
+      },
+      "ndsm_zero": {
+        "rmse": 42.347410697294364,
+        "mae": 21.898724381602733,
+        "bias": -21.898724381602733,
+        "r": null
+      },
+      "dsm": {
+        "rmse": 34.36490735123574,
+        "mae": 21.586529009060996,
+        "bias": -7.584079488961379,
+        "r": 0.3907426582987238
+      },
+      "dem_only": {
+        "rmse": 36.26256509056192,
+        "mae": 22.985209237738445,
+        "bias": -8.930444000352281,
+        "r": 0.27180539044452273
+      },
+      "gcp8": {
+        "model": "none",
+        "before": {
+          "rmse": 34.365000242709606,
+          "mae": 21.586603623647854,
+          "bias": -7.584220043723174,
+          "r": 0.3907434899877337
+        },
+        "after": null
+      }
+    },
+    {
+      "scene": "naip_dc_suburbs_chevychase.tif",
+      "landscape": "suburb (sparse)",
+      "gsd_m": 0.6,
+      "base_dem": "glo30",
+      "dtm_source": "3dep-seamless",
+      "ndsm": {
+        "rmse": 4.4745526690754875,
+        "mae": 3.212910195317256,
+        "bias": 1.4206636331026168,
+        "r": 0.6124807316005902
+      },
+      "ndsm_zero": {
+        "rmse": 6.480949758993333,
+        "mae": 4.9062319534394305,
+        "bias": -4.9062319534394305,
+        "r": null
+      },
+      "dsm": {
+        "rmse": 3.6172037457324504,
+        "mae": 2.788642895351038,
+        "bias": 0.3243852446750615,
+        "r": 0.8350680577114037
+      },
+      "dem_only": {
+        "rmse": 4.017603448563595,
+        "mae": 3.0876591555423696,
+        "bias": -0.7866957740063496,
+        "r": 0.7963573741554951
+      },
+      "gcp8": {
+        "model": "none",
+        "before": {
+          "rmse": 3.6172040696896497,
+          "mae": 2.7886424848907994,
+          "bias": 0.3243797563506498,
+          "r": 0.8350681759740876
+        },
+        "after": null
+      }
+    },
+    {
+      "scene": "naip_pittsburgh_hills.tif",
+      "landscape": "hilly town",
+      "gsd_m": 0.6,
+      "base_dem": "glo30",
+      "dtm_source": "3dep-seamless",
+      "ndsm": {
+        "rmse": 3.5449935071493486,
+        "mae": 1.663288578414549,
+        "bias": -0.14772073992795967,
+        "r": 0.7822994218009979
+      },
+      "ndsm_zero": {
+        "rmse": 6.48344691566377,
+        "mae": 3.4746857607415786,
+        "bias": -3.4746857607415786,
+        "r": null
+      },
+      "dsm": {
+        "rmse": 4.746683735654204,
+        "mae": 2.946753086523904,
+        "bias": -1.7664425341257781,
+        "r": 0.9408333162371584
+      },
+      "dem_only": {
+        "rmse": 5.532323225877639,
+        "mae": 3.5863345466419605,
+        "bias": -2.3953258872695984,
+        "r": 0.92344524733604
+      },
+      "gcp8": {
+        "model": "none",
+        "before": {
+          "rmse": 4.746684596672621,
+          "mae": 2.9467527956196258,
+          "bias": -1.7664520698086756,
+          "r": 0.9408333858174103
+        },
+        "after": null
+      }
+    },
+    {
+      "scene": "naip_smoky_mountains_forest.tif",
+      "landscape": "forest",
+      "gsd_m": 0.6,
+      "base_dem": "glo30",
+      "dtm_source": "3dep-lidar",
+      "ndsm": {
+        "rmse": 15.67255114113364,
+        "mae": 12.938927198114717,
+        "bias": -10.751504076045668,
+        "r": 0.36208182539405365
+      },
+      "ndsm_zero": {
+        "rmse": 24.661511129823694,
+        "mae": 22.762692671820275,
+        "bias": -22.762692671820275,
+        "r": null
+      },
+      "dsm": {
+        "rmse": 8.746969024352152,
+        "mae": 6.8377860625623725,
+        "bias": 5.554514982592082,
+        "r": 0.9920998028637844
+      },
+      "dem_only": {
+        "rmse": 8.530680195389108,
+        "mae": 6.553467825855478,
+        "bias": 5.57637146905472,
+        "r": 0.9927333275198399
+      },
+      "gcp8": {
+        "model": null,
+        "note": "only 0 bare-ground LiDAR pixels (closed canopy)"
+      }
+    }
+  ]
+}

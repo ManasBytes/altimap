@@ -69,7 +69,9 @@ part works, data formats, API, models, measured results and limits), [model card
    - GeoTIFF downloads;
    - validation against an optional reference height map (RMSE/MAE/correlation, bias, per-class
      errors, scatter plot).
-   Drop an image anywhere on the view or use Import; a live progress bar shows each processing stage,
+   Use the **Image** tab to upload or choose sample scenes, **View** for layers and scale,
+   **Measure** for profiles and routes, **Accuracy** for validation, and **Context** for mapped facilities.
+   Drop an image anywhere on the view or use **Open image**; a live progress bar shows each processing stage,
    and *Quality: Fast* skips the 4-flip averaging (~4× quicker). Click a building for its height,
    estimated floors, footprint area and roof elevation; *Export* saves the current 3D model as a
    `.glb` in metres (opens in Blender and other 3D tools). For PNG/JPG, a scale tool turns one
@@ -127,35 +129,28 @@ split used for checkpoint selection covered DC and Philadelphia only.
 
 ## Results by landscape (USGS 3DEP airborne LiDAR)
 
-Four NAIP scenes covering the brief's landscape types, scored as the app produces them
-(`python -m viewer.dsm_eval`, one pass without flip averaging). *DSM* is the exported absolute
-DSM; *GLO-30 alone* is what you'd get with no model at all. This table is the historical external
-run with the former 50/50 building blend. It remains useful domain-gap evidence but has not been
-rerun for the current 25/75 blend.
+The current 25/75 building-fusion pipeline was rerun on 2026-10-04 on four NAIP
+scenes against USGS 3DEP (`viewer.dsm_eval`, single pass, no flip averaging).
+All figures below are all-valid-pixel errors in metres; parentheses show the
+same base DEM alone. SRTM remains the default requested by the brief.
 
-| Scene (pixel size) | nDSM RMSE (predict 0) | nDSM bias | DSM RMSE (GLO-30 alone) | DSM r (GLO-30 alone) |
-|---|---|---|---|---|
-| Dense city, Philadelphia (0.3 m) | 30.1 m (42.4) | −1.2 m | 35.0 m (36.3) | 0.376 (0.272) |
-| Suburb, Chevy Chase (0.6 m) | 4.5 m (6.5) | +1.4 m | 3.97 m (4.02) | 0.820 (0.796) |
-| Hilly town, Pittsburgh (0.6 m) | 3.5 m (6.5) | −0.4 m | 5.02 m (5.53) | 0.941 (0.923) |
-| Forest, Smoky Mountains (0.6 m) | 15.7 m (24.7) | −10.8 m | 8.75 m (8.53) | 0.992 (0.993) |
+| Scene (pixel size) | nDSM RMSE (predict 0) | SRTM DSM RMSE (DEM alone) | GLO-30 DSM RMSE (DEM alone) |
+|---|---|---|---|
+| Dense city, Philadelphia (0.3 m) | 31.58 (42.35) | 38.87 (40.56) | 34.36 (36.26) |
+| Suburb, Chevy Chase (0.6 m) | 4.47 (6.48) | 4.28 (4.71) | 3.62 (4.02) |
+| Hilly town, Pittsburgh (0.6 m) | 3.55 (6.48) | 6.24 (7.26) | 4.75 (5.53) |
+| Forest, Smoky Mountains (0.6 m) | 15.67 (24.66) | 7.44 (7.13) | 8.75 (8.53) |
 
-- **Where it helps**: the model improves the absolute DSM over Copernicus in the city, suburb and
-  hills, and in the forest it stays within 0.2 m of it.
-- **What that historical three-model run fixed** (vs the first model alone):
-  - the city's tallest objects: 66 m → 104 m (LiDAR 151 m);
-  - forest canopy bias: −15.9 → −10.8 m;
-  - forest DSM: 9.03 → 8.75 m.
+The model improves absolute DSM error in the city, suburb and hills, while forest
+is slightly worse than the DEM alone. Dense-city errors and a −10.75 m canopy
+bias remain substantial. High forest DSM correlation reflects terrain relief,
+not accurate tree reconstruction. Eight LiDAR ground points reduce SRTM city
+DSM RMSE to 37.18 m on the other pixels.
 
-  Remaining weak spots in that run: very tall towers and forest canopy still read low.
-- **India** (Sikkim, Maxar satellite scenes, `viewer/dem_check.py`): the DSM matches Copernicus
-  to ~1 m. Copernicus itself sits 7–14 m above SRTM in the Himalaya, so the choice of reference
-  DEM matters (ARCHITECTURE.md §9.6).
-- **Resolution** (images block-averaged to 1, 2, 5 and 10 m): object heights hold up to about
-  1–2 m and fade to flat by 5–10 m. Because the export is DEM-consistent, the DSM stays within
-  0.1 m of GLO-30 alone there.
-
-Full breakdown in [ARCHITECTURE.md](ARCHITECTURE.md) §9.
+See the [current report](docs/evaluation/landscapes-2026-10-04.md) for MAE,
+correlation, datum caveats and reproduction commands, and its
+[raw metrics](docs/evaluation/landscapes-2026-10-04.json). Historical comparisons
+and resolution experiments remain in [ARCHITECTURE.md](ARCHITECTURE.md) §9.
 
 ### Current building-fusion evidence
 
@@ -174,7 +169,7 @@ altimap`, then open http://localhost:8000 (SETUP.md has the requirements).
 Teammates setting up from scratch: follow **[SETUP.md](SETUP.md)** (every step, model
 downloads, troubleshooting). The short version:
 
-Needs Python 3.12, Node 18+, an NVIDIA GPU (6 GB is enough for inference; CPU works, slowly), and
+Needs Python 3.12, Node 20+, an NVIDIA GPU (6 GB is enough for inference; CPU works, slowly), and
 internet on first run (DINOv2 model code from GitHub, then cached; GLO-30 ground from Microsoft
 Planetary Computer for GeoTIFF inputs).
 
@@ -227,14 +222,13 @@ Tests (no GPU, no network): `uv pip install -e ".[dev]"`, then `python -m pytest
   Measured on the 0.6 m NAIP scenes
   uploaded as plain PNGs, the wrong assumption moved nDSM RMSE by −0.7 to +1.0 m (better in the
   suburb, worse in the hills and forest). Pass `--gsd` (or fill the UI field) when it's known.
-- **Absolute DSM accuracy is bounded by GLO-30** (30 m posting, ~2–4 m vertical accuracy) for the
-  ground component. Hilly terrain relief comes from the DEM, not the model.
-- **Vertical datum** is orthometric (EGM2008). Comparing against ellipsoidal references needs a
+- **Absolute DSM accuracy depends on the chosen 30 m base DEM** (SRTM by default,
+  or Copernicus GLO-30) for the ground component. Hilly terrain relief comes from the DEM, not the model.
+- **Vertical datum** is orthometric: EGM96 on SRTM, EGM2008 on GLO-30. Comparing against ellipsoidal references needs a
   geoid correction.
 - **Very tall buildings and forest canopy** remained low in the historical 50/50 external run
-  (towers ~104 m where LiDAR says 151 m; canopy ~11 m low). The 25/75 route should improve towers,
-  but that external scene has not been rerun, so no replacement value is claimed
-  (ARCHITECTURE.md §5).
+  (towers ~104 m where LiDAR says 151 m; canopy ~11 m low). The current 25/75 run still has 31.58 m city nDSM RMSE and a −10.75 m canopy bias;
+  the historical tower percentile is not remeasured by the current evaluator.
 - **Large scenes** run tile by tile at full resolution (no seams: ARCHITECTURE.md §9.5). They
   take minutes on a laptop GPU.
 - **Network**: GeoTIFFs need Copernicus GLO-30 (AWS Open Data, with Microsoft Planetary Computer as

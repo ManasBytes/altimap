@@ -149,7 +149,9 @@ The model loads on the first upload.
 (Frontend development: `cd frontend && npm run dev` serves on :5173 and forwards `/api` to the
 server on :8000, see `frontend/vite.config.js`. Rebuild with `npm run build` for step 5.)
 
-Open the app, click **Import** (or drop a file on the viewport):
+Open the app, click **Open image** (or drop a file on the viewport). The **Image** tab
+contains upload options; **View** holds layers and exaggeration, **Measure** holds
+profiles and camera routes, **Accuracy** shows validation, and **Context** lists mapped facilities:
 
 - **PNG / JPG** gives heights above ground (nDSM) and a 3D city model on flat ground. Enter the
   pixel size in metres if you know it. Without one, the app uses an explicitly reported
@@ -158,7 +160,9 @@ Open the app, click **Import** (or drop a file on the viewport):
   its CRS and grid are north-up and square. Rotated/sheared or strongly non-square inputs are
   rejected for absolute DSM export with a warning instead of silently producing wrong geometry.
 - **Add reference heights** (optional): a single-band height map, either height above ground
-  or an absolute DSM (the app works out which). A georeferenced reference is reprojected onto
+  or an absolute DSM. Select **Reference heights represent** to match your file:
+  **Height above ground** for GAMUS AGL/nDSM, **Absolute elevation** for LiDAR DSM.
+  Auto-detect is available, but can guess incorrectly near sea level. A georeferenced reference is reprojected onto
   the image by its coordinates; any other is assumed to cover the same area. The app scores the
   model (RMSE, MAE, correlation, bias, per land-cover class, a scatter plot) and adds an
   **Error** layer showing where the model reads high or low.
@@ -257,5 +261,5 @@ test with TTA, upload to Hugging Face).
 | The app on a VM loads but uploads fail from your laptop | You're on an old build that called `localhost:8000`: `git pull`, `npm run build`, restart the server |
 | CUDA out of memory | Close other GPU apps, stop the server before evaluations, or choose *Fast* quality |
 | Choppy 3D view | Add `?detail=standard` to the address (half the mesh detail) |
-| GeoTIFF upload has no absolute DSM (`dsm_error` in the panel) | The Copernicus DEM couldn't be read (AWS Open Data, then Planetary Computer; each read gives up after 60 s). The nDSM still works; retry when the network is back |
+| GeoTIFF upload has no absolute DSM (`dsm_error` in the panel) | The selected base DEM (SRTM by default or Copernicus GLO-30) could not be read; remote reads time out after 60 s. The nDSM still works; retry when the network is back |
 | First upload is slow | The model loads on the first upload (plus the DINOv2 download on the very first run); later uploads skip both |

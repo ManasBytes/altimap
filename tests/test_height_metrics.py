@@ -107,3 +107,28 @@ def test_class_scores_locate_the_error():
     assert set(rows) == {"ground", "buildings"}
     assert rows["buildings"]["bias"] == -4.0 and rows["buildings"]["rmse"] == 4.0
     assert rows["ground"]["rmse"] == 0.0 and abs(rows["buildings"]["share"] - 50 / 99) < 1e-9
+
+
+def test_explicit_reference_kind_overrides_wrong_near_sea_level_guess():
+    from viewer.height_metrics import height_scores, select_reference_kind
+
+    # The absolute reference is closer to the nDSM because the base DEM is biased.
+    ndsm = np.array([[0, 10], [0, 20]], np.float32)
+    dsm = ndsm + 20
+    reference = ndsm + 5
+    assert select_reference_kind(ndsm, dsm, reference) == "ndsm"
+    assert select_reference_kind(ndsm, dsm, reference, "dsm") == "dsm"
+    assert height_scores(dsm, reference)["rmse"] == 15
+    assert select_reference_kind(ndsm, dsm, reference, "ndsm") == "ndsm"
+    assert select_reference_kind(ndsm, None, reference) == "ndsm"
+
+
+def test_absolute_reference_requires_an_absolute_prediction():
+    import pytest
+    from viewer.height_metrics import select_reference_kind
+
+    field = np.zeros((2, 2), np.float32)
+    with pytest.raises(ValueError, match="coordinates and a base DEM"):
+        select_reference_kind(field, None, field, "dsm")
+    with pytest.raises(ValueError, match="reference_kind"):
+        select_reference_kind(field, field, field, "invalid")
