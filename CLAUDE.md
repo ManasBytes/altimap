@@ -130,8 +130,10 @@ absolute level from a public DEM, rather than recovering absolute scale from the
    Unresolved coverage stays NaN; it never becomes 0 m.
 6. **DEM-consistent DSM**: `DSM = GLO-30 − mean₃₀ₘ(nDSM) + nDSM`, orthometric. Every 30 m cell
    reproduces the DEM, which is how the FAQ scores, while the model supplies sub-cell detail. In
-   forest, the detail is dropped (GLO-30 already holds the canopy surface). `dem_agreement` then
-   scores the DSM in 30 m cells against both GLO-30 and SRTM; the UI shows it.
+   forest, the detail is dropped (GLO-30 already holds the canopy surface). Optional
+   `compare_dems=True` (default off; CLI `--compare-dems`) checks agreement against GLO-30
+   and SRTM in approximate image-aligned 30 m blocks, not native DEM cells. Undefined metrics
+   are `null`; agreement with the base DEM is not independent building-height validation.
 7. **GCPs** (`read_gcps`, `gcp_correction`): compared with the bare-earth ground. A single
    vertical offset is applied only if it is ≥ 4 m and beats no correction on left-out points.
 8. **View-only ground**: the viewer's bare earth is chosen separately by building share

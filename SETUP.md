@@ -8,7 +8,7 @@ with an RTX 3050 6 GB laptop GPU; each step says what it is for, so you can tell
 
 | | Version | Why |
 |---|---|---|
-| Linux (Ubuntu tested) | — | macOS/Windows are untested; CPU-only works but is slow |
+| Linux (Ubuntu tested) / Windows | — | Windows app tested in an existing environment; fresh native install and macOS untested; CPU-only is slow |
 | NVIDIA GPU + driver for CUDA 12.x | 6 GB VRAM or more | the height model (DINOv2 ViT-L) runs here; training needs 24 GB |
 | [uv](https://docs.astral.sh/uv/) | any recent | creates the Python envs and installs Python 3.12 itself |
 | Node.js | 20+ (22 tested) | builds the React viewer |
@@ -26,7 +26,7 @@ its CUDA libraries is 7 GB, the weights 4.3 GB, and Docker keeps a compressed co
 cache). The final image is ~12 GB.
 
 ```bash
-git clone https://github.com/ManasBytes/altimap.git && cd altimap && git checkout dilavesh-new
+git clone --branch main https://github.com/ManasBytes/altimap.git && cd altimap
 docker build -t altimap .                       # ~10 min; downloads PyTorch and the weights
 docker run --gpus all -p 8000:8000 altimap      # then open http://<host>:8000
 ```
@@ -35,6 +35,15 @@ Without `--gpus all` it runs on the CPU (a 1024 px tile took 86 s instead of ~16
 live inside the container; add `-v altimap-uploads:/app/viewer/web/data-uploads` to keep them.
 Tested: GPU visible in the container, both DEM sources reachable, an upload through v1 + v2.
 
+Version note: the tested production snapshot on `main` is based on commit `665f514`
+plus the JSON-safety, opt-in DEM-comparison and camera-repaint fixes. The same snapshot
+is preserved on `updated-dilavesh-new-tested-665f514`; the teammate's newer
+`updated-dilavesh-new` branch is separate and is not this tested snapshot.
+The Docker test statement above describes the teammate's upstream test, not a new container
+verification of these local fixes.
+The Windows real-upload verification is summarized in
+`docs/real-upload-verification-20261004.md`; it used v1/v2 without CHMv2.
+
 The rest of this guide is the native install, for development.
 
 ## 1. Clone
@@ -42,7 +51,7 @@ The rest of this guide is the native install, for development.
 ```bash
 git clone https://github.com/ManasBytes/altimap.git
 cd altimap
-git checkout dilavesh-new   # current working branch
+git checkout main   # tested production snapshot
 ```
 
 ## 2. Python environments

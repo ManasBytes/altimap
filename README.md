@@ -6,7 +6,7 @@ Built for SIH 2026 problem statement 26175, *DepthWizard* (ISRO). Brief: `docs/p
 | Input | Output |
 |---|---|
 | PNG / JPG (no coordinates) | **nDSM**: height above ground in metres, per pixel (a relative DSM: heights are metric, the ground datum is unknown) |
-| GeoTIFF (with CRS) | **nDSM** + **absolute DSM** on Copernicus GLO-30 (default) or SRTM, same CRS and grid as the input, scored against both DEMs |
+| GeoTIFF (with CRS) | **nDSM** + **absolute DSM** on Copernicus GLO-30 (default) or SRTM, same CRS and grid as the input; optional agreement check against both DEMs |
 
 All elevation outputs are float32 Cloud-Optimized GeoTIFFs in metres, NaN nodata, with a JSON sidecar
 (GSD, vertical datum, height range, DEM source).
@@ -72,6 +72,16 @@ part works, data formats, API, models, measured results and limits), [model card
    and *Quality: Fast* skips the 4-flip averaging (~4× quicker). Click a building for its height,
    estimated floors, footprint area and roof elevation; *Export* saves the current 3D model as a
    `.glb` in metres (opens in Blender and other 3D tools).
+
+   **Public DEM comparison is optional and off by default.** Enable *Compare against public
+   DEMs* before an upload, or pass `--compare-dems` to `python -m viewer.estimate`.
+   Normal GeoTIFF uploads fetch only the selected base DEM; the optional check may fetch a
+   second source and take longer. A failed secondary read is shown as unavailable, and
+   undefined metrics (such as correlation with a flat DEM) are JSON `null`, not zero.
+   These scores use approximate image-aligned 30 m blocks, not native DEM grid cells.
+   Agreement with a DEM used to construct the DSM is **not independent building-height
+   accuracy**; attach independent reference heights for that. `python -m viewer.dem_check`
+   explicitly enables both comparisons.
 
 ## Results (GAMUS)
 
@@ -220,12 +230,18 @@ Tests (no GPU, no network): `uv pip install -e ".[dev]"`, then `python -m pytest
   geoid correction.
 - **Very tall buildings and forest canopy** remained low in the historical 50/50 external run
   (towers ~104 m where LiDAR says 151 m; canopy ~11 m low). The 25/75 route should improve towers,
-  but that external scene has not been rerun, so no replacement value is claimed
-  (ARCHITECTURE.md §5).
+  but this is not a universal accuracy guarantee (ARCHITECTURE.md §5). Local 4 October 2026
+  uploads using 25/75 produced absolute-DSM RMSEs of 35.41 m (Philadelphia), 3.96 m
+  (Chevy Chase), 5.02 m (Pittsburgh) and 8.76 m (Smoky Mountains). CHMv2 was unavailable
+  during this run; these are not measurements of the complete forest-specialist stack.
+  References and qualifications are in the
+  [real-upload validation summary](docs/real-upload-verification-20261004.md).
+  Full screenshots and raw upload outputs remain in the local test-results folder.
 - **Large scenes** run tile by tile at full resolution (no seams: ARCHITECTURE.md §9.5). They
   take minutes on a laptop GPU.
-- **Network**: GeoTIFFs need Copernicus GLO-30 (AWS Open Data, with Microsoft Planetary Computer as
-  fallback) and SRTM (OpenTopography); remote reads time out after 60 s and then return the nDSM
-  only.
+- **Network**: GeoTIFFs need the selected base DEM: Copernicus GLO-30 (AWS Open Data, with
+  Microsoft Planetary Computer as fallback) or SRTM (OpenTopography). The optional public-DEM
+  comparison can fetch the other source too; it is off by default. Remote reads time out
+  after 60 s; if the base DEM is unavailable the app returns nDSM with a DSM warning.
 - **Licences**: RS3DAda weights are MIT (JTRNEO/RS3DAda), and so are our fine-tuned v1 weights.
   v2 is also trained on SynRS3D data (CC BY-NC 4.0): treat it as non-commercial.

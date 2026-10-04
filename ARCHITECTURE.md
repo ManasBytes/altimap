@@ -85,7 +85,8 @@ sidecar always says which one a file holds.
 
 ## 4. Elevation module (`viewer/estimate.py`)
 
-`estimate(path, model, device, out_dir, gsd_m=None, tta=True, report=None, gcps=None)`:
+`estimate(path, model, device, out_dir, gsd_m=None, tta=True, report=None, gcps=None,
+building_model=None, canopy_model=None, base_dem="glo30", compare_dems=False)`:
 
 ### 4.1 Reading the image
 `read_image` opens anything GDAL reads (PIL as fallback):
@@ -152,9 +153,13 @@ coverage or network, the nDSM is still produced and the response carries `dsm_er
 5–14 m (§9.6). `base_dem="srtm"` (upload panel: *Base terrain*; CLI: `--base-dem srtm`) puts the
 DSM on SRTM GL1 instead (`viewer/dem.py:srtm`: 1 arcsec, EGM96, from OpenTopography's public copy
 over plain HTTPS, ~2 s a tile). The default stays GLO-30 (newer, and better in cities and forest).
-Every GeoTIFF upload is then scored against **both** DEMs (`estimate.dem_agreement`): the DSM
-averaged over each 30 m cell against that DEM, which is how GeoTIFF output is scored. The base DEM
-matches to about 1 m by construction; the other shows the gap a score against it would carry.
+GeoTIFF uploads can optionally be compared against **both** DEMs (`estimate.dem_agreement`),
+using `compare_dems=true` (UI checkbox; CLI `--compare-dems`). This is off by default so a
+secondary network read cannot delay a normal upload. The comparison uses approximate,
+image-aligned 30 m blocks, not native DEM grid cells. Base-DEM agreement measures consistency
+with the source used to build the DSM, not independent building-height accuracy. An unavailable
+source is `null`; undefined individual metrics, including correlation with a flat DEM, are
+also `null`. The dedicated `viewer.dem_check` CLI always enables the comparison.
 
 The **3D view's terrain** is a separate, display-only bare-earth estimate. It is chosen by the
 predicted building share, following a rule measured against USGS LiDAR bare earth on four scenes:
@@ -282,7 +287,7 @@ The DSM's forest rule (§4.3) is independent of CHMv2 and applies even without i
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/estimate` | The main path. Multipart: `file` (PNG/JPG/TIFF, ≤ 200 MB), optional `gsd` (m/px, 0.01–100), `reference` (height map: `.tif`/`.png`/GAMUS `.h5`), `gcps` (CSV), `job` (progress id), `tta` (bool), `base_dem` (`glo30`/`srtm`). Runs in a thread pool so the event loop keeps answering progress polls. Uploads run **one at a time** (`_ESTIMATE_LOCK`): the models are shared and v2/CHMv2 move between GPU and CPU in place, so overlapping uploads used to crash each other; a queued upload reports "Waiting for another upload to finish" |
+| `POST /api/estimate` | The main path. Multipart: `file` (PNG/JPG/TIFF, ≤ 200 MB), optional `gsd` (m/px, 0.01–100), `reference` (height map: `.tif`/`.png`/GAMUS `.h5`), `gcps` (CSV), `job` (progress id), `tta` (bool), `base_dem` (`glo30`/`srtm`), `compare_dems` (bool, default false). Runs in a thread pool so the event loop keeps answering progress polls. Uploads run **one at a time** (`_ESTIMATE_LOCK`): the models are shared and v2/CHMv2 move between GPU and CPU in place, so overlapping uploads used to crash each other; a queued upload reports "Waiting for another upload to finish" |
 | `GET /api/progress/{job}` | `{stage, progress}` while an estimate runs; the UI polls it every 400 ms |
 | `GET /api/health` | Liveness |
 | `POST /api/upload`, `POST /api/classify-static`, `GET/DELETE /api/uploads` | Legacy paths (DA3 depth, static land-cover preview) used by the old dashboards |
@@ -293,9 +298,10 @@ order: `ALTIMAP_HEIGHT_CKPT`, then `viewer/cache/best.pth`, then the stock RS3DA
 
 ### 6.2 `/api/estimate` response
 - **Record**: pixel size (and whether it was assumed), shape, nDSM max/p99, DSM range,
-  `base_dem` and datum, `dsm_error`, `gcp` (points used, model, errors), `dem_agreement` (30 m
-  cell and per-pixel RMSE/bias/r against GLO-30 and SRTM, `null` for one that couldn't be read),
-  timing, checkpoint, class pixel counts. Form field `base_dem`: `glo30` (default) or `srtm`.
+  `base_dem` and datum, `dsm_error`, `gcp` (points used, model, errors), optional `dem_agreement`
+  (approximate 30 m block and per-pixel RMSE/bias/r against GLO-30 and SRTM; unavailable sources
+  and undefined metrics are `null`), timing, checkpoint, class pixel counts. Form field
+  `base_dem`: `glo30` (default) or `srtm`; `compare_dems`: boolean, default `false`.
 - **Previews** (≤ 1024 px, data URIs): RGB, linear 8-bit height (`pixel/255 × max_m`), classes.
 - **`grids`**: nDSM, ground and DSM as **16-bit** values on the viewer's 1025×1025 mesh grid
   (`geo.encode_grid16`, value = lo + u16/65535 × span). 8-bit previews step 0.1–0.3 m, which
@@ -386,7 +392,7 @@ Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `st
   (High = 4-flip TTA, Fast = one pass), base terrain for GeoTIFFs (Copernicus or SRTM).
 - **Progress**: a staged progress bar.
 - **Results**: timing, surface max, DSM range, GCP result, the DSM's agreement with Copernicus
-  and SRTM in 30 m cells, validation numbers, the scatter
+  and SRTM in approximate 30 m blocks when requested, validation numbers, the scatter
   (model vs reference, with the 1:1 line), the per-class error table, class shares, and download
   links.
 
