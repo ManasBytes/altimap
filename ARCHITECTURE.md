@@ -379,6 +379,9 @@ Built on a grid of up to 2048 px from the nDSM and classes:
   IoU 0.843 → 0.793.
 - **Blocks**: each is extruded to the median of its interior heights, with base and top on the
   terrain and roof colour from the photo.
+  Roof seeds require both ≥ 4 m² area and a ≥ 1 m interior radius when multiple seeds exist;
+  long, narrow roof-edge streaks cannot seed their own wall-like blocks. This is a display
+  filter, not a correction to the model's exported height predictions.
 - **Trees**: one crown per canopy peak (≥ 3 m, peaks ≥ 5 m apart). Crown radius comes from the
   canopy extent, bounded by the tree's height; colour comes from the photo.
 - **Critical facilities**: the building a facility stands in gets its kind's colour, and a map-pin
@@ -411,6 +414,16 @@ Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `st
   - *City model*: the bare-earth terrain plus extruded buildings (`ExtrudeGeometry`, photo
     roofs, tinted walls) and instanced tree crowns and trunks.
   - *Exact DSM*: the model's raw per-pixel surface, which is what the GeoTIFF holds.
+- **Ground display** (georeferenced City model): *Estimated terrain* retains the DEM-derived
+  ground; *Flat ground* uses a zero-height display plane, building tops equal to their estimated
+  nDSM heights, trees based at zero, and facility markers on the flattened roofs or ground.
+  Bridge slabs retain their approximate clearance above the original local ground. Absolute
+  flood-defence crest lines are hidden in this view, and picked buildings omit absolute roof
+  elevation. GeoTIFFs and geographic probes/profiles remain original estimates; flat GLBs are
+  labelled in their filenames and scene metadata. The control resets on a new image.
+  This addresses visual street ramps left by urban contamination in coarse surface DEMs;
+  it does not establish true street elevations or reconstruct oblique building facades.
+  Rendering checks are recorded in [the viewer report](docs/evaluation/viewer-rendering-2026-10-04.md).
 - **Catalog scenes** (GAMUS tiles in `frontend/public/`): LiDAR reference layers, not model
   output. They are restyled for looks and always labelled "LiDAR reference heights, not model
   output". Only uploads show model output, drawn faithfully in metres.

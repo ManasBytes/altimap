@@ -78,6 +78,26 @@ def test_soft_edge_ramps_do_not_become_terraces():
     assert len(parts) == 1 and 22 <= parts[0]["h"] <= 24
 
 
+def test_long_narrow_roof_ridge_does_not_seed_a_wall_block():
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(20, 100), slice(20, 100), 20.0)
+    ndsm[20:100, 65:70] = 28.0  # 24 m long, 1.5 m wide: area alone accepts it
+    parts, heights = building_parts(ndsm, classes, 0.3)
+    from scipy import ndimage
+
+    assert heights
+    assert all(ndimage.distance_transform_edt(parts == pid).max() * 0.3 >= 1.0
+               for pid in heights)
+
+
+def test_compact_small_tower_still_seeds_a_separate_roof():
+    ndsm, classes = _scene()
+    _add(ndsm, classes, slice(20, 100), slice(20, 100), 12.0)
+    _add(ndsm, classes, slice(50, 74), slice(50, 74), 36.0)  # 7.2 m square
+    _, heights = building_parts(ndsm, classes, 0.3)
+    assert min(heights.values()) == 12.0 and max(heights.values()) == 36.0
+
+
 def test_facade_seen_at_an_angle_stays_one_block_at_roof_height():
     # An oblique view shows a tower's facade beside its roof; the model reads it as a slope
     # (60 m -> 10 m over 25 m) with ripples at each row of windows. It used to stand as a

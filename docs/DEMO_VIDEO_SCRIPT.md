@@ -85,6 +85,11 @@ followed by Error. Keep the error layer visible long enough to show its legend.
 upload `naip_philadelphia_cityhall.tif`. Show Ground (SRTM), DSM range and downloads. In View,
 switch City model → Exact DSM, then back. In Accuracy, show “Compared with the absolute DSM”.
 
+If coarse-DEM street ramps distract from the building view, use **View → Ground display →
+Flat ground** and keep its visualization label visible. Say: “This view removes terrain relief
+to inspect the estimated buildings; it does not show measured street elevations.” Switch back
+to **Estimated terrain** before showing flood-defence crest lines.
+
 **Say:**
 
 > A GeoTIFF provides coordinates, a coordinate system and pixel size. AltiMap uses those

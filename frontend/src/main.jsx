@@ -39,6 +39,7 @@ import "@fontsource/barlow/600.css";
 import "@fontsource/barlow-condensed/600.css";
 import "./theme.css";
 import { gamusScenes } from "./gamusScenes";
+import { flatCity } from "./cityDisplay.js";
 
 const samples = {
   train: {
@@ -1754,6 +1755,7 @@ function TerrainCanvas({
           const gw = sample.groundWidthM ?? 1024 * GAMUS_GSD_M;
           const exag = state.current.exaggeration || 1;
           const wrap = new THREE.Group();
+          wrap.userData.terrainMode = sample.flatGround ? "flat visualization" : "estimated terrain";
           wrap.scale.set(gw / 8, gw / (8 * exag), gw / 8); // world units -> metres
           wrap.add(mesh.clone());
           if (city) {
@@ -2545,7 +2547,10 @@ function App() {
       setLayer("texture");
   }, [layer, sample]);
   const [cityMode, setCityMode] = useState(true);
+  const [flatGround, setFlatGround] = useState(false);
+  useEffect(() => setFlatGround(false), [sample?.id, sample?.rgb]);
   const [pickedBuilding, setPickedBuilding] = useState(null);
+  useEffect(() => setPickedBuilding(null), [sample, cityMode, flatGround]);
   const exportRef = useRef(null);
   const profileView = profileStats(profile);
   const shown = sample ?? EMPTY_SAMPLE;
@@ -2562,6 +2567,21 @@ function App() {
       probeGrid: sample.ndsmGrid,
       elevGrid: terrain ? sample.dsmGrid : null,
     };
+    if (cityMode && sample.city && terrain && flatGround)
+      return {
+        ...sample,
+        ...grids,
+        ...flatCity(sample),
+        flatGround: true,
+        meshGrid: sample.groundGrid && new Float32Array(sample.groundGrid.length),
+        meshOffsetM: 0,
+        height: FLAT_HEIGHT,
+        maxM: sample.maxM,
+        exactHeight: sample.height,
+        exactMaxM: sample.maxM,
+        elevation: terrain.dsm,
+        groundMinM: null,
+      };
     if (cityMode && sample.city)
       return {
         ...sample,
@@ -2596,7 +2616,7 @@ function App() {
     return sample.ndsmGrid
       ? { ...sample, ...grids, meshGrid: sample.ndsmGrid }
       : sample;
-  }, [sample, cityMode]);
+  }, [sample, cityMode, flatGround]);
   const [waypointMode, setWaypointMode] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
   const [waypointCount, setWaypointCount] = useState(0);
@@ -2880,7 +2900,7 @@ function App() {
     if (sample.metricHeights && exportRef.current) {
       const name = (sample.label || "scene").replace(/\.[^.]+$/, "");
       exportRef
-        .current(`${name}-3d.glb`)
+        .current(`${name}${viewSample.flatGround ? "-flat-ground" : ""}-3d.glb`)
         .then(() => notify("3D model exported (.glb, metres)"))
         .catch((err) => notify(`Export failed: ${err?.message ?? err}`));
       return;
@@ -3224,6 +3244,7 @@ function App() {
                 )}
               </div>
               <div className="footer-note">
+                {viewSample?.flatGround && <span>Flat ground visualization · </span>}
                 {contours && shown.metricHeights && (
                   <span>
                     contours every {contourInterval(viewSample?.maxM ?? 1)} m
@@ -3733,6 +3754,26 @@ function App() {
                         Exact DSM
                       </button>
                     </div>
+                  </div>
+                )}
+                {cityMode && sample?.city && sample?.terrain && (
+                  <div className="control-section">
+                    <label>Ground display</label>
+                    <div className="segmented layer-tabs">
+                      <button className={!flatGround ? "selected" : ""}
+                        aria-pressed={!flatGround} onClick={() => setFlatGround(false)}>
+                        Estimated terrain
+                      </button>
+                      <button className={flatGround ? "selected" : ""}
+                        aria-pressed={flatGround} onClick={() => setFlatGround(true)}>
+                        Flat ground
+                      </button>
+                    </div>
+                    <p className="tab-empty">
+                      {flatGround
+                        ? "Flat visualization: terrain and flood-defence relief are hidden. Buildings retain estimated heights; elevation readouts and GeoTIFFs retain original values."
+                        : "Terrain is estimated from a coarse surface DEM. Buildings in that DEM can leave artificial slopes on streets."}
+                    </p>
                   </div>
                 )}
                 <div className="control-section">

@@ -55,7 +55,12 @@ def _roof_segments(cm: np.ndarray, smooth: np.ndarray, gsd_m: float, min_px: int
     lab, n = ndimage.label(seeds)
     if n > 1:
         sizes = ndimage.sum(seeds, lab, np.arange(1, n + 1))
-        keep = np.flatnonzero(sizes >= max(1, round(4.0 / gsd_m**2))) + 1  # >= 4 m^2 plateaus
+        # A long, narrow ridge can pass the area threshold but is not a roof plateau.
+        # Require a 1 m interior radius as well, so facade/roof-edge streaks cannot
+        # seed a separate block. Measure on seeds, before watershed expands them.
+        radii = ndimage.maximum(ndimage.distance_transform_edt(seeds), lab, np.arange(1, n + 1))
+        keep = np.flatnonzero((sizes >= max(1, round(4.0 / gsd_m**2)))
+                              & (radii >= 1.0 / gsd_m)) + 1
         lab = np.where(np.isin(lab, keep), np.searchsorted(keep, lab) + 1, 0)
         n = len(keep)
     if n <= 1:

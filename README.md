@@ -71,6 +71,10 @@ part works, data formats, API, models, measured results and limits), [model card
      errors, scatter plot).
    Use the **Image** tab to upload or choose sample scenes, **View** for layers and scale,
    **Measure** for profiles and routes, **Accuracy** for validation, and **Context** for mapped facilities.
+   In **View → Ground display**, **Flat ground** removes coarse-DEM street ramps for inspecting
+   buildings. It is a labelled visualization: terrain and flood-defence relief are hidden,
+   building heights stay estimated, and geographic readouts and GeoTIFF downloads keep their
+   original elevations. The flat GLB filename includes `flat-ground`.
    Drop an image anywhere on the view or use **Open image**; a live progress bar shows each processing stage,
    and *Quality: Fast* skips the 4-flip averaging (~4× quicker). Click a building for its height,
    estimated floors, footprint area and roof elevation; *Export* saves the current 3D model as a
