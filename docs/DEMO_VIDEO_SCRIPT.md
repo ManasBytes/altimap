@@ -1,8 +1,10 @@
 # AltiMap demo video script
 
 Target: approximately **5 minutes**, English narration, for the SIH DepthWizard submission.
-Record the running application and actual uploaded predictions. Allow a few seconds for each
-interaction; shorten processing waits in editing and label them **“Processing time shortened”**.
+Record the running application and actual predictions. The public demo at
+https://altimap-demo.vercel.app also loads prepared outputs while the GPU VM is offline;
+keep the prepared-output label visible and describe selecting a scene as loading a saved result.
+Allow a few seconds for each interaction; shorten processing waits in editing and label them **“Processing time shortened”**.
 
 ## Before recording
 
@@ -22,8 +24,9 @@ interaction; shorten processing waits in editing and label them **“Processing 
    | Segment | RGB image | Reference/settings |
    |---|---|---|
    | PNG + validation | `demo/gamus_DC_04_27.png` | Pixel size **0.33**; `demo/reference_heights/gamus_DC_04_27_reference_AGL.tif`; reference type **Height above ground (nDSM / AGL)**; **Fast** |
-   | Absolute DSM | `demo/naip_philadelphia_cityhall.tif` | Leave pixel size blank; `demo/reference_heights/naip_philadelphia_cityhall_lidar_dsm.tif`; reference type **Absolute elevation (DSM)**; **Fast**, **SRTM** |
-   | Disaster context | `demo/naip_pittsburgh_bridges.tif` | Remove the Philadelphia reference before uploading; leave pixel size blank; **Fast**, **SRTM** |
+   | Indian GeoTIFF | `demo/india/sikkim_chungthang_town.tif` | Remove the GAMUS reference; leave pixel size blank; no independent height reference; **Fast**, **SRTM** |
+   | Optional Indian landscape | `demo/india/sikkim_namchi_town.tif` or `demo/india/sikkim_chungthang_forest.tif` | No reference; **Fast**, **SRTM** |
+   | Disaster context | `demo/naip_pittsburgh_bridges.tif` | Keep the reference input empty; leave pixel size blank; **Fast**, **SRTM** |
    | Optional flood-defence insert | `demo/naip_baton_rouge_levee.tif` | No reference; **Fast**; use the base selected in your recorded result |
 
 5. Check that the Context tab actually contains the features you intend to show. If OSM is
@@ -35,7 +38,7 @@ interaction; shorten processing waits in editing and label them **“Processing 
 ## 0:00–0:25 — Problem and opening view
 
 **Show:** title “AltiMap — Single-view elevation and 3D flythrough”, then the app with an uploaded
-scene. Slowly orbit the city. Briefly show the original RGB image beside it in the video edit.
+Sikkim town scene. Slowly orbit the city. Briefly show the original RGB image beside it in the video edit.
 
 **Say:**
 
@@ -80,10 +83,11 @@ followed by Error. Keep the error layer visible long enough to show its legend.
 
 ## 1:30–2:15 — GeoTIFF input and absolute elevation
 
-**Show:** Image tab. Replace the reference with the Philadelphia LiDAR DSM. Select
-**Absolute elevation (DSM)**, clear the pixel-size field, retain **Fast** and **SRTM**, then
-upload `naip_philadelphia_cityhall.tif`. Show Ground (SRTM), DSM range and downloads. In View,
-switch City model → Exact DSM, then back. In Accuracy, show “Compared with the absolute DSM”.
+**Show:** Image tab. Remove the GAMUS reference, clear the pixel-size field, retain
+**Fast** and **SRTM**, then upload `demo/india/sikkim_chungthang_town.tif`, or select its
+prepared Demo scene. Show Ground (SRTM), DSM range and downloads. In View, switch
+City model → Exact DSM, then back. Show that no independent reference score is available.
+Use Namchi for a brief second town view and the forest scene to show mountainous terrain.
 
 If coarse-DEM street ramps distract from the building view, use **View → Ground display →
 Flat ground** and keep its visualization label visible. Say: “This view removes terrain relief
@@ -96,9 +100,10 @@ to **Estimated terrain** before showing flood-defence crest lines.
 > metadata to place the image and obtain a coarse elevation base. SRTM is the default;
 > Copernicus is also available. The model contributes local surface detail, producing an
 > absolute DSM on the source image’s grid. SRTM heights use the EGM96 datum, while Copernicus
-> uses EGM2008. We explicitly select an absolute DSM reference so validation compares the
-> correct elevation product. The Exact DSM view shows the per-pixel surface alongside the
-> simplified city model used for exploration.
+> uses EGM2008. This Sikkim scene uses Maxar Open Data satellite imagery acquired in
+> March 2022. We do not have an independent height reference for this scene, so the
+> reconstruction is an estimate, without a verified accuracy score. The Exact DSM view
+> shows the per-pixel surface alongside the simplified city model used for exploration.
 
 ## 2:15–3:00 — Height analysis and navigation
 
@@ -118,7 +123,8 @@ short flythrough. Pause if still playing, reset the view, then demonstrate Walk 
 
 ## 3:00–3:40 — Disaster-management context
 
-**Show:** remove the reference, upload `naip_pittsburgh_bridges.tif`, then open Context.
+**Show:** keep the reference empty, upload `naip_pittsburgh_bridges.tif` or load its
+prepared Demo scene, then open Context.
 Show actual bridge/facility results and their scene markers. Optionally insert a short clip of
 Baton Rouge’s mapped levee and its crest line; shorten this segment elsewhere to keep five minutes.
 
@@ -136,7 +142,7 @@ Baton Rouge’s mapped levee and its crest line; shorten this segment elsewhere 
 
 **Show:** the current report’s absolute DSM table. Highlight city, sparse suburb, hills and
 forest; highlight the SRTM rows. Label this screen “External NAIP / USGS 3DEP evaluation,
-Fast quality, all valid pixels”. Optionally show a brief montage of the four uploaded scenes.
+Fast quality, all valid pixels”. Optionally show a brief montage of the Sikkim scenes and Pittsburgh bridges.
 
 **Say:**
 
@@ -160,9 +166,11 @@ Finish with a slow orbit and a closing title.
 
 > The results are available beyond the viewer. We export float32 elevation GeoTIFFs with
 > metadata sidecars, building footprints as GeoJSON, and the current three-dimensional scene
-> as a GLB in metres. The unified application serves the interface and inference API from one
-> local process, with source code, setup instructions and measured evaluation results in the
-> repository. AltiMap brings single-image elevation estimation, reference validation and
+> as a GLB in metres. The hosted frontend runs on Vercel, with prepared results on Hugging
+> Face so the demo remains usable while the GPU VM is offline. New uploads use the VM
+> when its API is connected and online. Source code, setup instructions and measured
+> evaluation results are available in the repository. AltiMap brings single-image elevation
+> estimation, reference validation and
 > interactive exploration into one workflow. Our next priority is stronger validation on
 > Indian satellite imagery and better recovery of tall structures and forest canopy.
 
@@ -170,7 +178,8 @@ Finish with a slow orbit and a closing title.
 
 ## Keep the recording accurate
 
-- Use **uploaded predictions** for the main demonstration. Sample scenes are LiDAR reference
+- Use **uploaded predictions** or clearly labelled **Demo scenes** prepared model outputs for
+  the main demonstration. **Reference scenes** are LiDAR reference
   previews; if shown, retain their reference label.
 - Keep uploaded scenes at **1× vertical exaggeration** while discussing physical heights.
 - If PNG GSD is unknown, show the **experimental 0.33 m/pixel assumption**. A known-length

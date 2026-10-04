@@ -1,0 +1,9 @@
+{$ALTIMAP_API_HOST} {
+	@viewer path /api/health /api/estimate /api/progress/* /data-uploads/*
+	handle @viewer {
+		reverse_proxy app:8000
+	}
+	handle {
+		respond "Not found" 404
+	}
+}

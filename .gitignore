@@ -4,6 +4,9 @@ __pycache__/
 .pytest_cache/
 node_modules/
 frontend/dist/
+frontend/.env.local
+frontend/.env.*.local
+frontend/.vercel/
 backend/db.sqlite3
 backend/media/
 .run/
@@ -19,4 +22,5 @@ viewer/web/data-demdirect/
 # Derived data -- regenerate with viewer/fetch_buildings.py and the exporters.
 viewer/cache/
 viewer/web/data-uploads/
+output/hf-demo/
 .coverage

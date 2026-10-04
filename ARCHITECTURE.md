@@ -462,8 +462,17 @@ and five keyboard-navigable tabs. Arrow keys, Home and End move between tabs. On
 | Accuracy | RMSE/MAE/correlation, scatter, class errors, DEM agreement and GCP outcome |
 | Context | OpenStreetMap bridges, flood defences and facilities, with empty/error messages |
 
+The frontend can be deployed separately using `VITE_API_BASE` and `VITE_DEMO_CATALOG`.
+Completed height uploads persist the complete API payload as `result.json`, including
+textures, city geometry, elevation grids and validation. `viewer.demo_bundle` packages that
+state with original raster downloads for a public HF dataset. **Demo scenes** loads these
+prepared model outputs without inference; **Reference scenes** remains the GAMUS LiDAR
+gallery. Health polling gates live uploads when the VM is offline. Asset URLs resolve against
+their API or saved-result origin rather than the Vercel frontend. See [DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 **Open image** and **Export** are in the top bar. Uploads start at 1× vertical scale. The
-OpenStreetMap results belong to the current upload; selecting a catalog scene clears them.
+OpenStreetMap results belong to the active upload or prepared demo; selecting a reference
+scene clears them.
 
 - **Inputs**: image, optional pixel size, optional reference heights, optional GCP CSV, quality
   (High = 4-flip TTA, Fast = one pass), base terrain for GeoTIFFs (Copernicus or SRTM).

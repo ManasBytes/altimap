@@ -656,7 +656,7 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
                   class_pixel_counts={n: int(counts[i]) for i, n in enumerate(names)})
     (scene_dir / "meta.json").write_text(json.dumps(record))
     report("Done", 1.0)
-    return {
+    payload = {
         **record,
         "max_m": round(max_m, 2),
         "width": size[0],
@@ -673,6 +673,10 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
         "grids": grids,
         "error": error_view,
     }
+    # Complete display state for prepared demos; metadata alone lacks textures,
+    # city geometry and elevation grids. Raw raster exports remain unchanged.
+    (scene_dir / "result.json").write_text(json.dumps(payload))
+    return payload
 
 
 def _place_facilities(path: Path, shape: tuple[int, int], city: dict, ground) -> list[dict] | None:

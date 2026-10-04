@@ -7,4 +7,6 @@ viewer/cache/
 viewer/web/data-uploads/
 frontend/node_modules/
 frontend/dist/
+**/.env*
+**/.vercel/
 **/__pycache__/

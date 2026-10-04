@@ -18,9 +18,16 @@ npm run build
 Open http://127.0.0.1:8000. For frontend development, `npm run dev` starts Vite;
 `vite.config.js` proxies `/api` and `/data-uploads` to the local server on port 8000.
 
+For Vercel deployment with Hugging Face prepared model outputs and a separate GPU VM, see
+[DEPLOYMENT.md](../docs/DEPLOYMENT.md) and `.env.example`. `VITE_API_BASE` sets the live API
+origin (`disabled` for prepared demos only); `VITE_DEMO_CATALOG` supplies the saved-scene
+catalog. Image → Demo scenes works independently of API availability, with original textures,
+geometry, elevation grids, validation and exports. Reference scenes are the separate LiDAR
+preview gallery. All `VITE_*` configuration is public browser code.
+
 ## Workstation
 
-- **Image:** upload PNG/JPG/GeoTIFF or choose a GAMUS reference scene; set GSD, quality,
+- **Image:** upload PNG/JPG/GeoTIFF, load a prepared demo, or choose a GAMUS reference scene; set GSD, quality,
   reference type, GCPs and base DEM. Raster/GeoJSON downloads appear here.
 - **View:** City model / Exact DSM, RGB/Surface/Height/Classes/Slope/Error layers,
   contours and vertical exaggeration.

@@ -16,5 +16,12 @@ upstream notices with any distributed copy of the corresponding weights.
   consult the provider's current terms when redistributing derived products.
 - **GAMUS and external evaluation data**: follow each dataset's own license and citation
   requirements. Evaluation imagery and LiDAR are not bundled by this repository.
+- **Sikkim demo imagery**: March 2022 WorldView imagery from the Maxar Open Data Program's
+  North India Floods event, licensed CC BY-NC 4.0. The prepared HF demo includes derived
+  RGB previews and model outputs, with Maxar attribution in its dataset card. Retain that
+  attribution and the non-commercial terms. See the [source registry](https://registry.opendata.aws/maxar-open-data/).
+- **OpenStreetMap context**: mapped facilities, bridges and flood defences are from
+  OpenStreetMap contributors, under ODbL. Retain the [attribution](https://www.openstreetmap.org/copyright)
+  when showing or redistributing the prepared context.
 
 This file is an attribution checklist, not a replacement for the upstream license texts.

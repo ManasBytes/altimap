@@ -14,6 +14,10 @@ All elevation outputs are float32 Cloud-Optimized GeoTIFFs in metres, NaN nodata
 Docs: **[SETUP.md](SETUP.md)** (install and run), **[ARCHITECTURE.md](ARCHITECTURE.md)** (how every
 part works, data formats, API, models, measured results and limits), [model card](docs/model-card.md), and [demo video script](docs/DEMO_VIDEO_SCRIPT.md).
 
+For an online demo with a Vercel frontend, Hugging Face prepared scenes and an intermittently
+available GPU VM, follow [DEPLOYMENT.md](docs/DEPLOYMENT.md). Prepared scenes retain textures,
+geometry, elevation grids and validation; new uploads require the VM to be online.
+
 ## How it works
 
 1. **Height model.** RS3DAda ([SynRS3D, NeurIPS 2024](https://github.com/JTRNEO/SynRS3D)): a DINOv2 ViT-L

@@ -40,6 +40,7 @@ import "@fontsource/barlow-condensed/600.css";
 import "./theme.css";
 import { gamusScenes } from "./gamusScenes";
 import { flatCity } from "./cityDisplay.js";
+import { demoCatalog, resultAssets } from "./hosting.js";
 
 const samples = {
   train: {
@@ -405,8 +406,8 @@ const displayedScenes = [...curatedScenes, ...gamusScenes].map((scene) => {
     urban: scene.urban ?? (buildingCoverage != null && buildingCoverage >= 20),
   };
 });
-// Nothing is preloaded: the workspace starts empty until imagery is imported or
-// a catalog scene is picked. Text fields fall back to this placeholder.
+// Local workspaces start empty. A hosted prepared-demo catalog can load its first
+// result; text fields fall back to this placeholder until that finishes.
 const EMPTY_SAMPLE = {
   id: "",
   label: "No imagery loaded",
@@ -1262,6 +1263,15 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM, facil
       crowns.instanceColor.needsUpdate = true;
     }
   };
+  group.userData.dispose = () => {
+    const materials = new Set([photoRoof, heightRoof]);
+    group.traverse((object) => {
+      object.geometry?.dispose();
+      for (const mat of Array.isArray(object.material) ? object.material : [object.material])
+        if (mat) materials.add(mat);
+    });
+    materials.forEach((mat) => mat.dispose());
+  };
   return group;
 }
 
@@ -1327,6 +1337,16 @@ function profileStats(profile) {
 
 // Validation beyond the four headline numbers: what was compared, the bias, a scatter
 // of model vs reference (1500 random pixels) and where the error sits by land cover.
+function RasterDownloads({ downloads }) {
+  return <div className="download-row">
+    {Object.entries(downloads ?? {}).filter(([name]) => name.endsWith(".tif") || name.endsWith(".geojson"))
+      .map(([name, path]) => <a key={name} href={path} download>
+        ⬇ {name === "dsm.tif" ? "Absolute DSM (GeoTIFF)"
+          : name === "ndsm.tif" ? "nDSM (GeoTIFF)" : "3D buildings (GeoJSON)"}
+      </a>)}
+  </div>;
+}
+
 function ValidationDetail({ v }) {
   const pts = v.scatter;
   let lo = Infinity;
@@ -1579,6 +1599,7 @@ function TerrainCanvas({
     };
     const loadPixels = (url, done) => {
       const img = new Image();
+      img.crossOrigin = "anonymous";
       img.onload = () => {
         const c = document.createElement("canvas");
         c.width = HEIGHT_SAMPLE_WIDTH;
@@ -2248,11 +2269,7 @@ function TerrainCanvas({
       transform.dispose();
       geo.dispose();
       material.dispose();
-      if (city)
-        city.children.forEach((m) => {
-          m.geometry.dispose();
-          m.material.dispose();
-        });
+      city?.userData.dispose?.();
       roofTexture?.dispose();
       if (exportRef) exportRef.current = null;
       if (material.map && material.map !== height) material.map.dispose();
@@ -2498,7 +2515,9 @@ function TerrainCanvas({
 // ground). Served by `python -m viewer.server` on :8000.
 // Same origin as the page: viewer.server serves both the app and /api. For `npm run dev` /
 // `npm run preview`, vite.config.js proxies /api and /data-uploads to :8000.
-const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/+$/, "");
+const API_ENABLED = API_BASE !== "disabled";
+const DEMO_CATALOG = import.meta.env.VITE_DEMO_CATALOG ?? "";
 const ESTIMATE_API_URL = `${API_BASE}/api/estimate`;
 const CLASSIFY_CLASS_LABELS = [
   "background",
@@ -2522,7 +2541,7 @@ const CLASS_DOT_STYLE = {
 };
 
 function App() {
-  const [view, setView] = useState("upload"); // terrain | upload
+  const [view, setView] = useState(DEMO_CATALOG ? "demo" : "upload"); // demo | terrain | upload
   const [inspectorTab, setInspectorTab] = useState("image");
   const [split, setSplit] = useState("train");
   const [sample, setSample] = useState(null);
@@ -2626,6 +2645,41 @@ function App() {
   const [uploadStatus, setUploadStatus] = useState("idle"); // idle | loading | error
   const [uploadError, setUploadError] = useState("");
   const [uploadMeta, setUploadMeta] = useState(null);
+  const [backendStatus, setBackendStatus] = useState(API_ENABLED ? "checking" : "offline");
+  const [backendCheck, setBackendCheck] = useState(0);
+  const [demos, setDemos] = useState([]);
+  const [demoError, setDemoError] = useState("");
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [selectedDemo, setSelectedDemo] = useState("");
+  const demoRequest = useRef(0);
+  useEffect(() => {
+    if (!API_ENABLED) return;
+    let stopped = false;
+    const check = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/health`, { cache: "no-store", signal: AbortSignal.timeout(5000) });
+        const health = response.ok && await response.json();
+        if (!stopped) setBackendStatus(health?.ok ? "online" : "offline");
+      } catch {
+        if (!stopped) setBackendStatus("offline");
+      }
+    };
+    check();
+    const timer = setInterval(check, 30000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [backendCheck]);
+  useEffect(() => {
+    if (!DEMO_CATALOG) return;
+    const controller = new AbortController();
+    const catalogUrl = new URL(DEMO_CATALOG, window.location.href).href;
+    fetch(catalogUrl, { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error(`Demo catalog unavailable (${response.status})`);
+      setDemos(demoCatalog(await response.json(), catalogUrl));
+    }).catch((error) => {
+      if (!controller.signal.aborted) setDemoError(error.message);
+    });
+    return () => controller.abort();
+  }, []);
   const geoid = uploadMeta?.dsm?.base_dem === "srtm" ? "EGM96" : "EGM2008"; // of the DSM's heights
   // Mark tabs that contain results or service errors for the current image.
   const tabHasResults = (key) =>
@@ -2663,6 +2717,8 @@ function App() {
     setTimeout(() => setToast(""), 1800);
   };
   const selectScene = (s) => {
+    demoRequest.current++;
+    setDemoLoading(false);
     setSplit(s.split);
     setSample(s);
     setUploadMeta(null);
@@ -2677,8 +2733,113 @@ function App() {
     setPlaying(false);
     notify(`Loaded ${s.id}`);
   };
+  const loadEstimate = (data, label, savedDemo = false) => {
+    const gsdText = data.gsd_m
+      ? `${data.gsd_m.toFixed(2)} m/px`
+      : "GSD unknown (0.33 m/px assumption; experimental metric)";
+    // Reuses the exact same `sample` shape as a catalog scene (rgb/height/
+    // classes URLs + label/coord/max) so every existing viewer feature --
+    // layer switching, waypoints, measuring -- works on it unmodified.
+    setSample({
+      id: savedDemo ? `demo:${data.id}` : "upload",
+      label,
+      savedDemo,
+      coord: data.dsm
+        ? `Georeferenced · ${gsdText} · DSM ${data.dsm.min_m.toFixed(0)}–${data.dsm.max_m.toFixed(0)} m`
+        : `${data.georeferenced ? "Georeferenced" : "Non-georeferenced"} · ${gsdText}`,
+      rgb: data.rgb,
+      height: data.height,
+      classes: data.classes,
+      max: `${data.max_m.toFixed(1)} m`,
+      thumb: data.rgb,
+      // /api/estimate encodes height linearly: pixel/255 * max_m.
+      metricHeights: true,
+      maxM: data.max_m,
+      ndsmMaxM: data.max_m, // viewSample overrides maxM per mode; this stays the nDSM's
+      // 16-bit heights on the mesh grid, when the server's grid lines up with it
+      ...(data.grids &&
+      (data.grids.side - 1) % (HEIGHT_SAMPLE_WIDTH - 1) === 0
+        ? {
+            ndsmGrid: decodeGrid(
+              data.grids.ndsm,
+              data.grids.side,
+              HEIGHT_SAMPLE_WIDTH,
+            ),
+            groundGrid: decodeGrid(
+              data.grids.ground,
+              data.grids.side,
+              HEIGHT_SAMPLE_WIDTH,
+            ),
+            dsmGrid: decodeGrid(
+              data.grids.dsm,
+              data.grids.side,
+              HEIGHT_SAMPLE_WIDTH,
+            ),
+          }
+        : {}),
+      // The server centres the scene in a square at its own aspect: these span the square.
+      groundWidthM:
+        (data.view_shape ?? data.shape)[1] * (data.gsd_m || GAMUS_GSD_M),
+      groundHeightM:
+        (data.view_shape ?? data.shape)[0] * (data.gsd_m || GAMUS_GSD_M),
+      areaKm2:
+        (data.shape[0] * data.shape[1] * (data.gsd_m || GAMUS_GSD_M) ** 2) /
+        1e6,
+      gsdAssumed: data.gsd_assumed,
+      sourceLabel: `${savedDemo ? "Prepared model output · " : ""}${data.shape[1]} × ${data.shape[0]} source`,
+      city: data.city,
+      facilities: data.facilities ?? [],
+      embankments: data.embankments ?? [],
+      terrain: data.terrain,
+      error: data.error?.png ?? null, // signed model - reference map, when validated
+      errorLimitM: data.error?.limit_m ?? null,
+    });
+    setMeasure(false);
+    setWaypointMode(false);
+    setMeasurePoint(null);
+    setProfilePoints([]);
+    setWalkMode(false);
+    setExaggeration(1); // uploads are metric: open at true scale (0.5 suits the restyled previews)
+    setUploadMeta({
+      georeferenced: data.georeferenced,
+      seconds: data.seconds,
+      width: data.width,
+      height_px: data.height_px,
+      class_pixel_counts: data.class_pixel_counts,
+      max_m: data.max_m,
+      p99_m: data.ndsm_p99_m,
+      dsm: data.dsm,
+      dsm_error: data.dsm_error,
+      downloads: data.downloads,
+      validation: data.validation,
+      gcp: data.gcp,
+      checkpoint: data.checkpoint,
+      models: data.models,
+      work_gsd_m: data.work_gsd_m,
+      gsd_m: data.gsd_m,
+      height_mode: data.height_mode,
+      geospatial_warnings: data.geospatial_warnings,
+      base_dem_fallback: data.base_dem_fallback,
+      dem_agreement: data.dem_agreement,
+      facilities: data.facilities ?? [],
+      facilities_error: data.facilities_error,
+      flood: data.flood_defences ?? null,
+      bridges: data.bridges ?? null,
+    });
+    setProfileCleared(false);
+    setWaypointCount(0);
+    setSelectedWaypoint(null);
+    setPlaying(false);
+    setUploadStatus("idle");
+  };
   const runClassification = async (file, gsdOverride) => {
-    if (uploadStatus === "loading") return;
+    if (uploadStatus === "loading" || demoLoading) return;
+    if (!API_ENABLED || backendStatus !== "online") {
+      setUploadError("Live processing is unavailable. You can explore the prepared demo scenes.");
+      setUploadStatus("error");
+      return;
+    }
+    demoRequest.current++;
     setView("upload");
     setInspectorTab("image");
     setLastUploadFile(file);
@@ -2719,105 +2880,13 @@ function App() {
         );
       }
       const data = await res.json();
-      const gsdText = data.gsd_m
-        ? `${data.gsd_m.toFixed(2)} m/px`
-        : "GSD unknown (0.33 m/px assumption; experimental metric)";
-      // Reuses the exact same `sample` shape as a catalog scene (rgb/height/
-      // classes URLs + label/coord/max) so every existing viewer feature --
-      // layer switching, waypoints, measuring -- works on it unmodified.
-      setSample({
-        id: "upload",
-        label: file.name,
-        coord: data.dsm
-          ? `Georeferenced · ${gsdText} · DSM ${data.dsm.min_m.toFixed(0)}–${data.dsm.max_m.toFixed(0)} m`
-          : `${data.georeferenced ? "Georeferenced" : "Non-georeferenced"} · ${gsdText}`,
-        rgb: data.rgb,
-        height: data.height,
-        classes: data.classes,
-        max: `${data.max_m.toFixed(1)} m`,
-        thumb: data.rgb,
-        // /api/estimate encodes height linearly: pixel/255 * max_m.
-        metricHeights: true,
-        maxM: data.max_m,
-        ndsmMaxM: data.max_m, // viewSample overrides maxM per mode; this stays the nDSM's
-        // 16-bit heights on the mesh grid, when the server's grid lines up with it
-        ...(data.grids &&
-        (data.grids.side - 1) % (HEIGHT_SAMPLE_WIDTH - 1) === 0
-          ? {
-              ndsmGrid: decodeGrid(
-                data.grids.ndsm,
-                data.grids.side,
-                HEIGHT_SAMPLE_WIDTH,
-              ),
-              groundGrid: decodeGrid(
-                data.grids.ground,
-                data.grids.side,
-                HEIGHT_SAMPLE_WIDTH,
-              ),
-              dsmGrid: decodeGrid(
-                data.grids.dsm,
-                data.grids.side,
-                HEIGHT_SAMPLE_WIDTH,
-              ),
-            }
-          : {}),
-        // The server centres the scene in a square at its own aspect: these span the square.
-        groundWidthM:
-          (data.view_shape ?? data.shape)[1] * (data.gsd_m || GAMUS_GSD_M),
-        groundHeightM:
-          (data.view_shape ?? data.shape)[0] * (data.gsd_m || GAMUS_GSD_M),
-        areaKm2:
-          (data.shape[0] * data.shape[1] * (data.gsd_m || GAMUS_GSD_M) ** 2) /
-          1e6,
-        gsdAssumed: data.gsd_assumed,
-        sourceLabel: `${data.shape[1]} × ${data.shape[0]} source`,
-        city: data.city,
-        facilities: data.facilities ?? [],
-        embankments: data.embankments ?? [],
-        terrain: data.terrain,
-        error: data.error?.png ?? null, // signed model - reference map, when validated
-        errorLimitM: data.error?.limit_m ?? null,
-      });
-      setMeasurePoint(null);
-      setProfilePoints([]);
-      setWalkMode(false);
-      setExaggeration(1); // uploads are metric: open at true scale (0.5 suits the restyled previews)
-      setUploadMeta({
-        georeferenced: data.georeferenced,
-        seconds: data.seconds,
-        width: data.width,
-        height_px: data.height_px,
-        class_pixel_counts: data.class_pixel_counts,
-        max_m: data.max_m,
-        p99_m: data.ndsm_p99_m,
-        dsm: data.dsm,
-        dsm_error: data.dsm_error,
-        downloads: data.downloads,
-        validation: data.validation,
-        gcp: data.gcp,
-        checkpoint: data.checkpoint,
-        models: data.models,
-        work_gsd_m: data.work_gsd_m,
-        gsd_m: data.gsd_m,
-        height_mode: data.height_mode,
-        geospatial_warnings: data.geospatial_warnings,
-        base_dem_fallback: data.base_dem_fallback,
-        dem_agreement: data.dem_agreement,
-        facilities: data.facilities ?? [],
-        facilities_error: data.facilities_error,
-        flood: data.flood_defences ?? null,
-        bridges: data.bridges ?? null,
-      });
-      setProfileCleared(false);
-      setWaypointCount(0);
-      setSelectedWaypoint(null);
-      setPlaying(false);
-      setUploadStatus("idle");
+      loadEstimate(resultAssets(data, new URL(ESTIMATE_API_URL, window.location.href)), file.name);
+      setBackendStatus("online");
       notify(`Heights estimated for ${file.name}`);
     } catch (err) {
       setUploadError(
         err.message === "Failed to fetch"
-          ? "Couldn't reach the height backend — is `python -m viewer.server` running?"
+          ? "Live processing is unavailable. Prepared demo scenes remain available."
           : err.message,
       );
       setUploadStatus("error");
@@ -2826,6 +2895,34 @@ function App() {
       setUploadProgress(null);
     }
   };
+  const loadDemo = async (id) => {
+    const scene = demos.find((item) => item.id === id);
+    if (!scene || uploadStatus === "loading") return;
+    const request = ++demoRequest.current;
+    setSelectedDemo(id);
+    setDemoLoading(true);
+    setDemoError("");
+    try {
+      const response = await fetch(scene.result, { signal: AbortSignal.timeout(60000) });
+      if (!response.ok) throw new Error(`Demo scene unavailable (${response.status})`);
+      const data = resultAssets(await response.json(), scene.result);
+      if (!data.city || !data.rgb || !data.shape || !Number.isFinite(data.max_m))
+        throw new Error("This demo scene is incomplete");
+      if (request !== demoRequest.current) return;
+      loadEstimate(data, scene.label, true);
+      setLastUploadFile(null);
+      setUploadFileName("");
+      setUploadError("");
+      notify(`Loaded prepared demo: ${scene.label}`);
+    } catch (error) {
+      if (request === demoRequest.current) setDemoError(error.message);
+    } finally {
+      if (request === demoRequest.current) setDemoLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (demos.length && !sample && !selectedDemo) loadDemo(demos[0].id);
+  }, [demos]);
   const onPickUpload = (e) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // picking the same file again should re-run
@@ -3323,15 +3420,49 @@ function App() {
                   >
                     Your image
                   </button>
+                  {DEMO_CATALOG && <button
+                    className={view === "demo" ? "selected" : ""}
+                    disabled={uploadStatus === "loading"}
+                    onClick={() => setView("demo")}>
+                    Demo scenes
+                  </button>}
                   <button
                     className={view === "terrain" ? "selected" : ""}
                     disabled={uploadStatus === "loading"}
                     onClick={() => setView("terrain")}
                   >
-                    Sample scenes
+                    Reference scenes
                   </button>
                 </div>
-                {view === "terrain" ? (
+                <p className="tab-empty" role="status">
+                  {backendStatus === "online" ? "Live processing available."
+                    : backendStatus === "checking" ? "Checking live processing…"
+                    : "Live processing unavailable. Prepared scenes can still be explored."}
+                  {API_ENABLED && backendStatus === "offline" && <button className="connection-retry"
+                    onClick={() => { setBackendStatus("checking"); setBackendCheck((n) => n + 1); }}>
+                    Check again
+                  </button>}
+                </p>
+                {view === "demo" ? (
+                  <div className="control-section scene-switcher">
+                    <label htmlFor="demo-scene">Prepared model outputs</label>
+                    <select id="demo-scene" value={selectedDemo}
+                      disabled={demoLoading || uploadStatus === "loading" || !demos.length}
+                      onChange={(event) => loadDemo(event.target.value)}>
+                      <option value="" disabled>Choose a demo scene…</option>
+                      {demos.map((scene) => <option key={scene.id} value={scene.id}>{scene.label}</option>)}
+                    </select>
+                    <p className="tab-empty" role="status">
+                      {demoLoading ? "Loading saved textures and geometry…"
+                        : "Previously processed imagery with saved textures, heights and building geometry. No live inference is required."}
+                    </p>
+                    {demoError && <div className="upload-error">{demoError}</div>}
+                    {sample?.savedDemo && <p className="tab-empty">
+                      Loaded {sample.label}. View, Measure, Accuracy and Context use this scene's saved results.
+                    </p>}
+                    {sample?.savedDemo && <RasterDownloads downloads={uploadMeta?.downloads} />}
+                  </div>
+                ) : view === "terrain" ? (
                   <div className="control-section scene-switcher">
                     <div className="label-row">
                       <label>Scene</label>
@@ -3555,7 +3686,7 @@ function App() {
                       onClick={() => uploadFileRef.current?.click()}
                       onDragOver={(e) => e.preventDefault()}
                       onDrop={onDropFile}
-                      disabled={uploadStatus === "loading"}
+                      disabled={uploadStatus === "loading" || demoLoading || backendStatus !== "online"}
                     >
                       <Upload size={20} />
                       <span>
@@ -3583,7 +3714,7 @@ function App() {
                       <>
                         <div className="metric-grid">
                           <div>
-                            <small>Processed in</small>
+                            <small>{sample?.savedDemo ? "Original processing time" : "Processed in"}</small>
                             <strong>{uploadMeta.seconds.toFixed(2)}s</strong>
                           </div>
                           <div>
@@ -3649,28 +3780,7 @@ function App() {
                             GeoTIFF warning: {warning}
                           </div>
                         ))}
-                        <div className="download-row">
-                          {Object.entries(uploadMeta.downloads ?? {})
-                            .filter(
-                              ([name]) =>
-                                name.endsWith(".tif") ||
-                                name.endsWith(".geojson"),
-                            )
-                            .map(([name, path]) => (
-                              <a
-                                key={name}
-                                href={`${API_BASE}${path}`}
-                                download
-                              >
-                                ⬇{" "}
-                                {name === "dsm.tif"
-                                  ? "Absolute DSM (GeoTIFF)"
-                                  : name === "ndsm.tif"
-                                    ? "nDSM (GeoTIFF)"
-                                    : "3D buildings (GeoJSON)"}
-                              </a>
-                            ))}
-                        </div>
+                        <RasterDownloads downloads={uploadMeta.downloads} />
                         <div className="class-breakdown">
                           {CLASSIFY_CLASS_LABELS.map((name) => {
                             const count =
@@ -4108,6 +4218,10 @@ function App() {
                 aria-labelledby="inspector-tab-accuracy"
                 tabIndex={0}
               >
+                {uploadMeta && !uploadMeta.validation && <p className="tab-empty">
+                  No independent height reference was supplied for this scene.
+                  Building and canopy heights have not been validated.
+                </p>}
                 {uploadMeta &&
                 (uploadMeta.validation ||
                   uploadMeta.dem_agreement ||
@@ -4170,6 +4284,10 @@ function App() {
                             </div>
                           );
                         })}
+                        <p className="tab-empty">
+                          Coarse DEM agreement measures elevation consistency;
+                          it does not validate individual buildings or trees.
+                        </p>
                       </div>
                     )}
                     {uploadMeta.gcp &&
@@ -4200,8 +4318,8 @@ function App() {
                   <p className="tab-empty">
                     Add reference heights when you upload (a LiDAR DSM or a
                     height map) and the model is scored against them here.
-                    GeoTIFFs are also checked against SRTM and Copernicus, the
-                    DEMs GeoTIFF output is graded on.
+                    GeoTIFFs are also checked against SRTM and Copernicus for
+                    coarse elevation consistency.
                   </p>
                 )}
               </div>

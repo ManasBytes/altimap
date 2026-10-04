@@ -146,6 +146,10 @@ with `ssh -L 8000:127.0.0.1:8000 <user>@<vm>`, then open http://127.0.0.1:8000. 
 uploads and runs the model on them, so don't expose it to networks you don't trust.
 The model loads on the first upload.
 
+For a Vercel frontend backed by prepared Hugging Face scenes and a GPU VM, see
+[DEPLOYMENT.md](docs/DEPLOYMENT.md). Prepared demos work while the VM is off; live processing
+availability is reported separately.
+
 (Frontend development: `cd frontend && npm run dev` serves on :5173 and forwards `/api` to the
 server on :8000, see `frontend/vite.config.js`. Rebuild with `npm run build` for step 5.)
 

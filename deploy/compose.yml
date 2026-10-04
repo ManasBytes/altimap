@@ -1,0 +1,32 @@
+services:
+  app:
+    build:
+      context: ..
+    restart: unless-stopped
+    volumes:
+      - uploads:/app/viewer/web/data-uploads
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+  https:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      ALTIMAP_API_HOST: ${ALTIMAP_API_HOST:?Set the public API hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+volumes:
+  uploads:
+  caddy-data:
+  caddy-config:

@@ -166,6 +166,9 @@ overlapping uploads crashed each other); `GET /api/progress/{job}` serves its pr
 - previews, plus 16-bit `grids` (1025 a side; `geo.encode_grid16`) that the viewer meshes and
   probes from;
 - the city model;
+- a complete `result.json` saved beside metadata for `viewer.demo_bundle`, which packages
+  model outputs and raster downloads for HF-hosted prepared scenes; these remain usable from
+  a Vercel frontend when the separate VM API is offline (see `docs/DEPLOYMENT.md`);
 - validation against an optional reference.
 
 How `_validate` treats the reference:
