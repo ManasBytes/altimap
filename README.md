@@ -6,7 +6,7 @@ Built for SIH 2026 problem statement 26175, *DepthWizard* (ISRO). Brief: `docs/p
 | Input | Output |
 |---|---|
 | PNG / JPG (no coordinates) | **nDSM**: height above ground in metres, per pixel (a relative DSM: heights are metric, the ground datum is unknown) |
-| GeoTIFF (with CRS) | **nDSM** + **absolute DSM** on Copernicus GLO-30 (default) or SRTM, same CRS and grid as the input, scored against both DEMs |
+| GeoTIFF (with CRS) | **nDSM** + **absolute DSM** on SRTM (default, as the brief suggests) or Copernicus GLO-30, same CRS and grid as the input, scored against both DEMs |
 
 All elevation outputs are float32 Cloud-Optimized GeoTIFFs in metres, NaN nodata, with a JSON sidecar
 (GSD, vertical datum, height range, DEM source).
@@ -36,14 +36,15 @@ part works, data formats, API, models, measured results and limits), [model card
    Large scenes are processed in ~1 km tiles with a context margin, so every part is seen at full
    resolution.
 4. **Absolute elevation (GeoTIFF input).** The organisers score GeoTIFF output against SRTM/Copernicus
-   and require values that "match DEM heights". So the exported DSM is **DEM-consistent**: Copernicus
-   GLO-30 supplies absolute level and terrain, and the model adds the detail inside each 30 m cell with
-   its own cell-mean removed (`DSM = GLO-30 − mean₃₀(nDSM) + nDSM`). Averaged over 30 m, the DSM
-   reproduces GLO-30; at full resolution it has the buildings and trees. Heights are **orthometric
-   (EGM2008 geoid)**, and the sidecar says so. Known trade-off: in dense downtowns GLO-30's radar
-   under-records building mass, so street pixels come out below their true (LiDAR) level while the
-   30 m average still matches the DEM. In extensive forest the fine detail is left out (both
-   models place it poorly under closed canopy), so the DSM there is GLO-30's own surface.
+   and require values that "match DEM heights". So the exported DSM is **DEM-consistent**: the base
+   DEM (SRTM by default, Copernicus GLO-30 on request or where SRTM has no coverage) supplies
+   absolute level and terrain, and the model adds the detail inside each 30 m cell with its own
+   cell-mean removed (`DSM = DEM − mean₃₀(nDSM) + nDSM`). Averaged over 30 m, the DSM reproduces the
+   DEM; at full resolution it has the buildings and trees. Heights are **orthometric** (EGM96 on
+   SRTM, EGM2008 on GLO-30), and the sidecar says so. In dense downtowns the radar DEMs under-record
+   building mass; keeping the cell mean would push streets underground, so the DSM is floored at bare
+   earth. In extensive forest the fine detail is left out (both models place it poorly under closed
+   canopy), so the DSM there is the DEM's own surface.
 5. **Terrain in the 3D view.** A bare-earth estimate chosen by scene type (measured against USGS
    LiDAR on four scenes): a 300 m morphological opening of GLO-30 for dense cities, 150 m for towns
    (keeps hills), model subtraction for forest and farmland. Display only.
@@ -71,7 +72,19 @@ part works, data formats, API, models, measured results and limits), [model card
    Drop an image anywhere on the view or use Import; a live progress bar shows each processing stage,
    and *Quality: Fast* skips the 4-flip averaging (~4× quicker). Click a building for its height,
    estimated floors, footprint area and roof elevation; *Export* saves the current 3D model as a
-   `.glb` in metres (opens in Blender and other 3D tools).
+   `.glb` in metres (opens in Blender and other 3D tools). For PNG/JPG, a scale tool turns one
+   known length (a road lane, a car) into the pixel size and reprocesses: heights scale with it.
+8. **Disaster context from OpenStreetMap (GeoTIFF input).** What a height model can't see:
+   - **bridges**: decks the model reads as ground, interpolated between the terrain at their ends
+     and added to the DSM (deck RMSE vs LiDAR 16.6 → 9.0 m, downtown Pittsburgh);
+   - **levees, embankments, dams**: kept in the terrain, which the bare-earth step would erase
+     (Mississippi levee crest error 3.3–5.6 → 2.0 m), and drawn as flood-defence lines with their
+     crest elevation;
+   - **critical facilities**: hospitals, clinics, fire and police stations, shelters, schools,
+     highlighted in 3D with an icon each.
+
+   Answers are cached per area, so a scene keeps them offline; without the network the DSM is
+   still produced, just without these layers.
 
 ## Results (GAMUS)
 

@@ -115,8 +115,9 @@ is loaded, the viewer shows the required "Built with DINOv3" credit in the model
 The DINOv2 encoder code is fetched by `torch.hub` from GitHub the first time a model loads, then
 loaded from `~/.cache/torch/hub` without contacting GitHub. After that the app runs offline,
 except for GeoTIFF uploads, which read the Copernicus GLO-30 DEM from AWS Open Data (Microsoft
-Planetary Computer as fallback), SRTM GL1 from OpenTopography's public copy, and bridges from
-OpenStreetMap (Overpass API; answers are cached per area, so a scene keeps its bridges offline). Reprojected DEM patches are cached in `viewer/cache/dem/`;
+Planetary Computer as fallback), SRTM GL1 from OpenTopography's public copy, and bridges,
+embankments and critical facilities from OpenStreetMap (Overpass API; answers are cached per
+area, so a scene keeps them offline). Reprojected DEM patches are cached in `viewer/cache/dem/`;
 set `ALTIMAP_DEM_CACHE` to put that cache on another disk. If a DEM request is incomplete,
 the unresolved pixels remain nodata and the app returns the nDSM with a clear DSM warning;
 they are never silently converted to sea level.

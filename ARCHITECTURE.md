@@ -129,12 +129,14 @@ viewer does not present that scale as known physical truth.
 
 ### 4.3 Absolute DSM: DEM-consistent composition
 The organisers score GeoTIFF output against SRTM/Copernicus ("values must match DEM heights").
-Copernicus GLO-30 is itself a *surface* model: it already contains buildings and canopy, blurred
-over 30 m cells. So the export is
+Both are radar *surface* models: they already contain buildings and canopy, blurred over 30 m
+cells. So the export, on the base DEM (SRTM by default, GLO-30 on request), is
 
 ```
-DSM = GLO-30 − mean₃₀ₘ(nDSM) + nDSM
+DSM = DEM − mean₃₀ₘ(nDSM) + nDSM
 ```
+
+The measurements below were made on GLO-30, the base until 2026-10-04.
 
 Averaged over any 30 m cell, the DSM reproduces the DEM. Within the cell, the model supplies the
 detail: buildings, trees, streets. The DSM is then floored at the bare-earth estimate
@@ -153,10 +155,12 @@ Planetary Computer as fallback. Planetary Computer's URL-signing service stalled
 time, which made uploads take 2–3 minutes; with AWS the DEM step takes about 5 s. Without
 coverage or network, the nDSM is still produced and the response carries `dsm_error`.
 
-**Base DEM.** The FAQ names both SRTM and Copernicus, and over the Himalaya they differ by
-5–14 m (§9.6). `base_dem="srtm"` (upload panel: *Base terrain*; CLI: `--base-dem srtm`) puts the
-DSM on SRTM GL1 instead (`viewer/dem.py:srtm`: 1 arcsec, EGM96, from OpenTopography's public copy
-over plain HTTPS, ~2 s a tile). The default stays GLO-30 (newer, and better in cities and forest).
+**Base DEM.** The brief names SRTM as its example DEM and the FAQ names both SRTM and Copernicus;
+over the Himalaya they differ by 5–14 m (§9.6). The DSM sits on SRTM GL1 by default
+(`viewer/dem.py:srtm`: 1 arcsec, EGM96, from OpenTopography's public copy over plain HTTPS, ~2 s a
+tile); `base_dem="glo30"` (upload panel: *Base terrain*; CLI: `--base-dem glo30`) uses Copernicus
+GLO-30 instead. Where SRTM has no coverage (beyond 60 N / 56 S) or cannot be read, the upload falls
+back to GLO-30 and says so (`base_dem_fallback`).
 Every GeoTIFF upload is then scored against **both** DEMs (`estimate.dem_agreement`): the DSM
 averaged over each 30 m cell against that DEM, which is how GeoTIFF output is scored. The base DEM
 matches to about 1 m by construction; the other shows the gap a score against it would carry.
@@ -188,6 +192,15 @@ ways tagged `bridge=*`:
   where a raised approach continues. Adding the decks before the DEM-consistent step instead
   let the cell means pull them back toward the water (13.4 m). The remaining low bias is the
   rise of long spans between their ends.
+
+**Embankments** (`viewer/embankments.py`, GeoTIFF input): levees (`man_made=dyke`), embankments
+and dams/weirs from OpenStreetMap. They are terrain, but narrow: the bare-earth opening that takes
+buildings out of GLO-30 erases them too. On the Baton Rouge Mississippi levee (LiDAR crest 14.3 m)
+the 150/300 m openings read the crest 3.2/5.6 m low and raw GLO-30 1.95 m low. Within 25 m of each
+mapped line (feathered over 20 m) the ground keeps raw GLO-30: crest RMSE 3.33/5.64 → 1.97 m, the
+whole corridor 2.13/3.75 → 1.53/1.62 m, the other 97 % of the scene unchanged. The DSM's floor
+rises with it. Each line's crest elevation (median raw GLO-30 along it) is reported in
+`flood_defences` and drawn in 3D as a cyan band.
 
 ### 4.4 Ground control points (optional)
 `read_gcps` parses a CSV of lon, lat, height. A header row may name the columns in any order;
@@ -327,6 +340,10 @@ order: `ALTIMAP_HEIGHT_CKPT`, then `viewer/cache/best.pth`, then the stock RS3DA
 - **`terrain`**: ground and DSM relief PNGs for georeferenced input.
 - **`city`**: the 3D city model (§6.3); `downloads`: links to the files of §3.
 - **`bridges`**: `{source, ways, deck_m2}`, or `{source, error}` when OpenStreetMap was unreachable.
+- **`flood_defences`**: `{source, n, items: [{kind, name, crest_m}]}` (or `error`); `embankments`:
+  the crest lines in view coordinates.
+- **`facilities`**: `[{kind, name, u, v, z}]` critical facilities in the scene (OpenStreetMap), with
+  counts per kind in the record; `facilities_error` when OpenStreetMap was unreachable.
 - **`validation`** + **`error`** (when a reference is attached):
   - Reference placement: reprojected onto the image grid by coordinates when both are
     georeferenced (`geo.warp_to_grid`), otherwise resampled.
@@ -360,6 +377,10 @@ Built on a grid of up to 2048 px from the nDSM and classes:
   terrain and roof colour from the photo.
 - **Trees**: one crown per canopy peak (≥ 3 m, peaks ≥ 5 m apart). Crown radius comes from the
   canopy extent, bounded by the tree's height; colour comes from the photo.
+- **Critical facilities**: the building a facility stands in gets its kind's colour, and a map-pin
+  badge floats 14 m above it (hospital H, clinic cross, fire flame, police star, schools a book,
+  shelters a house), drawn on a canvas so it needs no font; the panel lists them by kind.
+- **Flood defences**: a cyan band along each embankment crest.
 - **Bridges**: OpenStreetMap decks (§4.3) as 1.5 m slabs, cut into pieces 0.5 m apart in elevation
   so a rising span is drawn at its own height along its length, with the river or road visible
   beneath. Clicking one opens a "Bridge" card. They are added after `buildings.geojson` is
@@ -585,9 +606,9 @@ no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
 - **Coarse imagery** (≳ 2 m): object heights fade and the DSM falls back to GLO-30 (§9.3). GLO-30
   is itself only 30 m, so the absolute level can't be better than that without GCPs or a finer
   DEM.
-- **Base DEM**: which DEM the organisers score against is unknown. The DSM follows GLO-30 by
-  default and SRTM on request (§4.3); over the Himalaya the two differ by 5–14 m (§9.6), and only
-  the chosen one is matched.
+- **Base DEM**: the DSM follows SRTM by default (the brief's example DEM) and GLO-30 on request
+  (§4.3). Over the Himalaya the two differ by 5–14 m (§9.6), and only the chosen one is matched,
+  so a score against the other would carry that gap.
 - **Training domain**: aerial imagery of three US cities. Cartosat-2S at 0.6 m over India is out
   of domain. The Sikkim scenes behave plausibly, but without Indian LiDAR their accuracy is
   unmeasured.
@@ -616,7 +637,10 @@ no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
 | `viewer/server.py` | FastAPI app: API + static app |
 | `frontend/` | React + three.js viewer |
 | `Dockerfile`, `.dockerignore` | The whole app as one image, weights included (§8) |
+| `viewer/osm.py` | Overpass queries: mirrors, time budget, per-area cache |
 | `viewer/bridges.py` | Bridge decks from OpenStreetMap, heights from the terrain at their ends |
+| `viewer/embankments.py` | Levees, embankments, dams: kept in the terrain, crest lines for the view |
+| `viewer/facilities.py` | Critical facilities (hospitals, fire, police, shelters, schools) |
 | `scripts/` | Training-data download, the unattended v2 training run, Indian and NAIP test scenes |
 | `tests/` | Synthetic-fixture test suite (no GPU, no network) |
 | `viewer/web/`, `viewer/export_*.py`, `refine*.py`, `validate.py`, `backend/` | Earlier DA3-based dashboards and exporters, the Django backend (legacy, kept working) |

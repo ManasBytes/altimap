@@ -7,8 +7,8 @@ The four demo NAIP scenes (0.6 m, RGB) cover the brief's landscape types: dense 
 leafy suburb, hilly town, forest. Each is scored as the app would produce it:
 
 - nDSM (height above ground) vs LiDAR height-above-ground,
-- the exported absolute DSM vs the LiDAR DSM, next to the Copernicus GLO-30 DEM alone
-  (what you get with no model at all),
+- the exported absolute DSM vs the LiDAR DSM, next to the base DEM alone (SRTM by default,
+  --base-dem glo30 for Copernicus: what you get with no model at all),
 - with 8 LiDAR ground points used as ground control points (scored on all other pixels).
 
 For coarser pixel sizes the image is block-averaged (as a coarser sensor would see it)
@@ -139,7 +139,7 @@ def gcp_check(dsm: np.ndarray, ground: np.ndarray, ref: dict, transform, crs, n:
 def main() -> None:
     import rasterio
 
-    from viewer.dem import glo30
+    from viewer.dem import BASE_DEMS
     from viewer.estimate import estimate, load_pipeline
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -149,6 +149,8 @@ def main() -> None:
     ap.add_argument("--ckpt", type=Path, default=Path("viewer/cache/best.pth"))
     ap.add_argument("--out", type=Path, default=Path("dsm_eval.json"))
     ap.add_argument("--scenes", nargs="+", default=list(SCENES), choices=list(SCENES))
+    ap.add_argument("--base-dem", choices=tuple(BASE_DEMS), default="srtm",
+                    help="DEM under the DSM, and the 'DEM alone' baseline (default SRTM, as the app)")
     args = ap.parse_args()
 
     models = load_pipeline(args.ckpt)  # app pipeline: v1 + 75%-weighted v2 buildings + CHMv2 forest
@@ -164,14 +166,14 @@ def main() -> None:
             gsds = args.gsd or [native] + [g for g in (0.6, 1.0, 2.0, 5.0, 10.0) if g > native + 0.01]
             for gsd in gsds:
                 img = degrade(path, gsd, tmp)
-                out = estimate(img, out_dir=tmp / "out", tta=args.tta, **models)
+                out = estimate(img, out_dir=tmp / "out", tta=args.tta, base_dem=args.base_dem, **models)
                 shape = out["ndsm"].shape
                 r = {k: (v if v.shape == shape else block_mean(v, shape))
                      for k, v in ref.items() if k in LIDAR}
                 with rasterio.open(img) as src:
                     transform, crs, bounds = src.transform, src.crs, tuple(src.bounds)
-                dem = glo30(bounds, crs, shape)  # the same GLO-30 read the export uses
-                row = {"scene": name, "landscape": landscape, "gsd_m": gsd,
+                dem = BASE_DEMS[args.base_dem][0](bounds, crs, shape)  # the base DEM alone, no model
+                row = {"scene": name, "landscape": landscape, "gsd_m": gsd, "base_dem": args.base_dem,
                        "dtm_source": ref.get("dtm_source", "3dep-lidar"),
                        "ndsm": scores(out["ndsm"], r["hag"]),
                        "ndsm_zero": scores(np.zeros(shape, np.float32), r["hag"]),
@@ -183,7 +185,7 @@ def main() -> None:
                 d, z = row["dsm"], row["dem_only"]
                 print(f"{landscape:16s} {gsd:5.1f} m | nDSM RMSE {row['ndsm']['rmse']:5.2f} bias "
                       f"{row['ndsm']['bias']:+6.2f} r {row['ndsm']['r']:.2f} (zero: {row['ndsm_zero']['rmse']:5.2f})"
-                      f" | DSM RMSE {d['rmse']:5.2f} r {d['r']:.3f} (GLO-30 alone {z['rmse']:5.2f} r {z['r']:.3f})"
+                      f" | DSM RMSE {d['rmse']:5.2f} r {d['r']:.3f} ({args.base_dem} alone {z['rmse']:5.2f} r {z['r']:.3f})"
                       + (f" | 8 GCPs {row['gcp8']['after']['rmse']:5.2f} ({row['gcp8']['model']})"
                          if row.get("gcp8", {}).get("after") else ""), flush=True)
                 args.out.write_text(json.dumps(rows, indent=1))  # after every row: a crash keeps the rest

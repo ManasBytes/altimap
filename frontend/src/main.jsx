@@ -979,7 +979,83 @@ function homeCamera(camera, controls, sample, exaggeration) {
   controls.target.set(0, 0, 0);
 }
 
-function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
+// Critical facilities (viewer/facilities.py, from OpenStreetMap): a badge per kind, floating
+// above the facility; the colour also tints the walls of the building it stands in.
+const FACILITY_STYLE = {
+  hospital: { colour: "#d7263d", glyph: "H", label: "Hospitals" },
+  clinic: { colour: "#e4576b", glyph: "cross", label: "Clinics" },
+  "fire station": { colour: "#f07f13", glyph: "flame", label: "Fire stations" },
+  police: { colour: "#2d6cdf", glyph: "star", label: "Police" },
+  shelter: { colour: "#1f9d61", glyph: "house", label: "Shelters" },
+  "assembly point": { colour: "#1f9d61", glyph: "house", label: "Assembly points" },
+  school: { colour: "#d9a400", glyph: "book", label: "Schools" },
+  college: { colour: "#d9a400", glyph: "book", label: "Colleges" },
+  university: { colour: "#d9a400", glyph: "book", label: "Universities" },
+};
+const facilityIconCache = new Map();
+function facilityIcon(kind) {
+  if (facilityIconCache.has(kind)) return facilityIconCache.get(kind);
+  const style = FACILITY_STYLE[kind] ?? FACILITY_STYLE.shelter;
+  const size = 128;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  const m = size / 2;
+  g.beginPath(); // map-pin badge: a disc with a point underneath
+  g.arc(m, m - 8, m - 14, Math.PI * 0.8, Math.PI * 2.2);
+  g.lineTo(m, size - 4);
+  g.closePath();
+  g.fillStyle = style.colour;
+  g.fill();
+  g.lineWidth = 6;
+  g.strokeStyle = "#ffffff";
+  g.stroke();
+  g.fillStyle = "#ffffff";
+  const cy = m - 8;
+  g.beginPath();
+  if (style.glyph === "H") {
+    g.font = "bold 58px sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("H", m, cy + 3);
+  } else if (style.glyph === "cross") {
+    g.rect(m - 9, cy - 28, 18, 56);
+    g.rect(m - 28, cy - 9, 56, 18);
+  } else if (style.glyph === "flame") {
+    g.moveTo(m, cy - 30);
+    g.bezierCurveTo(m + 30, cy - 4, m + 22, cy + 26, m, cy + 28);
+    g.bezierCurveTo(m - 22, cy + 26, m - 30, cy - 2, m - 8, cy - 14);
+    g.bezierCurveTo(m - 6, cy - 2, m + 2, cy + 2, m, cy - 30);
+  } else if (style.glyph === "star") {
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 ? 13 : 31;
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      g.lineTo(m + r * Math.cos(a), cy + r * Math.sin(a));
+    }
+  } else if (style.glyph === "book") {
+    g.moveTo(m, cy - 16); g.lineTo(m - 30, cy - 24); g.lineTo(m - 30, cy + 20); g.lineTo(m, cy + 28);
+    g.lineTo(m + 30, cy + 20); g.lineTo(m + 30, cy - 24); g.closePath();
+    g.fill();
+    g.beginPath();
+    g.fillStyle = style.colour;
+    g.rect(m - 2, cy - 14, 4, 40);
+  } else {
+    g.moveTo(m, cy - 30); g.lineTo(m + 30, cy - 2); g.lineTo(m + 20, cy - 2); g.lineTo(m + 20, cy + 26);
+    g.lineTo(m - 20, cy + 26); g.lineTo(m - 20, cy - 2); g.lineTo(m - 30, cy - 2); g.closePath();
+  }
+  g.fill();
+  const texture = new THREE.CanvasTexture(c);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  facilityIconCache.set(kind, texture);
+  return texture;
+}
+// Sprites take their parent's scale: the city group squashes y (metres -> world), so each icon
+// is stretched back by the same factor to stay a round badge.
+function fitFacilityIcons(city) {
+  for (const sp of city.userData.icons ?? []) sp.scale.y = sp.scale.x / city.scale.y;
+}
+
+function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM, facilities, embankments) {
   // hcol: the Height layer's colours (jet over 0..maxM metres), swapped in by setHeightMode
   const roof = { pos: [], nrm: [], uv: [], hcol: [], ranges: [] }; // ranges: [firstTri, endTri, building]
   const wall = { pos: [], nrm: [], col: [], hcol: [], ranges: [] };
@@ -1021,6 +1097,7 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
     wallColour
       .setRGB(c[0] / 255, c[1] / 255, c[2] / 255, THREE.SRGBColorSpace)
       .lerp(facade, 0.45);
+    if (b.facility) wallColour.set(FACILITY_STYLE[b.facility.kind]?.colour ?? FACADE_COLOR);
     const pos = g.attributes.position.array;
     const nrm = g.attributes.normal.array;
     const uv = g.attributes.uv.array;
@@ -1111,11 +1188,55 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
     meshes.push(crowns, trunks);
     crowns.userData.colours = [Float32Array.from(crowns.instanceColor.array), crownHeightColours];
   }
+  // Flood defences (OpenStreetMap levees, embankments, dams): a bright band along each crest.
+  for (const e of embankments ?? []) {
+    const pts = e.pts.map(([u, v]) => new THREE.Vector3(-4 + 8 * u, e.crest + 1.5, -4 + 8 * v));
+    const band = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, "centripetal"), Math.max(8, pts.length * 6), 0.01, 6),
+      new THREE.MeshBasicMaterial({ color: 0x2bd4ff }),
+    );
+    band.userData.noPick = true;
+    meshes.push(band);
+  }
+  const icons = [];
+  if (facilities?.length) {
+    const toWorld = 8 / groundWidthM;
+    const poleM = 14; // the badge floats this far above the roof or ground it marks
+    const poles = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(1, 1, 1, 6).translate(0, 0.5, 0),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }),
+      facilities.length,
+    );
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    facilities.forEach((f, i) => {
+      const x = -4 + 8 * f.u;
+      const z = -4 + 8 * f.v;
+      m4.compose(new THREE.Vector3(x, f.z, z), q, new THREE.Vector3(0.012, poleM, 0.012));
+      poles.setMatrixAt(i, m4);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: facilityIcon(f.kind), transparent: true }));
+      sp.position.set(x, f.z + poleM, z);
+      sp.center.set(0.5, 0.03); // the badge's point sits on the pole's top
+      const w = Math.max(0.12, Math.min(0.3, 40 * toWorld)); // ~40 m wide, kept legible at any scale
+      sp.scale.set(w, w, 1);
+      sp.userData.facility = f;
+      icons.push(sp);
+    });
+    poles.userData.noPick = true;
+    meshes.push(poles);
+  }
   for (const m of meshes) {
     m.castShadow = true;
     m.receiveShadow = true;
     group.add(m);
   }
+  if (icons.length) {
+    const iconGroup = new THREE.Group();
+    iconGroup.userData.noPick = true;
+    icons.forEach((sp) => iconGroup.add(sp));
+    group.add(iconGroup);
+  }
+  group.userData.icons = icons;
   // Height layer: roofs, walls and crowns take the jet colour of their height; photo otherwise.
   group.userData.setHeightMode = (on) => {
     roofs.material = on ? heightRoof : photoRoof;
@@ -1569,12 +1690,15 @@ function TerrainCanvas({
         roofTexture,
         sample.groundWidthM ?? 1024 * GAMUS_GSD_M,
         sample.ndsmMaxM ?? sample.maxM,
+        sample.facilities,
+        sample.embankments,
       );
       city.scale.y =
         (exaggeration * 8) / (sample.groundWidthM ?? 1024 * GAMUS_GSD_M);
+      fitFacilityIcons(city);
       scene.add(city);
     }
-    const pickable = city ? [mesh, ...city.children] : [mesh];
+    const pickable = city ? [mesh, ...city.children.filter((o) => !o.userData.noPick)] : [mesh];
     // Click a building: outline it and report its facts (uses the raycaster set by the click).
     let outline = null;
     const clearOutline = () => {
@@ -1601,6 +1725,7 @@ function TerrainCanvas({
       const widthM = sample.groundWidthM ?? 1024 * GAMUS_GSD_M;
       onBuildingPick?.({
         bridge: b.kind === "bridge",
+        facility: b.facility ?? null,
         height: b.h,
         floors: Math.max(1, Math.round(b.h / 3.2)),
         areaM2: footprintAreaM2(b, widthM, sample.groundHeightM ?? widthM),
@@ -2234,6 +2359,7 @@ function TerrainCanvas({
     if (state.current.city)
       state.current.city.scale.y =
         (exaggeration * 8) / (state.current.groundWidthM ?? 1024 * GAMUS_GSD_M);
+    if (state.current.city) fitFacilityIcons(state.current.city);
     state.current.exaggeration = exaggeration;
     state.current.renderDirty = true;
   }, [exaggeration]);
@@ -2295,6 +2421,7 @@ function TerrainCanvas({
     onProfile?.({
       values,
       metric: s.probeMetric,
+      lengthM,
       label: `A → B · ${lengthM < 1000 ? `${Math.round(lengthM)} m` : `${(lengthM / 1000).toFixed(2)} km`}`,
       what: s.elevField ? "elevation" : "height above ground",
     });
@@ -2457,7 +2584,9 @@ function App() {
   const [referenceFile, setReferenceFile] = useState(null);
   const [gcpFile, setGcpFile] = useState(null); // CSV lon, lat, height: corrects a GeoTIFF's DSM
   const [uploadQuality, setUploadQuality] = useState("high"); // high = 4-flip TTA
-  const [baseDem, setBaseDem] = useState("glo30"); // public DEM under a GeoTIFF's absolute DSM
+  const [baseDem, setBaseDem] = useState("srtm"); // public DEM under a GeoTIFF's absolute DSM (the brief names SRTM)
+  const [lastUploadFile, setLastUploadFile] = useState(null); // re-run at a measured scale
+  const [knownLengthM, setKnownLengthM] = useState(""); // real length of the measured A -> B
   const [uploadProgress, setUploadProgress] = useState(null); // {stage, progress}
   const fileRef = useRef(null);
   const uploadFileRef = useRef(null);
@@ -2478,7 +2607,8 @@ function App() {
     setPlaying(false);
     notify(`Loaded ${s.id}`);
   };
-  const runClassification = async (file) => {
+  const runClassification = async (file, gsdOverride) => {
+    setLastUploadFile(file);
     setUploadFileName(file.name);
     setUploadStatus("loading");
     setUploadError("");
@@ -2498,7 +2628,8 @@ function App() {
       body.append("file", file);
       body.append("job", job);
       body.append("tta", uploadQuality === "high" ? "true" : "false");
-      if (uploadGsd.trim()) body.append("gsd", uploadGsd.trim());
+      const gsdValue = gsdOverride ?? uploadGsd.trim();
+      if (gsdValue) body.append("gsd", gsdValue);
       if (referenceFile) body.append("reference", referenceFile);
       if (gcpFile) body.append("gcps", gcpFile);
       body.append("base_dem", baseDem);
@@ -2549,6 +2680,8 @@ function App() {
         gsdAssumed: data.gsd_assumed,
         sourceLabel: `${data.shape[1]} × ${data.shape[0]} source`,
         city: data.city,
+        facilities: data.facilities ?? [],
+        embankments: data.embankments ?? [],
         terrain: data.terrain,
         error: data.error?.png ?? null, // signed model - reference map, when validated
         errorLimitM: data.error?.limit_m ?? null,
@@ -2575,7 +2708,12 @@ function App() {
         gsd_m: data.gsd_m,
         height_mode: data.height_mode,
         geospatial_warnings: data.geospatial_warnings,
+        base_dem_fallback: data.base_dem_fallback,
         dem_agreement: data.dem_agreement,
+        facilities: data.facilities ?? [],
+        facilities_error: data.facilities_error,
+        flood: data.flood_defences ?? null,
+        bridges: data.bridges ?? null,
       });
       setProfileCleared(false);
       setWaypointCount(0);
@@ -2807,6 +2945,12 @@ function App() {
                   </dl>
                   ) : (
                   <dl>
+                    {pickedBuilding.facility && (
+                      <>
+                        <dt>{FACILITY_STYLE[pickedBuilding.facility.kind]?.label.replace(/s$/, "") ?? "Facility"}</dt>
+                        <dd>{pickedBuilding.facility.name || "unnamed (OpenStreetMap)"}</dd>
+                      </>
+                    )}
                     <dt>Height</dt>
                     <dd>{pickedBuilding.height.toFixed(1)} m</dd>
                     <dt>Floors (≈3.2 m each)</dt>
@@ -3230,10 +3374,49 @@ function App() {
                       )}
                     </div>
                   )}
+                  {uploadMeta.height_mode !== "metadata_metric" && lastUploadFile && (
+                    <div className="gcp-result scale-tool">
+                      <div>
+                        Pixel size used: {(uploadMeta.gsd_m ?? GAMUS_GSD_M).toFixed(3)} m
+                        {uploadMeta.gsd_m == null ? " (assumed)" : ""}. Heights scale with it.
+                      </div>
+                      <div>
+                        Set the scale: Measure, double-click both ends of something you know
+                        (a road lane ≈ 3.5 m, a car ≈ 4.5 m, a building side), then enter its real length.
+                      </div>
+                      <div className="scale-row">
+                        <span>
+                          A → B {profile?.lengthM ? `${profile.lengthM.toFixed(1)} m now` : "not measured yet"} · real
+                        </span>
+                        <input
+                          type="number"
+                          min="0.1"
+                          step="0.1"
+                          placeholder="m"
+                          value={knownLengthM}
+                          onChange={(e) => setKnownLengthM(e.target.value)}
+                        />
+                        <button
+                          disabled={!(profile?.lengthM > 0 && +knownLengthM > 0) || uploadStatus === "loading"}
+                          onClick={() => {
+                            const gsd = (uploadMeta.gsd_m ?? GAMUS_GSD_M) * (+knownLengthM / profile.lengthM);
+                            setUploadGsd(gsd.toFixed(3));
+                            setMeasure(false);
+                            runClassification(lastUploadFile, gsd.toFixed(3));
+                          }}
+                        >
+                          Reprocess
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {uploadMeta.dsm_error && (
                     <div className="upload-error">
                       Absolute DSM unavailable: {uploadMeta.dsm_error}
                     </div>
+                  )}
+                  {uploadMeta.base_dem_fallback && (
+                    <div className="upload-error">{uploadMeta.base_dem_fallback}</div>
                   )}
                   {uploadMeta.geospatial_warnings?.map((warning) => (
                     <div className="upload-error" key={warning}>
@@ -3279,6 +3462,55 @@ function App() {
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+                  {uploadMeta.bridges && (uploadMeta.bridges.error || uploadMeta.bridges.deck_m2 > 0) && (
+                    <div className="gcp-result bridge-line">
+                      Bridges (OpenStreetMap):{" "}
+                      {uploadMeta.bridges.error
+                        ? `unavailable (${uploadMeta.bridges.error})`
+                        : `${Math.round(uploadMeta.bridges.deck_m2).toLocaleString()} m² of deck from ${uploadMeta.bridges.ways} ways, heights from the banks`}
+                    </div>
+                  )}
+                  {uploadMeta.flood && (uploadMeta.flood.error || uploadMeta.flood.items?.length > 0) && (
+                    <div className="gcp-result facility-list">
+                      Embankments and flood defences (OpenStreetMap)
+                      {uploadMeta.flood.error ? (
+                        <div>unavailable: {uploadMeta.flood.error}</div>
+                      ) : (
+                        uploadMeta.flood.items.map((e, i) => (
+                          <div key={i}>
+                            <i className="facility-dot" style={{ background: "#2bd4ff" }} />
+                            {e.kind}{e.name ? ` "${e.name}"` : ""}: crest ≈ {e.crest_m.toFixed(1)} m ({geoid},{" "}
+                            {uploadMeta.dsm?.base_dem === "glo30" ? "Copernicus" : "SRTM"})
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                  {(uploadMeta.facilities?.length > 0 || uploadMeta.facilities_error) && (
+                    <div className="gcp-result facility-list">
+                      Critical facilities (OpenStreetMap)
+                      {uploadMeta.facilities_error ? (
+                        <div>unavailable: {uploadMeta.facilities_error}</div>
+                      ) : (
+                        Object.entries(
+                          uploadMeta.facilities.reduce((acc, f) => {
+                            (acc[f.kind] ??= []).push(f.name);
+                            return acc;
+                          }, {}),
+                        ).map(([kind, names]) => (
+                          <div key={kind}>
+                            <i
+                              className="facility-dot"
+                              style={{ background: FACILITY_STYLE[kind]?.colour ?? "#888" }}
+                            />
+                            {FACILITY_STYLE[kind]?.label ?? kind} ({names.length})
+                            {names.filter(Boolean).length > 0 &&
+                              `: ${names.filter(Boolean).slice(0, 4).join(", ")}${names.filter(Boolean).length > 4 ? "…" : ""}`}
+                          </div>
+                        ))
+                      )}
                     </div>
                   )}
                   {uploadMeta.validation && (

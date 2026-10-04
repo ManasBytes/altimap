@@ -125,17 +125,23 @@ absolute level from a public DEM, rather than recovering absolute scale from the
 
    v2 and CHMv2 are optional, kept on the CPU and moved to the GPU only while they run (`_on`),
    so a 6 GB GPU holds one ViT-L at a time.
-5. **DEM**: Copernicus GLO-30 (default; AWS Open Data via `dem.glo30`, Planetary Computer as
-   fallback) or SRTM GL1 (`base_dem="srtm"`; OpenTopography via `dem.srtm`), read once per upload
-   (`padded_dem`: image + 300 m margin). Complete patches are cached, keyed by source.
+5. **DEM**: SRTM GL1 by default (the brief names SRTM; OpenTopography via `dem.srtm`), or
+   Copernicus GLO-30 (`base_dem="glo30"`; AWS Open Data via `dem.glo30`, Planetary Computer as
+   fallback), which also stands in where SRTM has no coverage (beyond 60 N / 56 S) and says so
+   (`record["base_dem_fallback"]`). Read once per upload (`padded_dem`: image + 300 m margin);
+   complete patches are cached, keyed by source.
    Unresolved coverage stays NaN; it never becomes 0 m.
-6. **DEM-consistent DSM**: `DSM = GLO-30 − mean₃₀ₘ(nDSM) + nDSM`, orthometric. Every 30 m cell
-   reproduces the DEM, which is how the FAQ scores, while the model supplies sub-cell detail. In
-   forest, the detail is dropped (GLO-30 already holds the canopy surface). The DSM is floored at
-   bare earth (`compose_dsm`): where GLO-30 under-reads tall downtowns, keeping the cell mean
+6. **DEM-consistent DSM**: `DSM = DEM − mean₃₀ₘ(nDSM) + nDSM` on the base DEM, orthometric. Every
+   30 m cell reproduces the DEM, which is how the FAQ scores, while the model supplies sub-cell
+   detail. In forest, the detail is dropped (the DEM already holds the canopy surface). The DSM is
+   floored at bare earth (`compose_dsm`): where the DEM under-reads tall downtowns, keeping the cell mean
    pushed streets underground (Philadelphia to −35 m). `dem_agreement` then scores the DSM in
    30 m cells against both GLO-30 and SRTM; the UI shows it.
-7. **Bridges** (`viewer/bridges.py`, GeoTIFF only): the model reads decks as ground and calls
+7. **Embankments** (`viewer/embankments.py`, GeoTIFF only): levees, embankments, dams and weirs
+   from OpenStreetMap. The bare-earth opening erases them (Baton Rouge levee crest 3.2–5.6 m
+   low), so the ground keeps raw GLO-30 within 25 m of each line (crest error → 1.97 m, the rest
+   of the scene unchanged). Crest elevations go to `record["flood_defences"]`.
+   **Bridges** (`viewer/bridges.py`, GeoTIFF only): the model reads decks as ground and calls
    most of them water, so OpenStreetMap places them (Overpass, several mirrors, 60 s budget,
    cached per area under the DEM cache). Each deck is interpolated between the raw GLO-30
    elevation at its land ends (connected ways are one structure) and laid over the finished
@@ -186,6 +192,12 @@ Unknown well-formed job ids return "Uploading", because the UI polls before the 
 - bridge decks as 1.5 m slabs cut 0.5 m apart in elevation (`bridges`), `kind: "bridge"`, added
   after `buildings.geojson` is written so the export stays buildings only.
 
+All OpenStreetMap reads go through `viewer/osm.py` (Overpass mirrors, 60 s budget, cached per
+area). The server also places **critical facilities** (`viewer/facilities.py`: hospitals,
+clinics, fire, police, shelters, assembly points, schools/colleges/universities): a facility
+inside a building marks it (`facility`), and the viewer tints its walls and floats an icon over
+it. Embankment crests come back as `embankments` lines for a flood-defence band.
+
 It never feeds the GeoTIFFs; regularising heights costs RMSE. Changes to it are scored with
 `viewer.city_eval`.
 
@@ -209,6 +221,9 @@ software, mobile and Intel integrated graphics. `?detail=high|standard` override
 - shader contour lines;
 - the A→B profile;
 - first-person Walk (`walkGround`, building cells block);
+- for PNG/JPG, a scale tool: measure A→B on something of known length, enter it, and the upload
+  re-runs at the implied pixel size (heights scale with it: a 1 m screenshot read as 0.33 m lost
+  half its building height; entered, building RMSE 5.1 → 3.1 m on GAMUS);
 - a building card;
 - GLB export.
 
@@ -263,6 +278,10 @@ the named evaluator before changing any of these:
 - **GCP rule** (`dsm_eval`): every looser fit made the DSM worse on the LiDAR scenes. GLO-30 had
   no real offset there, and street points don't represent roofs.
 - **Outlines stay traced** (`city_eval`): squaring every outline cost IoU 0.843 → 0.793.
+- **Street trees** (GAMUS truth, registered): 82 % of street-tree pixels are classed tree, median
+  height 7.7 vs 8.6 m; city crowns cover ~50 % of truth crowns at 88 % precision (dense canopy
+  drawn as fewer, larger crowns). Crown spacing/height tuning gained ≤ 3 points: unchanged. A
+  LiDAR "roadside canopy" mask on NAIP was mostly misregistered building edges; don't reuse it.
 - **One block per roof** (`city_eval`, `dsm_eval` LiDAR): dropping within-roof levels removed the
   facade staircases; IoU 0.843 → 0.848, edge F1 0.663 → 0.674, building RMSE 2.87 → 3.05 m.
 - **Not adopted, all measured**:
@@ -272,9 +291,9 @@ the named evaluator before changing any of these:
 - **Network**: the DEM comes from AWS because Planetary Computer's URL signing stalled for
   50–120 s at a time. `viewer/dem.py` sets GDAL and `requests` timeouts at import, so import it
   before any remote read.
-- **Open issue — base DEM**: GLO-30 sits 5–14 m above SRTM in the Himalaya (`dem_check`), and the
-  FAQ names both. The base is selectable (`base_dem`, default GLO-30), but which one the
-  organisers score against is unresolved: ask them.
+- **Base DEM: SRTM by default** (team decision, 2026-10-04: the brief names SRTM). GLO-30 sits
+  5–14 m above SRTM in the Himalaya (`dem_check`), and the FAQ names both, so the base stays
+  selectable (`base_dem`) and every GeoTIFF is scored against both.
 
 ## Load-bearing invariants (breaking these gives silently wrong output, not a crash)
 

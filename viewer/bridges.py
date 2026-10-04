@@ -9,22 +9,8 @@ georeferenced input (OSM needs coordinates, the ends need a DEM).
 
 from __future__ import annotations
 
-import hashlib
-import json
-import os
-import time
-from pathlib import Path
-
 import numpy as np
 
-# Public Overpass servers are volunteer-run and often busy (504s, timeouts): try several, within
-# FETCH_BUDGET_S overall, and keep every answer on disk so a scene that worked once keeps its
-# bridges without the network.
-OVERPASS = ("https://overpass-api.de/api/interpreter",
-            "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-            "https://overpass.private.coffee/api/interpreter",
-            "https://overpass.kumi.systems/api/interpreter")
-FETCH_BUDGET_S = 60.0
 LANE_M = 3.5
 WIDTH_M = {  # deck width by OSM highway/railway type when no width or lanes tag says otherwise
     "motorway": 12.0, "trunk": 12.0, "primary": 10.0, "secondary": 9.0, "tertiary": 8.0,
@@ -35,44 +21,16 @@ WIDTH_M = {  # deck width by OSM highway/railway type when no width or lanes tag
 }
 
 
-def _cache_path(query: str) -> Path:
-    root = Path(os.environ.get("ALTIMAP_DEM_CACHE", Path(__file__).resolve().parent / "cache" / "dem"))
-    return root / "osm" / f"{hashlib.sha256(query.encode()).hexdigest()}.json"
-
-
 def fetch(bounds_lonlat) -> list[dict] | None:
     """Bridge ways crossing a (west, south, east, north) box: [{"lonlat": [(lon, lat), ...], "tags"}].
-    None when no Overpass server answers in time (the upload continues without bridges)."""
-    import requests
+    None when OpenStreetMap is unreachable (the upload continues without bridges)."""
+    from viewer import osm
 
-    w, s, e, n = (round(float(v), 5) for v in bounds_lonlat)
-    query = f'[out:json][timeout:25];way["bridge"]["bridge"!="no"]({s},{w},{n},{e});out geom tags;'
-    cache = _cache_path(query)
-    data = None
-    if cache.exists():
-        try:
-            data = json.loads(cache.read_text())
-        except (OSError, ValueError):
-            data = None
-    deadline = time.monotonic() + FETCH_BUDGET_S
-    for url in OVERPASS if data is None else ():
-        left = deadline - time.monotonic()
-        if left < 5:
-            break
-        try:
-            r = requests.post(url, data={"data": query}, timeout=(min(10, left), min(30, left)),
-                              headers={"User-Agent": "AltiMap (SIH 2026 PS 26175)"})
-            r.raise_for_status()
-            data = r.json()
-            cache.parent.mkdir(parents=True, exist_ok=True)
-            cache.write_text(json.dumps(data))
-            break
-        except Exception:  # busy server, rate limit, bad JSON: try the next one
-            continue
-    if data is None:
+    els = osm.query('way["bridge"]["bridge"!="no"]({bbox});out geom tags;', bounds_lonlat)
+    if els is None:
         return None
     return [{"lonlat": [(p["lon"], p["lat"]) for p in el["geometry"]], "tags": el.get("tags", {})}
-            for el in data.get("elements", []) if el.get("geometry")]
+            for el in els if el.get("geometry")]
 
 
 def width_m(tags: dict) -> float:

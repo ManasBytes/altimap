@@ -50,7 +50,7 @@ def main() -> None:
     ap.add_argument("images", nargs="+", type=Path)
     ap.add_argument("--ckpt", type=Path, default=Path("viewer/cache/best.pth"))
     ap.add_argument("--tta", action="store_true")
-    ap.add_argument("--base-dem", choices=tuple(BASE_DEMS), default="glo30")
+    ap.add_argument("--base-dem", choices=tuple(BASE_DEMS), default="srtm")
     args = ap.parse_args()
     models = load_pipeline(args.ckpt)
     with tempfile.TemporaryDirectory() as tmp:

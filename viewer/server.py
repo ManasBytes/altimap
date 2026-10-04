@@ -445,7 +445,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
                             reference: UploadFile | None = File(None),
                             gcps: UploadFile | None = File(None),
                             job: str | None = Form(None), tta: bool = Form(True),
-                            base_dem: str = Form("glo30")):
+                            base_dem: str = Form("srtm")):
     """Height model on an upload: metric nDSM always, absolute DSM for GeoTIFFs.
 
     Response keeps the classify-static shape (rgb/height/classes data URIs) so
@@ -518,7 +518,8 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(422, f"could not process this image: {exc}") from exc
+        detail = str(exc).replace(str(scene_dir), "the upload")  # never show server paths
+        raise HTTPException(422, f"could not process this image: {detail}") from exc
     finally:
         staged.unlink(missing_ok=True)
         if ref_path is not None:
@@ -530,7 +531,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
 
 def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | None,
                   ref_path: Path | None, report, tta: bool = True, gcps: list | None = None,
-                  base_dem: str = "glo30") -> dict:
+                  base_dem: str = "srtm") -> dict:
     from viewer.city_model import bridges, city_model
     from viewer.classify import classes_to_rgb
     from viewer.estimate import estimate
@@ -606,6 +607,33 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
                       to_city(out["rgb"]), city_gsd, ground=city_ground)
     _write_buildings_geojson(scene_dir, city["buildings"], out["ndsm"].shape)
     record["files"].append("buildings.geojson")
+    try:
+        facilities = _place_facilities(staged, out["ndsm"].shape, city, city_ground) if record["georeferenced"] else []
+    except Exception:  # an odd OSM feature must not cost a finished upload its result
+        facilities = None
+    if facilities is not None:
+        counts: dict[str, int] = {}
+        for f in facilities:
+            counts[f["kind"]] = counts.get(f["kind"], 0) + 1
+        record["facilities"] = counts
+    else:
+        record["facilities_error"] = "OpenStreetMap unreachable"
+        facilities = []
+    # Embankments: crest lines for the 3D view, in image coordinates like the city model.
+    h0, w0 = out["ndsm"].shape
+    embank = []
+    if ground_zero is not None:
+        from shapely.geometry import LineString, box
+
+        frame = box(0, 0, 1, 1)
+        for e in out.get("embankments") or []:
+            if not np.isfinite(e["crest_m"]):
+                continue
+            clipped = LineString([(c / w0, r / h0) for c, r in e["pts"]]).intersection(frame)
+            for part in getattr(clipped, "geoms", [clipped]):
+                if part.geom_type == "LineString" and len(part.coords) >= 2:
+                    embank.append({"kind": e["kind"], "name": e["name"], "crest": round(e["crest_m"] - ground_zero, 2),
+                                   "pts": [[round(u, 5), round(v, 5)] for u, v in part.coords]})
     if out.get("deck") is not None and ground_zero is not None:  # bridges join the 3D view only
         deck_city = np.asarray(Image.fromarray(out["deck"].astype(np.float32), mode="F").resize(csize, Image.NEAREST))
         city["buildings"] += bridges(deck_city, city_gsd, to_city(out["rgb"]), zero=ground_zero)
@@ -615,8 +643,10 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
     for b in city["buildings"]:
         b["rings"] = [[[round(0.5 + (u - 0.5) * fw, 5), round(0.5 + (v - 0.5) * fh, 5)] for u, v in ring]
                       for ring in b["rings"]]
-    for t in city["trees"]:
+    for t in city["trees"] + facilities:
         t["u"], t["v"] = round(0.5 + (t["u"] - 0.5) * fw, 5), round(0.5 + (t["v"] - 0.5) * fh, 5)
+    for e in embank:
+        e["pts"] = [[round(0.5 + (u - 0.5) * fw, 5), round(0.5 + (v - 0.5) * fh, 5)] for u, v in e["pts"]]
 
     names = ["background", "ground", "low_vegetation", "buildings", "water", "roads", "trees"]
     counts = np.bincount(classes.ravel(), minlength=len(names))
@@ -636,10 +666,26 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
         "height": _png_data_uri(square(np.stack([height_u8] * 3, axis=-1), 0)),
         "classes": _png_data_uri(classes_to_rgb(square(classes, 0))),
         "city": city,
+        "facilities": facilities,
+        "embankments": embank,
         "terrain": terrain,
         "grids": grids,
         "error": error_view,
     }
+
+
+def _place_facilities(path: Path, shape: tuple[int, int], city: dict, ground) -> list[dict] | None:
+    """OpenStreetMap critical facilities in the scene (viewer/facilities.py), placed on the city
+    model; None if OpenStreetMap was unreachable."""
+    import rasterio
+    from rasterio.warp import transform_bounds
+
+    from viewer import facilities as fac
+
+    with rasterio.open(path) as src:
+        crs, tf, bounds = src.crs, src.transform, src.bounds
+    found = fac.fetch(transform_bounds(crs, "EPSG:4326", *bounds))
+    return None if found is None else fac.place(found, tf, crs, shape, city["buildings"], ground)
 
 
 def _write_buildings_geojson(scene_dir: Path, buildings: list[dict], shape: tuple[int, int]) -> None:

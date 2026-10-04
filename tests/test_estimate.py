@@ -316,3 +316,15 @@ def test_dsm_never_drops_below_bare_earth_where_the_dem_under_reads_a_tower():
     dsm = compose_dsm(dem, ndsm, 0.5, bare)
     assert dsm.min() >= 10.0 and dsm[60, 35] == 10.0  # streets stay on the ground
     assert dsm[60, 60] == unfloored[60, 60] > 80.0  # the tower keeps its height
+
+
+def test_an_unreadable_upload_gets_a_plain_message_not_a_server_path(tmp_path):
+    import pytest
+
+    from viewer.estimate import NotImageryError, read_image
+
+    bad = tmp_path / "upload.png"
+    bad.write_bytes(b"\x00not an image\x00" * 100)
+    with pytest.raises(NotImageryError) as e:
+        read_image(bad)
+    assert str(tmp_path) not in str(e.value) and "PNG, JPG or GeoTIFF" in str(e.value)

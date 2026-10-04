@@ -1,7 +1,7 @@
 """Image in, elevation GeoTIFFs out: the product the brief asks for.
 
     nDSM (always)  height above ground, metres, from the height model.
-    DSM (GeoTIFF)  nDSM on Copernicus GLO-30 (default) or SRTM GL1, DEM-consistent.
+    DSM (GeoTIFF)  nDSM on SRTM GL1 (default) or Copernicus GLO-30, DEM-consistent.
 
 The model was trained at GAMUS's 0.33 m ground sampling distance, so input
 with a known GSD is resampled to 0.33 m before inference and the result is
@@ -252,7 +252,10 @@ def read_image(path: Path) -> tuple[np.ndarray, np.ndarray]:
     try:
         src = rasterio.open(path)
     except rasterio.errors.RasterioIOError:  # formats GDAL can't open: let PIL try
-        rgb = np.asarray(Image.open(path).convert("RGB"), dtype=np.uint8)
+        try:
+            rgb = np.asarray(Image.open(path).convert("RGB"), dtype=np.uint8)
+        except (OSError, ValueError) as exc:  # PIL's UnidentifiedImageError names the server path
+            raise NotImageryError("this file is not a readable image. Upload a PNG, JPG or GeoTIFF.") from exc
         return rgb, np.ones(rgb.shape[:2], bool)
     with src:
         if src.count < 3 and np.dtype(src.dtypes[0]).kind == "f":
@@ -282,7 +285,7 @@ def _resize(arr: np.ndarray, shape: tuple[int, int], nearest: bool = False) -> n
 BARE_EARTH_PAD_M = 300.0  # margin around the image: the widest bare-earth opening below
 
 
-def padded_dem(geo: dict, base_dem: str = "glo30") -> tuple[np.ndarray | None, tuple[int, int]]:
+def padded_dem(geo: dict, base_dem: str = "srtm") -> tuple[np.ndarray | None, tuple[int, int]]:
     """One DEM read for the whole upload (`base_dem`: a viewer.dem.BASE_DEMS name): the image
     extent plus BARE_EARTH_PAD_M on every side, at the DEM's ~30 m posting -> (coarse array,
     (pad rows, pad cols) in image pixels). The export DEM and the viewer's bare-earth ground
@@ -362,6 +365,32 @@ def bridge_decks(geo: dict, coarse: np.ndarray, transform, crs, shape: tuple[int
                   "deck_m2": round(float(np.isfinite(deck).sum() * px_m2))}
 
 
+def embankment_lines(geo: dict, transform, crs, shape: tuple[int, int], dem: np.ndarray):
+    """OpenStreetMap embankments, levees, dams and weirs crossing the image -> ([{"kind", "name",
+    "pts": (n, 2) image (col, row), "crest_m": median raw GLO-30 along the line}], record entry)."""
+    from rasterio.warp import transform_bounds
+
+    from viewer import embankments as emb
+
+    ways = emb.fetch(transform_bounds(crs, "EPSG:4326", *geo["bounds"]))
+    if ways is None:
+        return [], {"source": "OpenStreetMap", "error": "unreachable"}
+    try:
+        lines = emb.lines_on_grid(ways, transform, crs)
+    except Exception as exc:  # odd OSM geometry must not cost the upload its DSM
+        return [], {"source": "OpenStreetMap", "error": f"{type(exc).__name__}: {exc}"}
+    out = []
+    for w, pts in zip(ways, lines):
+        inside = (pts[:, 0] >= 0) & (pts[:, 0] < shape[1]) & (pts[:, 1] >= 0) & (pts[:, 1] < shape[0])
+        if not inside.any():
+            continue
+        z = dem[pts[inside, 1].astype(int), pts[inside, 0].astype(int)]
+        crest = float(np.nanmedian(z)) if np.isfinite(z).any() else float("nan")
+        out.append({"kind": w["kind"], "name": w["name"], "pts": pts, "crest_m": round(crest, 2)})
+    return out, {"source": "OpenStreetMap", "n": len(out),
+                 "items": [{"kind": e["kind"], "name": e["name"], "crest_m": e["crest_m"]} for e in out]}
+
+
 def dem_on_image(coarse: np.ndarray, pad_px: tuple[int, int], shape: tuple[int, int]) -> np.ndarray:
     """The padded coarse DEM bilinearly resampled onto the image grid, cropping the margin.
     Separable (rows, then columns), so memory is the output size even for huge images."""
@@ -437,14 +466,14 @@ def _on(model, device: str):
 
 def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None = None,
              tta: bool = True, report=None, gcps: list | None = None,
-             building_model=None, canopy_model=None, base_dem: str = "glo30") -> dict:
+             building_model=None, canopy_model=None, base_dem: str = "srtm") -> dict:
     """Run the height model on `path`, write GeoTIFFs into `out_dir`, return arrays + a record.
 
     `gcps`: (lon, lat, height) control points that correct the DSM (georeferenced input only).
     `building_model`: a second height model blended at 75% on building pixels (`fuse_heights`).
     `canopy_model`: CHMv2 (viewer/canopy.py) for canopy heights in forest.
-    `base_dem`: the public DEM the absolute DSM sits on, "glo30" (Copernicus GLO-30) or
-    "srtm" (SRTM GL1); the organisers score against "SRTM/Copernicus".
+    `base_dem`: the public DEM the absolute DSM sits on, "srtm" (SRTM GL1, the default: the brief
+    names SRTM) or "glo30" (Copernicus GLO-30, also used where SRTM has no coverage).
     Both are kept on the CPU and moved to `device` only while they run. `load_pipeline()` loads
     all three the way the app does.
 
@@ -524,11 +553,17 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
         "dsm": None,
     }
 
-    ground, dsm, deck = None, None, None  # ground: bare earth for the 3D view only; dsm: the export
+    ground, dsm, deck, embank = None, None, None, []  # ground: bare earth for the 3D view only; dsm: the export
     if geo.get("georeferenced") and not geospatial_warnings:
         report(f"Fetching ground elevation ({dem_label})", 0.78)
         try:
             coarse, pad_px = padded_dem(geo, base_dem)
+            if coarse is None and base_dem != "glo30":  # SRTM stops at 60 N / 56 S, or is unreachable
+                coarse, pad_px = padded_dem(geo, "glo30")
+                if coarse is not None:
+                    record["base_dem_fallback"] = f"{dem_label} unavailable here: used Copernicus GLO-30"
+                    base_dem = "glo30"
+                    dem_label, dem_geoid = BASE_DEMS[base_dem][1:]
             dem = None if coarse is None else dem_on_image(coarse, pad_px, shape)
             if dem is None:
                 record["dsm_error"] = f"no {dem_label} coverage for this area"
@@ -545,6 +580,12 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
                 ground = dem_consistent_ground(dem, ndsm, gsd_out)
             else:
                 ground = ground_for(coarse, pad_px, shape, 300.0 if method == "open300" else 150.0)
+            # Embankments, levees, dams (OpenStreetMap): terrain the bare-earth opening erased.
+            embank, record["flood_defences"] = embankment_lines(geo, transform, crs, shape, dem)
+            if embank:
+                from viewer import embankments as emb
+
+                ground = emb.keep_in_ground(ground, dem, emb.corridor([e["pts"] for e in embank], shape, gsd_out))
             dsm = compose_dsm(dem, detail, gsd_out, ground)
             # Bridges: the model reads decks as ground. OpenStreetMap places them; their height
             # comes from the terrain where they land (viewer/bridges.py). Laid over the finished
@@ -568,6 +609,10 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
                     dsm = dsm + fix
                     ground = ground + fix  # the 3D view's terrain follows the corrected DSM
                     deck = deck + fix
+                    for e in embank:  # fix is a constant field; its value is the offset
+                        e["crest_m"] = round(e["crest_m"] + float(gcp_info["offset_m"]), 2)
+                    record["flood_defences"]["items"] = [
+                        {"kind": e["kind"], "name": e["name"], "crest_m": e["crest_m"]} for e in embank]
             dem_note = (f"{dem_label}, DEM-consistent: model detail added with its "
                         f"{DEM_POSTING_M:.0f} m mean removed")
             if fix is not None:
@@ -600,7 +645,7 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
         dtm_source=None))
 
     return {"record": record, "rgb": rgb, "ndsm": ndsm, "classes": classes, "ground": ground,
-            "dsm": dsm, "deck": deck}
+            "dsm": dsm, "deck": deck, "embankments": embank}
 
 
 CACHE_DIR = Path(__file__).resolve().parent / "cache"
@@ -647,8 +692,8 @@ def main() -> None:
     ap.add_argument("--no-tta", action="store_true", help="4x faster, slightly less accurate")
     ap.add_argument("--gcps", type=Path, default=None,
                     help="CSV of ground control points (lon, lat, height m) to correct the DSM")
-    ap.add_argument("--base-dem", choices=("glo30", "srtm"), default="glo30",
-                    help="public DEM under the absolute DSM (default Copernicus GLO-30)")
+    ap.add_argument("--base-dem", choices=("glo30", "srtm"), default="srtm",
+                    help="public DEM under the absolute DSM (default SRTM GL1, Copernicus where SRTM has none)")
     args = ap.parse_args()
     gcps = read_gcps(args.gcps) if args.gcps else None
 
