@@ -48,17 +48,20 @@ part works, data formats, API, models, measured results and limits), [model card
 5. **Terrain in the 3D view.** A bare-earth estimate chosen by scene type (measured against USGS
    LiDAR on four scenes): a 300 m morphological opening of the selected base DEM for dense cities, 150 m for towns
    (keeps hills), model subtraction for forest and farmland. Display only.
-6. **3D city model (display).** From the same prediction, `viewer/city_model.py` builds an LoD1
-   city: each building complex cut into roofs where the roof height steps or dips (touching row
-   houses become separate blocks) and into distinct height levels (a tower on a podium becomes two
-   blocks), outlines kept as traced unless squaring them off barely moves them, extruded with the
-   photo on the roof. On 40 GAMUS val tiles (`viewer/city_eval.py`) this scores footprint IoU 0.841
-   and edge F1 0.655 against the true outlines, 2372 separate buildings (was 0.787 / 0.564 / 1281);
-   SAM 3 masks scored lower (0.72–0.78 IoU) and aren't used. Trees are detected as individual crowns
-   (height, width and colour from the image), and flat ground. It is also exported as
-   `buildings.geojson` (footprint + height, WGS84 for GeoTIFF input). This is for the 3D view only:
-   regularizing heights this way raised RMSE from 2.66 m to 2.86–3.38 m on validation tiles, so the
-   GeoTIFFs stay the raw model output. The viewer's *Exact surface* toggle shows that raw DSM.
+6. **3D city model (display).** Image-only reconstruction uses `viewer/city_model.py`:
+   roof plateaus become LoD1 blocks, with separate towers and podiums where the predicted heights
+   support them. On 40 cached GAMUS validation tiles, the current roof filter gives footprint IoU
+   0.848, edge F1 0.673, and display building-height RMSE 3.07 m; this is not a guarantee for new
+   imagery ([rendering report](docs/evaluation/viewer-rendering-2026-10-04.md)).
+   For GeoTIFFs, **Map-assisted** is the default: OSM outlines and building parts constrain the
+   structure, height tags take priority, floor counts or image heights fill missing dimensions,
+   and simple roof meshes represent gabled, hipped, pyramidal, skillion, dome and cone shapes.
+   Uncertain image fallback blocks are available through **Include image-derived buildings**.
+   Click a part to inspect its geometry, height and roof sources. Mapped roofs use solid colours
+   because oblique aerial roof textures may be displaced from ground footprints.
+   Trees remain image-derived. `buildings.geojson` exports footprints, heights and provenance
+   (WGS84 for GeoTIFFs); GLBs export the displayed geometry. These display models never modify
+   the nDSM/DSM rasters. **Exact DSM**, probes and Accuracy retain image-model elevations.
 7. **Viewer.** React + three.js. The RGB image is draped on a displaced mesh: 1025 × 1025 on
    capable GPUs, 513 × 513 on integrated or software graphics, chosen automatically. Navigation:
    orbit, WASD/QE flight, first-person **Walk** and waypoint flythroughs.

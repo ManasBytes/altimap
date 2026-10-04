@@ -82,8 +82,14 @@ followed by Error. Keep the error layer visible long enough to show its legend.
 
 **Show:** Image tab. Replace the reference with the Philadelphia LiDAR DSM. Select
 **Absolute elevation (DSM)**, clear the pixel-size field, retain **Fast** and **SRTM**, then
-upload `naip_philadelphia_cityhall.tif`. Show Ground (SRTM), DSM range and downloads. In View,
+select **Map-assisted** and upload `naip_philadelphia_cityhall.tif`. Show Ground (SRTM), DSM range and downloads. In View,
 switch City model → Exact DSM, then back. In Accuracy, show “Compared with the absolute DSM”.
+
+In City model, show the mapped-part count and shaped roofs. Click one building part to show
+its geometry and height sources. Say: “Mapped outlines and building parts improve the displayed
+structure. Some dimensions are tagged in OpenStreetMap; others remain estimates. These mapped
+dimensions do not change the model's raster accuracy scores.” Keep image fallback off for this
+segment; it is an optional overlay of uncertain predicted blocks.
 
 If coarse-DEM street ramps distract from the building view, use **View → Ground display →
 Flat ground** and keep its visualization label visible. Say: “This view removes terrain relief

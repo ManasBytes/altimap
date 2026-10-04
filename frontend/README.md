@@ -21,9 +21,9 @@ Open http://127.0.0.1:8000. For frontend development, `npm run dev` starts Vite;
 ## Workstation
 
 - **Image:** upload PNG/JPG/GeoTIFF or choose a GAMUS reference scene; set GSD, quality,
-  reference type, GCPs and base DEM. Raster/GeoJSON downloads appear here.
+  reference type, GCPs, base DEM and Map-assisted / Image only buildings. Raster/GeoJSON downloads appear here.
 - **View:** City model / Exact DSM, RGB/Surface/Height/Classes/Slope/Error layers,
-  contours and vertical exaggeration.
+  contours, vertical exaggeration, estimated/flat ground and optional image fallback buildings.
 - **Measure:** point height/slope, A→B profiles, PNG scale reprocessing and waypoint routes.
 - **Accuracy:** reference metrics, scatter, per-class errors, DEM agreement and GCP results.
 - **Context:** OpenStreetMap bridges, flood defences and critical facilities for GeoTIFFs.
@@ -38,7 +38,11 @@ Orbit by dragging; fly with WASD/QE. Walk follows the ground using WASD and Shif
 In Measure, double-click A and B for a height profile. For a route, enable Set points, click at
 least two terrain positions, then Play; markers can be selected and moved with transform arrows.
 
-Uploads show model estimates at 1× vertical scale. SRTM is the default absolute-elevation base;
+Uploads use 1× vertical scale. GeoTIFF City model defaults to mapped OSM building parts when
+available, with height provenance on click and simple shaped roofs. Missing dimensions remain
+estimates; image fallback blocks are optional. Probes, profiles, Accuracy and GeoTIFFs retain
+image-model raster values; GLBs export the displayed geometry with source metadata.
+SRTM is the default absolute-elevation base;
 Copernicus is selectable. PNG/JPG without a known GSD use an explicitly reported experimental
 0.33 m/pixel assumption. Select the reference type explicitly: nDSM/AGL is height above ground,
 while DSM is absolute elevation. Auto-detect can misclassify references near sea level.

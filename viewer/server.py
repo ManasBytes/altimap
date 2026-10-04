@@ -444,7 +444,8 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
                             reference_kind: Literal["auto", "ndsm", "dsm"] = Form("auto"),
                             gcps: UploadFile | None = File(None),
                             job: str | None = Form(None), tta: bool = Form(True),
-                            base_dem: str = Form("srtm")):
+                            base_dem: str = Form("srtm"),
+                            building_source: Literal["hybrid", "image"] = Form("hybrid")):
     """Height model on an upload: metric nDSM always, absolute DSM for GeoTIFFs.
 
     Response keeps the classify-static shape (rgb/height/classes data URIs) so
@@ -456,6 +457,9 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
     `base_dem` ("glo30" or "srtm") picks the public DEM
     it sits on, and the response scores it against both. With a `job` id,
     progress is readable at /api/progress/<job> while this request runs.
+    `building_source="hybrid"` reconstructs mapped OSM building parts and simple
+    roofs where available; "image" keeps image-derived blocks. This affects the
+    city model and buildings GeoJSON only, never the raw DSM/nDSM rasters.
     """
     from starlette.concurrency import run_in_threadpool
 
@@ -515,7 +519,8 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
         # Model inference is blocking: run it off the event loop so the server keeps
         # answering progress polls and static files meanwhile.
         payload = await run_in_threadpool(_run_estimate, staged, scene_dir, scene_id, gsd,
-                                          ref_path, report, tta, gcp_points, base_dem, reference_kind)
+                                          ref_path, report, tta, gcp_points, base_dem, reference_kind,
+                                          building_source)
     except HTTPException:
         raise
     except Exception as exc:
@@ -532,7 +537,8 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
 
 def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | None,
                   ref_path: Path | None, report, tta: bool = True, gcps: list | None = None,
-                  base_dem: str = "srtm", reference_kind: str = "auto") -> dict:
+                  base_dem: str = "srtm", reference_kind: str = "auto",
+                  building_source: str = "hybrid") -> dict:
     from viewer.city_model import bridges, city_model
     from viewer.classify import classes_to_rgb
     from viewer.estimate import estimate
@@ -606,6 +612,39 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
         city_ground = to_city(out["ground"]) - ground_zero  # same zero as the terrain relief PNG
     city = city_model(to_city(ndsm_filled), to_city(out["classes"], nearest=True),
                       to_city(out["rgb"]), city_gsd, ground=city_ground)
+    geometry_info = {"requested": building_source, "mapped_parts": 0,
+                     "image_parts": len(city["buildings"]), "heights": {}, "roof_meshes": 0}
+    if building_source == "hybrid" and record["georeferenced"]:
+        report("Reconstructing mapped building parts", 0.94)
+        try:
+            import rasterio
+            from rasterio.transform import Affine
+            from rasterio.warp import transform_bounds
+            from collections import Counter
+            from viewer import mapped_buildings
+
+            with rasterio.open(staged) as src:
+                bounds = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+                city_transform = src.transform * Affine.scale(src.width / csize[0], src.height / csize[1])
+                city_crs = src.crs
+            elements = mapped_buildings.fetch(bounds)
+            if elements is None:
+                geometry_info["note"] = "OpenStreetMap unavailable; using image-derived buildings"
+            else:
+                mapped = mapped_buildings.reconstruct(elements, city_transform, city_crs,
+                    to_city(ndsm_filled), to_city(out["classes"], nearest=True),
+                    to_city(out["rgb"]), city_gsd, ground=city_ground)
+                city["buildings"] = mapped_buildings.combine(city["buildings"], mapped)
+                geometry_info.update(mapped_parts=len(mapped), image_parts=len(city["buildings"]) - len(mapped),
+                    heights=dict(Counter(b["height_source"] for b in mapped)),
+                    roof_meshes=sum("roof" in b for b in mapped))
+                if not mapped:
+                    geometry_info["note"] = "No usable mapped buildings in this extent; using image-derived buildings"
+        except Exception:
+            geometry_info["note"] = "Mapped reconstruction unavailable; using image-derived buildings"
+    elif building_source == "hybrid":
+        geometry_info["note"] = "Map assistance requires a georeferenced image; using image-derived buildings"
+    record["building_geometry"] = geometry_info
     _write_buildings_geojson(scene_dir, city["buildings"], out["ndsm"].shape)
     record["files"].append("buildings.geojson")
     try:
@@ -644,6 +683,9 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
     for b in city["buildings"]:
         b["rings"] = [[[round(0.5 + (u - 0.5) * fw, 5), round(0.5 + (v - 0.5) * fh, 5)] for u, v in ring]
                       for ring in b["rings"]]
+        if "roof" in b:
+            b["roof"]["vertices"] = [[0.5 + (u - 0.5) * fw, 0.5 + (v - 0.5) * fh, z]
+                                      for u, v, z in b["roof"]["vertices"]]
     for t in city["trees"] + facilities:
         t["u"], t["v"] = round(0.5 + (t["u"] - 0.5) * fw, 5), round(0.5 + (t["v"] - 0.5) * fh, 5)
     for e in embank:
@@ -706,8 +748,15 @@ def _write_buildings_geojson(scene_dir: Path, buildings: list[dict], shape: tupl
         geom = {"type": "Polygon", "coordinates": [ring + ring[:1] for ring in rings]}
         if crs is not None:
             geom = transform_geom(crs, "EPSG:4326", geom)
-        features.append({"type": "Feature", "geometry": geom, "properties": {"height_m": b["h"]}})
+        properties = {"height_m": b["h"], "source": b.get("source", "Image prediction"),
+                      "height_source": b.get("height_source", "Image height estimate")}
+        for key in ("source", "osm_id", "name", "height_source", "roof_source", "roof_shape", "min_height_m"):
+            if key in b:
+                properties[key] = b[key]
+        features.append({"type": "Feature", "geometry": geom, "properties": properties})
     doc = {"type": "FeatureCollection", "features": features}
+    if any(b.get("source") == "OpenStreetMap" for b in buildings):
+        doc["attribution"] = "© OpenStreetMap contributors; https://www.openstreetmap.org/copyright"
     if crs is None:
         doc["note"] = "no georeferencing: coordinates are image pixels (x = column, y = row)"
     (scene_dir / "buildings.geojson").write_text(json.dumps(doc))

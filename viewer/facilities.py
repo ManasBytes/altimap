@@ -43,23 +43,26 @@ def place(found: list[dict], transform, crs, shape: tuple[int, int], buildings: 
     import numpy as np
     from rasterio.warp import transform as warp
     from shapely.geometry import Point, Polygon
+    from viewer.mapped_buildings import roof_elevation
 
     if not found:
         return []
     xs, ys = warp("EPSG:4326", crs, [f["lon"] for f in found], [f["lat"] for f in found])
     cols, rows = ~transform * (np.asarray(xs), np.asarray(ys))  # lists fail inside affine
     h, w = shape
-    blocks = [(b, Polygon(b["rings"][0])) for b in buildings if b.get("kind") != "bridge"]
+    blocks = sorted([(b, Polygon(b["rings"][0], b["rings"][1:])) for b in buildings
+                     if b.get("kind") != "bridge"], key=lambda item: item[0]["t"], reverse=True)
     out = []
     for f, c, r in zip(found, cols, rows):
         u, v = float(c) / w, float(r) / h
         if not (0 <= u < 1 and 0 <= v < 1):
             continue
         p = Point(u, v)
-        home = next((b for b, poly in blocks if poly.is_valid and poly.contains(p)), None)
+        candidates = [(b, roof_elevation(b, u, v)) for b, poly in blocks if poly.is_valid and poly.contains(p)]
+        home, support = max(candidates, key=lambda item: item[1]) if candidates else (None, 0)
         if home is not None:
             home["facility"] = {"kind": f["kind"], "name": f["name"]}
-            z = home["t"]
+            z = support
         elif ground is not None:
             z = float(ground[int(v * ground.shape[0]), int(u * ground.shape[1])])
         else:

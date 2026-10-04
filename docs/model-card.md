@@ -24,6 +24,10 @@ Hackathon 2026, problem statement 26175 (ISRO, "DepthWizard"), as the model behi
 GeoTIFFs and a 3D city model. Setup and usage: the repo's
 [SETUP.md](../SETUP.md).
 
+The viewer can additionally use OSM outlines, building parts and height/roof tags for its
+Map-assisted city model. Those mapped dimensions and floor/roof heuristics are separate from
+this learned model: they do not change nDSM/DSM GeoTIFFs or the evaluation metrics below.
+
 ## Model
 
 - **Architecture:** RS3DAda: DINOv2 ViT-L/14 encoder + DPT decoder with a height-regression head

@@ -396,6 +396,40 @@ Built on a grid of up to 2048 px from the nDSM and classes:
 The city model **never feeds the GeoTIFFs**. Regularising heights this way raised RMSE from 2.66
 to 2.86–3.38 m on validation tiles, so the exports stay the model's raw output.
 
+### 6.4 Map-assisted building reconstruction (`viewer/mapped_buildings.py`)
+
+The upload API defaults to `building_source=hybrid`; `image` retains the image-only LoD1
+generator above. For georeferenced images, the hybrid path fetches cached OSM outlines,
+parts and multipolygons, projects them into the input grid, clips them to the image and
+preserves courtyard holes. Outlines with mapped parts are not extruded as whole buildings,
+following [Simple 3D Buildings](https://wiki.openstreetmap.org/wiki/Simple_3D_Buildings).
+
+Height priority is the part's explicit `height`, then `building:levels × 3.2 m` plus roof
+height, then a containing parent's height, then the 75th-percentile predicted building
+height inside the footprint. Only the explicit height tag is shown as a tagged dimension;
+the other routes are labelled estimates. `min_height` and `building:min_level` retain raised
+parts. Floor-derived total heights add roof height, while explicit total heights already
+include it. Unknown height with no image support produces no invented block.
+
+Simple roof meshes support gabled, hipped, pyramidal, skillion, dome and cone shapes. Roof
+height uses its tag when supplied, otherwise a bounded footprint-width estimate. Along/across
+orientation follows the footprint's main axis; directional bearings and complex roofs such
+as quadruple saltbox are not reconstructed. Unsupported or incomplete triangulations fall
+back to a labelled flat approximation. This is not a complete architectural reconstruction.
+
+The viewer shows mapped parts first and offers image fallback blocks as an optional overlay;
+they are hidden by default when mapped geometry exists because oblique facades can create
+duplicate structures. Mapped roofs use solid sampled colours rather than misaligned aerial
+textures. Walk collisions use the displayed footprints, including courtyard holes. Facility
+pins use triangle-interpolated roof support on the highest containing part. Flat ground
+preserves raised bases and roof geometry while removing ground relief.
+
+GeoJSON and GLB carry source/height/roof provenance and OSM attribution. nDSM/DSM exports,
+reference validation, probe values and profiles remain the original image-model products;
+mapped dimensions do not enter elevation accuracy scores. The GAMUS city-model benchmarks
+above describe the image-only path, not mapped reconstruction accuracy.
+See [the mapped reconstruction check](docs/evaluation/mapped-buildings-2026-10-04.md).
+
 ## 7. Viewer (`frontend/`, React + Vite + three.js)
 
 Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `styles.css`.

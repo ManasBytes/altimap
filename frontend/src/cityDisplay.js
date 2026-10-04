@@ -10,6 +10,23 @@ function inRing(u, v, ring) {
   return inside;
 }
 
+export function buildingContains(b, u, v) {
+  return inRing(u, v, b.rings[0]) && !b.rings.slice(1).some((r) => inRing(u, v, r));
+}
+
+export function roofElevation(building, u, v) {
+  for (const face of building.roof?.faces ?? []) {
+    const [a, b, c] = face.map((i) => building.roof.vertices[i]);
+    const denominator = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+    if (Math.abs(denominator) < 1e-15) continue;
+    const wa = ((b[1] - c[1]) * (u - c[0]) + (c[0] - b[0]) * (v - c[1])) / denominator;
+    const wb = ((c[1] - a[1]) * (u - c[0]) + (a[0] - c[0]) * (v - c[1])) / denominator;
+    const wc = 1 - wa - wb;
+    if (Math.min(wa, wb, wc) >= -1e-8) return wa * a[2] + wb * b[2] + wc * c[2];
+  }
+  return building.t;
+}
+
 export function flatCity(sample) {
   const ground = sample.groundGrid;
   const side = Math.round(Math.sqrt(ground?.length ?? 0));
@@ -20,19 +37,22 @@ export function flatCity(sample) {
     return ground[row * side + col] - sample.terrain.ground.min_m;
   };
   const buildings = sample.city.buildings.map((b) => {
-    let base = 0;
+    let base = b.min_height_m ?? 0;
+    let top = b.h;
     if (b.kind === "bridge") {
       const ring = b.rings[0];
       const u = ring.reduce((sum, p) => sum + p[0], 0) / ring.length;
       const v = ring.reduce((sum, p) => sum + p[1], 0) / ring.length;
       base = Math.max(0, b.b - groundAt(u, v));
+      top = base + b.h;
     }
-    return { ...b, b: base, t: base + b.h };
+    const roof = b.roof && { ...b.roof,
+      vertices: b.roof.vertices.map(([u, v, z]) => [u, v, z - ((b.t ?? b.h) - b.h)]) };
+    return { ...b, b: base, t: top, ...(roof ? { roof } : {}) };
   });
   const facilities = (sample.facilities ?? []).map((f) => {
-    const home = buildings.find((b) => b.kind !== "bridge" &&
-      inRing(f.u, f.v, b.rings[0]) && !b.rings.slice(1).some((r) => inRing(f.u, f.v, r)));
-    return { ...f, z: home ? home.t : 0 };
+    const candidates = buildings.filter((b) => b.kind !== "bridge" && buildingContains(b, f.u, f.v));
+    return { ...f, z: candidates.length ? Math.max(...candidates.map((b) => roofElevation(b, f.u, f.v))) : 0 };
   });
   return {
     buildings,

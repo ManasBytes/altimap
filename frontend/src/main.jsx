@@ -39,7 +39,7 @@ import "@fontsource/barlow/600.css";
 import "@fontsource/barlow-condensed/600.css";
 import "./theme.css";
 import { gamusScenes } from "./gamusScenes";
-import { flatCity } from "./cityDisplay.js";
+import { buildingContains, flatCity } from "./cityDisplay.js";
 
 const samples = {
   train: {
@@ -1071,7 +1071,7 @@ const INSPECTOR_TABS = [
 
 function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM, facilities, embankments) {
   // hcol: the Height layer's colours (jet over 0..maxM metres), swapped in by setHeightMode
-  const roof = { pos: [], nrm: [], uv: [], hcol: [], ranges: [] }; // ranges: [firstTri, endTri, building]
+  const roof = { pos: [], nrm: [], uv: [], col: [], hcol: [], ranges: [], groups: [] };
   const wall = { pos: [], nrm: [], col: [], hcol: [], ranges: [] };
   const jet = [0, 0, 0];
   const top = Math.max(maxM || 0, 1e-3);
@@ -1097,7 +1097,7 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM, facil
         shape.holes.push(new THREE.Path(hole.map(toVec)));
       // Base = lowest ground under the footprint, top = median ground + height (metres).
       g = new THREE.ExtrudeGeometry(shape, {
-        depth: Math.max(0.5, (b.t ?? b.h) - (b.b ?? 0)),
+        depth: Math.max(0.01, (b.t ?? b.h) - (b.b ?? 0) - (b.roof?.height ?? 0)),
         bevelEnabled: false,
         UVGenerator: uvGenerator,
       });
@@ -1122,18 +1122,47 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM, facil
       const isCap = group.materialIndex === 0;
       const target = isCap ? roof : wall;
       for (let t = group.start; t < group.start + group.count; t += 3) {
-        if (isCap && nrm[t * 3 + 1] < 0) continue; // bottom cap faces the ground: never visible
+        if (isCap && (nrm[t * 3 + 1] < 0 || b.roof)) continue;
         for (let k = t; k < t + 3; k++) {
           target.pos.push(pos[k * 3], pos[k * 3 + 1], pos[k * 3 + 2]);
           target.nrm.push(nrm[k * 3], nrm[k * 3 + 1], nrm[k * 3 + 2]);
-          if (isCap) target.uv.push(uv[k * 2], uv[k * 2 + 1]);
+          if (isCap) {
+            target.uv.push(uv[k * 2], uv[k * 2 + 1]);
+            target.col.push(...(b.source === "OpenStreetMap" ? [wallColour.r, wallColour.g, wallColour.b] : [1, 1, 1]));
+          }
           else target.col.push(wallColour.r, wallColour.g, wallColour.b);
           target.hcol.push(jet[0], jet[1], jet[2]);
         }
       }
     }
+    if (b.roof) {
+      const vertex = ([u, v, z]) => new THREE.Vector3(-4 + 8 * u, z, -4 + 8 * v);
+      const append = (target, points) => {
+        const normal = new THREE.Vector3().subVectors(points[1], points[0])
+          .cross(new THREE.Vector3().subVectors(points[2], points[0]));
+        if (normal.lengthSq() < 1e-16) return;
+        normal.normalize();
+        for (const p of points) {
+          target.pos.push(p.x, p.y, p.z);
+          target.nrm.push(normal.x, normal.y, normal.z);
+          target.col.push(wallColour.r, wallColour.g, wallColour.b);
+          target.hcol.push(...jet);
+          if (target.uv) target.uv.push((p.x + 4) / 8, 1 - (p.z + 4) / 8);
+        }
+      };
+      const vertices = b.roof.vertices.map(vertex);
+      for (const face of b.roof.faces) append(roof, face.map((i) => vertices[i]));
+      const eave = b.t - b.roof.height;
+      for (const [a, z] of b.roof.edges) {
+        const p = vertices[a], q = vertices[z];
+        const pb = new THREE.Vector3(p.x, eave, p.z), qb = new THREE.Vector3(q.x, eave, q.z);
+        append(wall, [pb, qb, q]);
+        append(wall, [pb, q, p]);
+      }
+    }
     g.dispose();
     roof.ranges.push([roofStart, roof.pos.length / 9, bi]);
+    roof.groups.push([roofStart * 3, roof.pos.length / 3 - roofStart * 3, b.source === "OpenStreetMap" ? 1 : 0]);
     wall.ranges.push([wallStart, wall.pos.length / 9, bi]);
   }
   const makeGeometry = (parts) => {
@@ -1144,9 +1173,12 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM, facil
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(parts.col ?? parts.hcol, 3));
     return geometry;
   };
-  const photoRoof = new THREE.MeshStandardMaterial({ map: roofTexture, roughness: 0.9, metalness: 0.02 });
+  const photoRoof = new THREE.MeshStandardMaterial({ map: roofTexture, vertexColors: true, roughness: 0.9, metalness: 0.02 });
+  const mappedRoof = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.02 });
   const heightRoof = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.02 });
-  const roofs = new THREE.Mesh(makeGeometry(roof), photoRoof);
+  const roofGeometry = makeGeometry(roof);
+  for (const [start, count, material] of roof.groups) roofGeometry.addGroup(start, count, material);
+  const roofs = new THREE.Mesh(roofGeometry, [photoRoof, mappedRoof]);
   const walls = new THREE.Mesh(
     makeGeometry(wall),
     new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }),
@@ -1251,9 +1283,16 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM, facil
     group.add(iconGroup);
   }
   group.userData.icons = icons;
+  group.userData.buildings = buildings.map((b) => ({
+    name: b.name ?? "", osm_id: b.osm_id, height_m: b.h,
+    source: b.source ?? "Image prediction", height_source: b.height_source ?? "Image height estimate",
+    roof_shape: b.roof_shape ?? "flat", roof_source: b.roof_source ?? "Flat roof approximation",
+  }));
   // Height layer: roofs, walls and crowns take the jet colour of their height; photo otherwise.
   group.userData.setHeightMode = (on) => {
-    roofs.material = on ? heightRoof : photoRoof;
+    roofs.material = on ? [heightRoof, heightRoof] : [photoRoof, mappedRoof];
+    roofs.geometry.attributes.color.array.set(on ? roof.hcol : roof.col);
+    roofs.geometry.attributes.color.needsUpdate = true;
     walls.geometry.attributes.color.array.set(on ? wall.hcol : wall.col);
     walls.geometry.attributes.color.needsUpdate = true;
     const crowns = meshes[2];
@@ -1261,6 +1300,15 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM, facil
       crowns.instanceColor.array.set(crowns.userData.colours[on ? 1 : 0]);
       crowns.instanceColor.needsUpdate = true;
     }
+  };
+  group.userData.dispose = () => {
+    const materials = new Set([photoRoof, mappedRoof, heightRoof]);
+    group.traverse((object) => {
+      object.geometry?.dispose();
+      for (const material of Array.isArray(object.material) ? object.material : [object.material])
+        if (material) materials.add(material);
+    });
+    materials.forEach((material) => material.dispose());
   };
   return group;
 }
@@ -1739,11 +1787,16 @@ function TerrainCanvas({
       const widthM = sample.groundWidthM ?? 1024 * GAMUS_GSD_M;
       onBuildingPick?.({
         bridge: b.kind === "bridge",
+        name: b.name,
+        geometrySource: b.source ?? "Image prediction",
+        heightSource: b.height_source ?? "Image height estimate",
+        roofShape: b.roof_shape ?? "flat",
+        roofSource: b.roof_source ?? "Flat roof approximation",
         facility: b.facility ?? null,
         height: b.h,
         floors: Math.max(1, Math.round(b.h / 3.2)),
         areaM2: footprintAreaM2(b, widthM, sample.groundHeightM ?? widthM),
-        volumeM3: footprintAreaM2(b, widthM, sample.groundHeightM ?? widthM) * b.h,
+        volumeM3: footprintAreaM2(b, widthM, sample.groundHeightM ?? widthM) * ((b.t ?? b.h) - (b.b ?? 0)),
         roofElevation: sample.groundMinM != null ? sample.groundMinM + (b.t ?? b.h) : null,
       });
       state.current.renderDirty = true;
@@ -1756,6 +1809,7 @@ function TerrainCanvas({
           const exag = state.current.exaggeration || 1;
           const wrap = new THREE.Group();
           wrap.userData.terrainMode = sample.flatGround ? "flat visualization" : "estimated terrain";
+          if (sample.mappedGeometry) wrap.userData.attribution = "© OpenStreetMap contributors; https://www.openstreetmap.org/copyright";
           wrap.scale.set(gw / 8, gw / (8 * exag), gw / 8); // world units -> metres
           wrap.add(mesh.clone());
           if (city) {
@@ -1826,6 +1880,10 @@ function TerrainCanvas({
     state.current.walkEye = () => 1.7 * worldPerMetre();
     state.current.walkBlocked = (x, z) => {
       if (Math.abs(x) > 3.98 || Math.abs(z) > 3.98) return true;
+      if (sample.mappedGeometry && sample.buildings) {
+        return sample.buildings.some((b) => b.kind !== "bridge" && b.h > 2 &&
+          (b.min_height_m ?? 0) < 1.7 && buildingContains(b, (x + 4) / 8, (z + 4) / 8));
+      }
       const i = cellOf(x, z);
       const cf = state.current.classField;
       return Boolean(
@@ -2248,11 +2306,7 @@ function TerrainCanvas({
       transform.dispose();
       geo.dispose();
       material.dispose();
-      if (city)
-        city.children.forEach((m) => {
-          m.geometry.dispose();
-          m.material.dispose();
-        });
+      city?.userData.dispose?.();
       roofTexture?.dispose();
       if (exportRef) exportRef.current = null;
       if (material.map && material.map !== height) material.map.dispose();
@@ -2548,9 +2602,13 @@ function App() {
   }, [layer, sample]);
   const [cityMode, setCityMode] = useState(true);
   const [flatGround, setFlatGround] = useState(false);
-  useEffect(() => setFlatGround(false), [sample?.id, sample?.rgb]);
+  const [includeImageFallback, setIncludeImageFallback] = useState(false);
+  useEffect(() => {
+    setFlatGround(false);
+    setIncludeImageFallback(false);
+  }, [sample?.id, sample?.rgb]);
   const [pickedBuilding, setPickedBuilding] = useState(null);
-  useEffect(() => setPickedBuilding(null), [sample, cityMode, flatGround]);
+  useEffect(() => setPickedBuilding(null), [sample, cityMode, flatGround, includeImageFallback]);
   const exportRef = useRef(null);
   const profileView = profileStats(profile);
   const shown = sample ?? EMPTY_SAMPLE;
@@ -2559,6 +2617,10 @@ function App() {
   const viewSample = useMemo(() => {
     if (!sample) return sample;
     const terrain = sample.terrain; // georeferenced uploads only
+    const mappedGeometry = sample.city?.buildings.some((b) => b.source === "OpenStreetMap");
+    const buildings = mappedGeometry && !includeImageFallback
+      ? sample.city.buildings.filter((b) => b.source === "OpenStreetMap" || b.kind === "bridge")
+      : sample.city?.buildings;
     // 16-bit grids (uploads): mesh relative to the same zero as its relief PNG, probe = nDSM,
     // elevation = absolute DSM. Catalog scenes have none and use their PNGs.
     const relative = (grid, lo) =>
@@ -2571,7 +2633,9 @@ function App() {
       return {
         ...sample,
         ...grids,
-        ...flatCity(sample),
+        ...flatCity({ ...sample, city: { ...sample.city, buildings } }),
+        mappedGeometry,
+        ndsmMaxM: sample.cityMaxM ?? sample.maxM,
         flatGround: true,
         meshGrid: sample.groundGrid && new Float32Array(sample.groundGrid.length),
         meshOffsetM: 0,
@@ -2597,8 +2661,10 @@ function App() {
         exactMaxM: sample.maxM,
         elevation: terrain?.dsm,
         groundMinM: terrain?.ground.min_m,
-        buildings: sample.city.buildings,
+        buildings,
+        mappedGeometry,
         trees: sample.city.trees,
+        ndsmMaxM: sample.cityMaxM ?? sample.maxM,
       };
     if (terrain)
       // exact surface of a GeoTIFF upload: the exported absolute DSM itself
@@ -2616,7 +2682,7 @@ function App() {
     return sample.ndsmGrid
       ? { ...sample, ...grids, meshGrid: sample.ndsmGrid }
       : sample;
-  }, [sample, cityMode, flatGround]);
+  }, [sample, cityMode, flatGround, includeImageFallback]);
   const [waypointMode, setWaypointMode] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
   const [waypointCount, setWaypointCount] = useState(0);
@@ -2651,6 +2717,7 @@ function App() {
   const [gcpFile, setGcpFile] = useState(null); // CSV lon, lat, height: corrects a GeoTIFF's DSM
   const [uploadQuality, setUploadQuality] = useState("high"); // high = 4-flip TTA
   const [baseDem, setBaseDem] = useState("srtm"); // public DEM under a GeoTIFF's absolute DSM (the brief names SRTM)
+  const [buildingSource, setBuildingSource] = useState("hybrid");
   const [lastUploadFile, setLastUploadFile] = useState(null); // re-run at a measured scale
   const [knownLengthM, setKnownLengthM] = useState(""); // real length of the measured A -> B
   const [uploadProgress, setUploadProgress] = useState(null); // {stage, progress}
@@ -2709,6 +2776,7 @@ function App() {
       }
       if (gcpFile) body.append("gcps", gcpFile);
       body.append("base_dem", baseDem);
+      body.append("building_source", buildingSource);
       const res = await fetch(ESTIMATE_API_URL, { method: "POST", body });
       if (!res.ok) {
         const detail = await res.json().catch(() => null);
@@ -2740,6 +2808,7 @@ function App() {
         metricHeights: true,
         maxM: data.max_m,
         ndsmMaxM: data.max_m, // viewSample overrides maxM per mode; this stays the nDSM's
+        cityMaxM: Math.max(data.max_m, ...data.city.buildings.map((b) => b.h)),
         // 16-bit heights on the mesh grid, when the server's grid lines up with it
         ...(data.grids &&
         (data.grids.side - 1) % (HEIGHT_SAMPLE_WIDTH - 1) === 0
@@ -2807,6 +2876,7 @@ function App() {
         facilities_error: data.facilities_error,
         flood: data.flood_defences ?? null,
         bridges: data.bridges ?? null,
+        building_geometry: data.building_geometry,
       });
       setProfileCleared(false);
       setWaypointCount(0);
@@ -3052,13 +3122,17 @@ function App() {
                       )}
                       <dt>Height</dt>
                       <dd>{pickedBuilding.height.toFixed(1)} m</dd>
+                      {pickedBuilding.name && <><dt>Name</dt><dd>{pickedBuilding.name}</dd></>}
+                      <dt>Geometry source</dt><dd>{pickedBuilding.geometrySource}</dd>
+                      <dt>Height source</dt><dd>{pickedBuilding.heightSource}</dd>
+                      <dt>Roof</dt><dd>{pickedBuilding.roofShape} · {pickedBuilding.roofSource}</dd>
                       <dt>Floors (≈3.2 m each)</dt>
                       <dd>~{pickedBuilding.floors}</dd>
                       <dt>Footprint</dt>
                       <dd>
                         {Math.round(pickedBuilding.areaM2).toLocaleString()} m²
                       </dd>
-                      <dt>Volume</dt>
+                      <dt>Volume (block estimate)</dt>
                       <dd>
                         {Math.round(pickedBuilding.volumeM3).toLocaleString()}{" "}
                         m³
@@ -3221,7 +3295,7 @@ function App() {
                     />
                     <span>
                       {shown.metricHeights
-                        ? `${(shown.ndsmMaxM ?? shown.maxM).toFixed(1)} m`
+                        ? `${(viewSample.ndsmMaxM ?? shown.maxM).toFixed(1)} m`
                         : "high"}
                     </span>
                     <span className="legend-note">
@@ -3233,7 +3307,7 @@ function App() {
                 ) : shown.metricHeights ? (
                   <span>
                     Height above ground 0–
-                    {(shown.ndsmMaxM ?? shown.maxM).toFixed(1)} m · Height layer
+                    {(viewSample.ndsmMaxM ?? shown.maxM).toFixed(1)} m · Height layer
                     shows it in colour
                   </span>
                 ) : (
@@ -3543,6 +3617,19 @@ function App() {
                         </div>
                       </div>
                     </div>
+                    <div className="quality-row">
+                      <small>Building geometry (GeoTIFF)</small>
+                      <div className="segmented">
+                        <button className={buildingSource === "hybrid" ? "selected" : ""}
+                          aria-pressed={buildingSource === "hybrid"} onClick={() => setBuildingSource("hybrid")}>
+                          Map-assisted
+                        </button>
+                        <button className={buildingSource === "image" ? "selected" : ""}
+                          aria-pressed={buildingSource === "image"} onClick={() => setBuildingSource("image")}>
+                          Image only
+                        </button>
+                      </div>
+                    </div>
                     <input
                       ref={uploadFileRef}
                       type="file"
@@ -3707,7 +3794,7 @@ function App() {
               >
                 <div className="metric-grid">
                   <div>
-                    <small>Surface max</small>
+                    <small>{shown.metricHeights ? "Model nDSM max" : "Surface max"}</small>
                     <strong>{shown.max}</strong>
                     <em className="neutral">
                       {shown.metricHeights
@@ -3736,7 +3823,7 @@ function App() {
                     <div className="label-row">
                       <label>3D model</label>
                       <span>
-                        {sample.city.buildings.length} buildings ·{" "}
+                        {(viewSample.buildings ?? sample.city.buildings).length} building parts ·{" "}
                         {sample.city.trees.length} trees
                       </span>
                     </div>
@@ -3755,6 +3842,25 @@ function App() {
                       </button>
                     </div>
                   </div>
+                )}
+                {cityMode && uploadMeta?.building_geometry && (
+                  <p className="tab-empty">
+                    {uploadMeta.building_geometry.mapped_parts} mapped building parts ·{" "}
+                    {uploadMeta.building_geometry.image_parts} image-derived parts ({includeImageFallback || !uploadMeta.building_geometry.mapped_parts ? "shown" : "hidden"}) ·{" "}
+                    {uploadMeta.building_geometry.roof_meshes} shaped roofs.
+                    {" "}{uploadMeta.building_geometry.heights?.["OSM height tag"] ?? 0} tagged heights;{" "}
+                    {uploadMeta.building_geometry.mapped_parts - (uploadMeta.building_geometry.heights?.["OSM height tag"] ?? 0)} estimated heights.
+                    {" "}{uploadMeta.building_geometry.note ?? "Mapped data may be incomplete or outdated; click a building to inspect its sources. Roof dimensions without tags are estimates."}
+                    {" "}Probe and Accuracy report image-model rasters, not mapped heights.
+                    {uploadMeta.building_geometry.mapped_parts > 0 && <span> © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>.</span>}
+                  </p>
+                )}
+                {cityMode && uploadMeta?.building_geometry?.mapped_parts > 0 && (
+                  <label className="toggle-row">
+                    <input type="checkbox" checked={includeImageFallback}
+                      onChange={(e) => setIncludeImageFallback(e.target.checked)} />
+                    Include image-derived buildings
+                  </label>
                 )}
                 {cityMode && sample?.city && sample?.terrain && (
                   <div className="control-section">
