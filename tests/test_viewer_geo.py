@@ -222,3 +222,17 @@ def test_srtm_tiles_follow_the_south_west_corner_and_cache_apart_from_glo30(monk
     box = ((0.0, 0.0, 1.0, 1.0), "EPSG:4326", (2, 2))
     assert _patch_cache_path(*box) == _patch_cache_path(*box, "glo30")  # existing GLO-30 caches stay valid
     assert _patch_cache_path(*box, "srtm") != _patch_cache_path(*box)  # never served GLO-30 for SRTM
+
+
+def test_non_square_scenes_are_centred_in_the_viewer_square_not_stretched():
+    from viewer.geo import square, square_heights
+
+    a = np.arange(12, dtype=np.float32).reshape(2, 6)  # a wide 3:1 image
+    edge = square(a)
+    assert edge.shape == (6, 6)
+    assert (edge[2:4] == a).all() and (edge[0] == a[0]).all() and (edge[5] == a[1]).all()  # terrain continues
+    rgb = square(np.full((2, 6, 3), 200, np.uint8), (7, 17, 30))
+    assert rgb.shape == (6, 6, 3) and (rgb[0, 0] == (7, 17, 30)).all() and (rgb[2, 0] == 200).all()
+    g = square_heights(np.ones((300, 900)), 99, 0.0)  # flat 1 m scene on a 99-cell grid
+    rows = np.flatnonzero(g[:, 49] > 0.5)
+    assert g.shape == (99, 99) and len(rows) == 33 and rows[0] == 33  # a third of the height, centred

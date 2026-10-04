@@ -169,9 +169,9 @@ Unknown well-formed job ids return "Uploading", because the UI polls before the 
 
 `viewer/city_model.py` builds an LoD1 city **for display only**:
 - roofs cut at height steps (`_roof_segments`);
-- levels ≥ 2.5 m apart, found from flat pixels only. Wide slopes steeper than 45° that hang
-  below a roof are oblique facades: they join that roof as wall, so window rows can't become
-  a staircase;
+- one block per roof, never banded into height levels: banding the model's soft wall and
+  facade slopes stood towers as staircases. Wide slopes steeper than 45° that hang below a roof
+  (oblique facades) don't set its height;
 - outlines squared off only if that moves ≤ 10 % of their area;
 - tree crowns.
 
@@ -252,6 +252,8 @@ the named evaluator before changing any of these:
 - **GCP rule** (`dsm_eval`): every looser fit made the DSM worse on the LiDAR scenes. GLO-30 had
   no real offset there, and street points don't represent roofs.
 - **Outlines stay traced** (`city_eval`): squaring every outline cost IoU 0.843 → 0.793.
+- **One block per roof** (`city_eval`, `dsm_eval` LiDAR): dropping within-roof levels removed the
+  facade staircases; IoU 0.843 → 0.848, edge F1 0.663 → 0.674, building RMSE 2.87 → 3.05 m.
 - **Not adopted, all measured**:
   - SAM 3 and public building models: none beat ours on `city_eval`.
   - Post-filtering the nDSM: no gain.

@@ -46,6 +46,40 @@ def encode_rg16(depth: np.ndarray) -> tuple[np.ndarray, float, float]:
     return out, lo, hi
 
 
+def resample_centres(a: np.ndarray, rows: int, cols: int) -> np.ndarray:
+    """Bilinear samples of `a` at the pixel centres of a rows x cols grid over the same extent."""
+    r = (np.arange(rows) + 0.5) * a.shape[0] / rows - 0.5
+    c = (np.arange(cols) + 0.5) * a.shape[1] / cols - 0.5
+    rr, cc = np.meshgrid(r, c, indexing="ij")
+    return ndimage.map_coordinates(a, [rr, cc], order=1, mode="nearest")
+
+
+def square(a: np.ndarray, fill="edge") -> np.ndarray:
+    """A display raster centred in a square. The viewer's terrain is square, and a non-square
+    image squeezed onto it came out stretched (a 3:1 screenshot drawn 1:1). `fill` is a value,
+    or "edge" to continue the outer rows/columns so terrain has no cliff at the border."""
+    h, w = a.shape[:2]
+    side = max(h, w)
+    top, left = (side - h) // 2, (side - w) // 2
+    if isinstance(fill, str):
+        return np.pad(a, [(top, side - h - top), (left, side - w - left)] + [(0, 0)] * (a.ndim - 2),
+                      mode="edge")
+    out = np.empty((side, side) + a.shape[2:], a.dtype)
+    out[...] = fill
+    out[top:top + h, left:left + w] = a
+    return out
+
+
+def square_heights(a: np.ndarray, side: int, fill="edge") -> np.ndarray:
+    """Heights resampled onto a side x side viewer grid, the image centred at its own aspect.
+    NaN (nodata) takes the lowest valid value, as in encode_grid16."""
+    a = np.asarray(a, np.float64)
+    finite = np.isfinite(a)
+    a = np.where(finite, a, a[finite].min() if finite.any() else 0.0)
+    s = side / max(a.shape)
+    return square(resample_centres(a, max(1, round(a.shape[0] * s)), max(1, round(a.shape[1] * s))), fill)
+
+
 def encode_grid16(a: np.ndarray, side: int) -> dict:
     """Heights (metres) resampled to a side x side grid (pixel centres aligned, bilinear) as
     16-bit little-endian base64: value = lo + u16 / 65535 * span. NaN (nodata) takes the lowest
@@ -56,10 +90,7 @@ def encode_grid16(a: np.ndarray, side: int) -> dict:
     a = np.asarray(a, np.float64)
     finite = np.isfinite(a)
     a = np.where(finite, a, a[finite].min() if finite.any() else 0.0)
-    rows = (np.arange(side) + 0.5) * a.shape[0] / side - 0.5
-    cols = (np.arange(side) + 0.5) * a.shape[1] / side - 0.5
-    rr, cc = np.meshgrid(rows, cols, indexing="ij")
-    g = ndimage.map_coordinates(a, [rr, cc], order=1, mode="nearest")
+    g = resample_centres(a, side, side)
     lo = float(g.min())
     span = max(float(g.max()) - lo, 1e-3)
     u16 = np.rint((g - lo) / span * 65535).astype("<u2")

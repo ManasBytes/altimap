@@ -317,17 +317,17 @@ Built on a grid of up to 2048 px from the nDSM and classes:
 - **Separating buildings**: each blob of building pixels is cut into roofs, one seed per roof
   plateau, then a watershed over the height gradient. Touching row houses split at the step or
   dip between them.
-- **Height levels**: each roof splits into levels ≥ 2.5 m apart, found from interior pixels so
-  the soft ramp at walls doesn't make terraces. Speckle, thin slivers and pavement-height blobs
-  are dropped or merged.
-- **Facades**: in an oblique view a tall building's facade shows beside its roof. The model
-  reads it as a slope down from the roof, window rows included, and banding that slope into
-  levels made a staircase. A slope steeper than 45° (measured over a storey, ~1.5 m, so window
-  rows average out) and wider than 8 m that hangs below a roof joins that roof as wall and does
-  not count toward its height. A slope that rises above the nearest roof is a building of its
-  own and keeps its levels. The limit: where the model reads a facade as a *gentle* lower
-  roof (< 45°), it still shows as a step; nothing in the heights tells it from a real lower
-  wing.
+- **One block per roof**: each roof is extruded to the median of its interior heights and is
+  never banded into height levels. The model's heights fall off gradually at walls, across a
+  facade seen at an angle and along its rows of windows; banding that slope into levels ≥ 2.5 m
+  apart stood such roofs as staircases (the leaning towers of downtown Philadelphia showed it
+  most). A tower on its podium still gets two blocks, because they are two plateaus. Speckle
+  and pavement-height blobs are dropped.
+- **Facades**: a slope steeper than 45° (measured over a storey, ~1.5 m, so window rows average
+  out) and wider than 8 m that hangs below a roof belongs to that roof but doesn't count toward
+  its height, so a tower keeps its roof height. On the real scenes this changes little
+  (Philadelphia 43.23 → 43.21 m city-model RMSE vs LiDAR); the synthetic leaning-facade test
+  is where it matters (60 m instead of a diluted median).
 - **Outlines**: traced and simplified. `regularize` squares an outline off (rectangle or right
   angles) only when that moves ≤ 10 % of its area, because squaring everything cost footprint
   IoU 0.843 → 0.793.
@@ -491,14 +491,16 @@ The app's pipeline (v1, v2 on buildings, CHMv2 in forest; §5), with v1 alone in
 
 | Metric | Value |
 |---|---|
-| Footprint IoU | 0.843 |
-| Edge F1 (within 1 m) | 0.663 |
-| Height RMSE on buildings (v1 + 25/75 v2 fused) | 2.87 m (v1 alone 2.99) |
-| Separate buildings | 2434 |
+| Footprint IoU | 0.848 |
+| Edge F1 (within 1 m) | 0.674 |
+| Height RMSE on buildings (v1 + 25/75 v2 fused) | 3.05 m |
+| Separate buildings | 2036 |
 
-The facade rule (§6.3) cost 0.02 m here (2.85 → 2.87 m; these tiles are near-nadir) and
-moved the city model's RMSE against 3DEP LiDAR from 43.75 to 43.35 m in downtown
-Philadelphia (leaning towers) and from 5.44 to 5.54 m in Pittsburgh.
+One block per roof (§6.3) against banding roofs into levels: IoU 0.843 → 0.848, edge F1 0.663 →
+0.674, building height RMSE 2.87 → 3.05 m (a podium loses its own level when no step separates
+it from the tower). City-model RMSE against 3DEP LiDAR: downtown Philadelphia 43.75 → 43.21 m,
+Pittsburgh 5.44 → 5.75 m. Accepted for the display model because the staircases were the visible
+failure; the GeoTIFFs are unaffected.
 
 Raw building masks: ours IoU 0.854, which beats every public model we tested:
 

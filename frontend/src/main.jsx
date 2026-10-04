@@ -2522,8 +2522,9 @@ function App() {
               dsmGrid: decodeGrid(data.grids.dsm, data.grids.side, HEIGHT_SAMPLE_WIDTH),
             }
           : {}),
-        groundWidthM: data.shape[1] * (data.gsd_m || GAMUS_GSD_M),
-        groundHeightM: data.shape[0] * (data.gsd_m || GAMUS_GSD_M),
+        // The server centres the scene in a square at its own aspect: these span the square.
+        groundWidthM: (data.view_shape ?? data.shape)[1] * (data.gsd_m || GAMUS_GSD_M),
+        groundHeightM: (data.view_shape ?? data.shape)[0] * (data.gsd_m || GAMUS_GSD_M),
         areaKm2:
           (data.shape[0] * data.shape[1] * (data.gsd_m || GAMUS_GSD_M) ** 2) / 1e6,
         gsdAssumed: data.gsd_assumed,

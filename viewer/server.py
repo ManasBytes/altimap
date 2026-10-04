@@ -32,7 +32,8 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from viewer.geo import encode_grid16, encode_rg16, fit_absolute_elevation, read_geo_meta
+from viewer.geo import (encode_grid16, encode_rg16, fit_absolute_elevation, read_geo_meta, square,
+                        square_heights)
 from viewer.metrics import luminance, scene_metrics
 from viewer.terrain import build_terrain, height_field
 
@@ -266,6 +267,9 @@ async def upload(file: UploadFile = File(...), glb: bool = True):
 GRID_SIDE = 1025  # the viewer's mesh vertices per side (HEIGHT_SAMPLE_WIDTH/HEIGHT in main.jsx)
 
 
+VIEW_BG = (7, 17, 30)  # the viewer's background colour, so a scene's padding reads as empty
+
+
 def _png_data_uri(arr: np.ndarray) -> str:
     import base64
     import io
@@ -377,7 +381,7 @@ def _error_png(err: np.ndarray, size: tuple[int, int]) -> tuple[str, float]:
     blue, white, red = np.array([33, 102, 172]), np.array([247, 247, 247]), np.array([178, 24, 43])
     rgb = np.where(t < 0, white + (blue - white) * -t, white + (red - white) * t)
     rgb[~np.isfinite(e)] = (90, 90, 90)
-    return _png_data_uri(rgb.astype(np.uint8)), float(limit)
+    return _png_data_uri(square(rgb.astype(np.uint8), (90, 90, 90))), float(limit)
 
 
 def _validate(out: dict, ref_path: Path, scene_dir: Path) -> tuple[dict, dict]:
@@ -571,14 +575,19 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
 
     # Terrain for georeferenced input: bare earth under the city model, and the exported
     # DSM for "Exact surface" view. Both relative to their own minimum.
+    # Everything the viewer draws is centred in a square (`geo.square`) at the image's own aspect;
+    # surfaces continue the terrain into the border, objects (nDSM, classes) are flat there.
     terrain, ground_zero = None, None
     if out["ground"] is not None and out["dsm"] is not None:
         ground_view = to_view(out["ground"])
         ground_zero = float(np.nanmin(ground_view))
-        terrain = {"ground": relief_png(ground_view), "dsm": relief_png(to_view(out["dsm"]))}
-    grids = {"side": GRID_SIDE, "ndsm": encode_grid16(ndsm_filled, GRID_SIDE)}
+        dsm_view = square(ground_view) + square(to_view(out["dsm"]) - ground_view, 0.0)
+        terrain = {"ground": relief_png(square(ground_view)), "dsm": relief_png(dsm_view)}
+    grids = {"side": GRID_SIDE, "ndsm": encode_grid16(square_heights(ndsm_filled, GRID_SIDE, 0.0), GRID_SIDE)}
     if terrain is not None:
-        grids.update(ground=encode_grid16(out["ground"], GRID_SIDE), dsm=encode_grid16(out["dsm"], GRID_SIDE))
+        ground_g = square_heights(out["ground"], GRID_SIDE)
+        dsm_g = ground_g + square_heights(out["dsm"] - out["ground"], GRID_SIDE, 0.0)
+        grids.update(ground=encode_grid16(ground_g, GRID_SIDE), dsm=encode_grid16(dsm_g, GRID_SIDE))
 
     # 3D city model for the viewer (display only; GeoTIFFs stay raw), built on a grid up to
     # 2x finer than the previews so footprints follow the buildings closely.
@@ -597,6 +606,14 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
                       to_city(out["rgb"]), city_gsd, ground=city_ground)
     _write_buildings_geojson(scene_dir, city["buildings"], out["ndsm"].shape)
     record["files"].append("buildings.geojson")
+    # The GeoJSON keeps image coordinates; the viewer gets them inside its centred square.
+    h, w = out["ndsm"].shape
+    fh, fw = h / max(h, w), w / max(h, w)
+    for b in city["buildings"]:
+        b["rings"] = [[[round(0.5 + (u - 0.5) * fw, 5), round(0.5 + (v - 0.5) * fh, 5)] for u, v in ring]
+                      for ring in b["rings"]]
+    for t in city["trees"]:
+        t["u"], t["v"] = round(0.5 + (t["u"] - 0.5) * fw, 5), round(0.5 + (t["v"] - 0.5) * fh, 5)
 
     names = ["background", "ground", "low_vegetation", "buildings", "water", "roads", "trees"]
     counts = np.bincount(classes.ravel(), minlength=len(names))
@@ -610,10 +627,11 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
         "max_m": round(max_m, 2),
         "width": size[0],
         "height_px": size[1],
+        "view_shape": [max(h, w), max(h, w)],  # pixels the viewer's square spans
         "downloads": {f: f"/data-uploads/scenes/{scene_id}/{f}" for f in record["files"]},
-        "rgb": _png_data_uri(rgb),
-        "height": _png_data_uri(np.stack([height_u8] * 3, axis=-1)),
-        "classes": _png_data_uri(classes_to_rgb(classes)),
+        "rgb": _png_data_uri(square(rgb, VIEW_BG)),
+        "height": _png_data_uri(square(np.stack([height_u8] * 3, axis=-1), 0)),
+        "classes": _png_data_uri(classes_to_rgb(square(classes, 0))),
         "city": city,
         "terrain": terrain,
         "grids": grids,
