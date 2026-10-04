@@ -1057,12 +1057,12 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
   // like the buildings, so the group's y scale applies to both.
   if (trees?.length) {
     const toWorld = 8 / groundWidthM;
-    const crownGeo = new THREE.IcosahedronGeometry(1, 1);
+    const crownGeo = new THREE.IcosahedronGeometry(1, LOW_DETAIL ? 1 : 2);
     const trunkGeo = new THREE.CylinderGeometry(1, 1, 1, 6);
     trunkGeo.translate(0, 0.5, 0); // base at y = 0
     const crowns = new THREE.InstancedMesh(
       crownGeo,
-      new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }),
+      new THREE.MeshStandardMaterial({ roughness: 0.9 }),
       trees.length,
     );
     const trunks = new THREE.InstancedMesh(
@@ -1073,6 +1073,7 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
     const m4 = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const colour = new THREE.Color();
+    const hsl = {};
     const crownHeightColours = new Float32Array(trees.length * 3);
     trees.forEach((tree, i) => {
       const x = -4 + 8 * tree.u;
@@ -1083,7 +1084,11 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
       const base = tree.b ?? 0; // ground at the trunk, metres
       m4.compose(new THREE.Vector3(x, base + tree.h - rv, z), q, new THREE.Vector3(rw, rv, rw));
       crowns.setMatrixAt(i, m4);
+      // Canopy in overhead photos is dark, and lit from above it rendered near-black: lift it,
+      // keeping the photo's hue (autumn and dry-season trees keep their colour).
       colour.setRGB(tree.c[0] / 255, tree.c[1] / 255, tree.c[2] / 255, THREE.SRGBColorSpace);
+      colour.getHSL(hsl);
+      colour.setHSL(hsl.h, Math.min(1, hsl.s * 1.15 + 0.05), Math.max(hsl.l * 1.25, 0.22));
       crowns.setColorAt(i, colour);
       heightToColor(tree.h / top, jet);
       crownHeightColours.set(jet, i * 3);
@@ -1506,6 +1511,7 @@ function TerrainCanvas({
       );
       updateGeometry();
     });
+    height.colorSpace = THREE.SRGBColorSpace; // display only: the field is read from a canvas
     const material = new THREE.MeshStandardMaterial({
       map: height,
       vertexColors: true,
@@ -2194,6 +2200,7 @@ function TerrainCanvas({
     const nextMap = s.tex.load(source, () => {
       s.renderDirty = true;
     });
+    nextMap.colorSpace = THREE.SRGBColorSpace; // PNG/JPG photos and maps: untagged, they drew washed out
     s.mesh.material.map = nextMap;
     if (previousMap && previousMap !== s.height) previousMap.dispose();
     s.mesh.material.needsUpdate = true;
@@ -2537,6 +2544,7 @@ function App() {
       setMeasurePoint(null);
       setProfilePoints([]);
       setWalkMode(false);
+      setExaggeration(1); // uploads are metric: open at true scale (0.5 suits the restyled previews)
       setUploadMeta({
         seconds: data.seconds,
         width: data.width,
@@ -3447,7 +3455,10 @@ function App() {
             <div className="control-section">
               <div className="label-row">
                 <label>Vertical exaggeration</label>
-                <span>{exaggeration.toFixed(1)}×</span>
+                <span>
+                  {exaggeration.toFixed(1)}×
+                  {shown.metricHeights && Math.abs(exaggeration - 1) < 0.05 ? " · true scale" : ""}
+                </span>
               </div>
               <input
                 type="range"
