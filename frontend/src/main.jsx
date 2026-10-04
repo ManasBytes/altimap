@@ -967,6 +967,18 @@ const FACADE_COLOR = 0xd6cfc0;
 const TRUNK_COLOR = 0x5b4636;
 // 1x1 black height map: flat ground under the city model.
 const FLAT_HEIGHT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC";
+// Home view: back the camera off with the scene's height at true scale, so a 130 m downtown
+// doesn't open inside its towers (the fixed view was framed for flat tiles at 0.5x).
+function homeCamera(camera, controls, sample, exaggeration) {
+  let k = 1;
+  if (sample?.metricHeights && sample.groundWidthM) {
+    const metres = Math.max(sample.ndsmMaxM ?? sample.maxM ?? 0, sample.terrain?.dsm?.relief_m ?? 0);
+    k = Math.max(1, 1 + ((metres * 8) / sample.groundWidthM) * exaggeration / 2.5);
+  }
+  camera.position.set(0, 3.4 * k, 5.6 * k);
+  controls.target.set(0, 0, 0);
+}
+
 function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
   // hcol: the Height layer's colours (jet over 0..maxM metres), swapped in by setHeightMode
   const roof = { pos: [], nrm: [], uv: [], hcol: [], ranges: [] }; // ranges: [firstTri, endTri, building]
@@ -2227,8 +2239,7 @@ function TerrainCanvas({
   useEffect(() => {
     const s = state.current;
     if (!s.camera || !s.controls) return;
-    s.camera.position.set(0, 3.4, 5.6);
-    s.controls.target.set(0, 0, 0);
+    homeCamera(s.camera, s.controls, sample, s.exaggeration ?? 1);
     s.controls.update();
   }, [resetToken]);
   useEffect(() => {
@@ -2315,8 +2326,8 @@ function TerrainCanvas({
       s.camera.near = 0.002;
     } else {
       s.camera.near = 0.1;
-      s.camera.position.set(0, 3.4, 5.6);
-      c.target.set(0, 0, 0);
+      // uploads open at true scale (the exaggeration state may not have caught up yet)
+      homeCamera(s.camera, c, sample, sample?.metricHeights ? 1 : s.exaggeration ?? 1);
     }
     s.camera.updateProjectionMatrix();
     c.update();

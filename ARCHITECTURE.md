@@ -137,7 +137,12 @@ DSM = GLO-30 − mean₃₀ₘ(nDSM) + nDSM
 ```
 
 Averaged over any 30 m cell, the DSM reproduces the DEM. Within the cell, the model supplies the
-detail: buildings, trees, streets. In extensive forest the fine detail is left out, so the DSM
+detail: buildings, trees, streets. The DSM is then floored at the bare-earth estimate
+(`compose_dsm`): where GLO-30 under-reads tall towers, keeping each cell's mean pushed the streets
+between them below ground, down to −35 m in Philadelphia (15 % of pixels; 26 % in Pittsburgh).
+Floored, RMSE against the 3DEP LiDAR DSM went 35.35 → 34.36 m (Philadelphia) and 5.04 → 4.77 m
+(Pittsburgh), while agreement with GLO-30 in 30 m cells went 3.52 → 3.99 m and 0.62 → 0.92 m,
+still inside GLO-30's own accuracy. Scenes without the problem (Namchi) are unchanged. In extensive forest the fine detail is left out, so the DSM
 there is GLO-30's own surface. Under closed canopy both our model and CHMv2 place that detail
 poorly (r ≈ 0.3 against LiDAR), and including it made the forest DSM worse than the DEM alone
 (8.92 vs 8.53 m RMSE; with the rule, 8.63 m, and the other landscapes are unchanged). The ground DEM is read once per upload: the image extent

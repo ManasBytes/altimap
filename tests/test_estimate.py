@@ -302,3 +302,17 @@ def test_dem_agreement_scores_each_dem_in_30m_cells_and_survives_a_failed_read(m
     out = est.dem_agreement(dsm, {}, dsm.shape, gsd_m=1.0, dems={"glo30": dem})
     assert out["srtm"] is None  # an unreadable DEM is reported, not raised
     assert out["glo30"]["cell_rmse"] == 2.0 and out["glo30"]["cell_bias"] == 2.0
+
+
+def test_dsm_never_drops_below_bare_earth_where_the_dem_under_reads_a_tower():
+    from viewer.estimate import compose_dsm, dem_consistent_ground
+
+    ndsm = np.zeros((120, 120), np.float32)
+    ndsm[40:80, 40:80] = 100.0  # a 20 m tower in its 30 m DEM cell (0.5 m pixels)
+    bare = np.full(ndsm.shape, 10.0, np.float32)
+    dem = np.full(ndsm.shape, 30.0, np.float32)  # the radar DEM saw only part of the tower
+    unfloored = dem_consistent_ground(dem, ndsm, 0.5) + ndsm
+    assert unfloored[60, 35] < 10.0  # the cell mean alone pushes the street beside it underground
+    dsm = compose_dsm(dem, ndsm, 0.5, bare)
+    assert dsm.min() >= 10.0 and dsm[60, 35] == 10.0  # streets stay on the ground
+    assert dsm[60, 60] == unfloored[60, 60] > 80.0  # the tower keeps its height

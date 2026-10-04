@@ -200,6 +200,15 @@ def dem_consistent_ground(dem: np.ndarray, ndsm: np.ndarray, gsd_m: float,
     return (np.asarray(dem, np.float64) - smooth).astype(np.float32)
 
 
+def compose_dsm(dem: np.ndarray, detail: np.ndarray, gsd_m: float, bare: np.ndarray) -> np.ndarray:
+    """The exported DSM: DEM-consistent (dem_consistent_ground + detail), but never below bare
+    earth. Where GLO-30 under-reads tall downtowns, keeping each 30 m cell's mean pushed the
+    streets below ground (Philadelphia down to -35 m on 15 % of pixels, Pittsburgh 26 %).
+    Floored: RMSE vs 3DEP LiDAR DSM 35.35 -> 34.36 m and 5.04 -> 4.77 m; agreement with GLO-30
+    in 30 m cells 3.52 -> 3.99 m and 0.62 -> 0.92 m, still inside GLO-30's own accuracy."""
+    return np.maximum(dem_consistent_ground(dem, detail, gsd_m) + detail, bare).astype(np.float32)
+
+
 def display_ground_method(building_share: float) -> str:
     """Bare-earth method for the 3D view's terrain, by the scene's predicted building share.
     Measured against USGS LiDAR bare earth on four NAIP scenes (dense downtown 52 %,
@@ -501,12 +510,12 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
             # vs LiDAR) and only added error: there the DSM keeps GLO-30's surface (forest DSM
             # 8.92 -> 8.63 m RMSE, Copernicus alone 8.53; other landscapes unchanged).
             detail = np.where(forest, 0.0, ndsm).astype(np.float32)
-            dsm = dem_consistent_ground(dem, detail, gsd_out) + detail
             method = display_ground_method(float((classes == 3).mean()))
             if method == "subtract":
                 ground = dem_consistent_ground(dem, ndsm, gsd_out)
             else:
                 ground = ground_for(coarse, pad_px, shape, 300.0 if method == "open300" else 150.0)
+            dsm = compose_dsm(dem, detail, gsd_out, ground)
             fix, gcp_info = (None, None)
             if gcps:
                 # Control points measure the ground, so they are compared with the bare-earth
