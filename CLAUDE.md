@@ -72,6 +72,7 @@ docker build -t altimap . && docker run --gpus all -p 8000:8000 altimap
 .venv-da3/bin/python -m viewer.dsm_eval [--scenes ...] [--gsd ...]   # DSM vs USGS 3DEP LiDAR, demo/ NAIP scenes
 .venv-da3/bin/python -m viewer.dem_check demo/india/*.tif            # DSM vs Copernicus and SRTM (no-LiDAR scenes)
 .venv-da3/bin/python scripts/fetch_india_samples.py                   # Sikkim Maxar crops -> demo/india/
+.venv-da3/bin/python scripts/fetch_naip_scene.py --lat 40.44 --lon -80.006 --name naip_pittsburgh_bridges  # NAIP test scene
 
 # Training (24 GB GPU): data, then fine-tune; scripts/overnight_v2.sh is the unattended run
 .venv-da3/bin/python scripts/fetch_training_data.py
@@ -134,9 +135,15 @@ absolute level from a public DEM, rather than recovering absolute scale from the
    bare earth (`compose_dsm`): where GLO-30 under-reads tall downtowns, keeping the cell mean
    pushed streets underground (Philadelphia to −35 m). `dem_agreement` then scores the DSM in
    30 m cells against both GLO-30 and SRTM; the UI shows it.
-7. **GCPs** (`read_gcps`, `gcp_correction`): compared with the bare-earth ground. A single
+7. **Bridges** (`viewer/bridges.py`, GeoTIFF only): the model reads decks as ground and calls
+   most of them water, so OpenStreetMap places them (Overpass, several mirrors, 60 s budget,
+   cached per area under the DEM cache). Each deck is interpolated between the raw GLO-30
+   elevation at its land ends (connected ways are one structure) and laid over the finished
+   DSM; the nDSM gets its height above the bare earth. Deck RMSE vs 3DEP LiDAR 16.6 → 9.0 m
+   (downtown Pittsburgh). A failed fetch only means no bridges (`record["bridges"]`).
+8. **GCPs** (`read_gcps`, `gcp_correction`): compared with the bare-earth ground. A single
    vertical offset is applied only if it is ≥ 4 m and beats no correction on left-out points.
-8. **View-only ground**: the viewer's bare earth is chosen separately by building share
+9. **View-only ground**: the viewer's bare earth is chosen separately by building share
    (`display_ground_method`).
 
 `viewer/height_model.py` wraps RS3DAda (DINOv2 ViT-L + DPT from the cloned SynRS3D repo). It
@@ -175,7 +182,9 @@ Unknown well-formed job ids return "Uploading", because the UI polls before the 
   facade slopes stood towers as staircases. Wide slopes steeper than 45° that hang below a roof
   (oblique facades) don't set its height;
 - outlines squared off only if that moves ≤ 10 % of their area;
-- tree crowns.
+- tree crowns;
+- bridge decks as 1.5 m slabs cut 0.5 m apart in elevation (`bridges`), `kind: "bridge"`, added
+  after `buildings.geojson` is written so the export stays buildings only.
 
 It never feeds the GeoTIFFs; regularising heights costs RMSE. Changes to it are scored with
 `viewer.city_eval`.

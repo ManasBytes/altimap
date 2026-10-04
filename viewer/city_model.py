@@ -255,6 +255,30 @@ def footprints(parts: np.ndarray, heights: dict, shape: tuple[int, int], gsd_m: 
     return out
 
 
+DECK_M = 1.5  # drawn deck thickness
+
+
+def bridges(deck: np.ndarray, gsd_m: float, rgb: np.ndarray | None = None, zero: float = 0.0,
+            step_m: float = 0.5) -> list[dict]:
+    """Bridge decks (elevation grid, NaN off bridges; viewer/bridges.py) -> deck slabs for the
+    3D view, in the footprints() format with "kind": "bridge". A deck rises along its span, so
+    it is cut into pieces `step_m` apart in elevation (strips across the deck), each a
+    DECK_M-thick slab at its own height: the river or road shows underneath."""
+    on = np.isfinite(deck)
+    if not on.any():
+        return []
+    band = np.floor(np.where(on, deck, 0.0) / step_m).astype(np.int64)
+    parts = np.zeros(deck.shape, np.int32)
+    n = 0
+    for k in np.unique(band[on]):
+        lab, m = ndimage.label(on & (band == k))
+        parts[lab > 0] = lab[lab > 0] + n
+        n += m
+    slabs = footprints(parts, {i: DECK_M for i in range(1, n + 1)}, deck.shape, gsd_m, rgb,
+                       ground=np.where(on, deck - DECK_M - zero, 0.0))
+    return [dict(s, kind="bridge") for s in slabs]
+
+
 def trees(ndsm: np.ndarray, classes: np.ndarray, rgb: np.ndarray, gsd_m: float,
           min_height_m: float = 3.0, spacing_m: float = 5.0,
           ground: np.ndarray | None = None) -> list[dict]:

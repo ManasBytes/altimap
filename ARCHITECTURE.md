@@ -170,6 +170,25 @@ predicted building share, following a rule measured against USGS LiDAR bare eart
 | ≥ 10 % | the same opening, 150 m (keeps hills) |
 | < 10 % | GLO-30 minus the model's heights |
 
+**Bridges** (`viewer/bridges.py`, GeoTIFF input). The height model reads bridge decks as ground
+(downtown Pittsburgh: 7.6 m LiDAR decks read as 0.1 m), and the land-cover map calls two thirds
+of them water, so neither the heights nor the classes find them. OpenStreetMap maps bridges as
+ways tagged `bridge=*`:
+- **Fetch**: one Overpass query for the scene's box, tried on several public mirrors within 60 s
+  (they are often busy), cached per area next to the DEM patches, so a scene keeps its bridges
+  offline. No answer means no bridges, never a failed upload.
+- **Deck**: width from the `width` tag, else lanes × 3.5 m + 1.5 m, else a default per road
+  type. Ways that share an end node are one structure, and its open ends are where it lands.
+  Each deck pixel takes the inverse-distance blend of the raw GLO-30 elevation at those ends;
+  where decks cross, the higher one is the visible surface.
+- **Use**: laid over the finished DSM, and its height above the bare earth goes into the nDSM.
+- **Measured** on 47,800 m² of deck in downtown Pittsburgh (`scripts/fetch_naip_scene.py`) against
+  3DEP LiDAR: deck RMSE 16.6 m (bias −12.7) → 9.0 m (bias −5.9); the whole scene 25.34 → 25.19 m.
+  Raw GLO-30 at the ends beat the LiDAR ground at the ends (11.2 m): OSM bridge ways often stop
+  where a raised approach continues. Adding the decks before the DEM-consistent step instead
+  let the cell means pull them back toward the water (13.4 m). The remaining low bias is the
+  rise of long spans between their ends.
+
 ### 4.4 Ground control points (optional)
 `read_gcps` parses a CSV of lon, lat, height. A header row may name the columns in any order;
 without one, the order is lon, lat, height.
@@ -307,6 +326,7 @@ order: `ALTIMAP_HEIGHT_CKPT`, then `viewer/cache/best.pth`, then the stock RS3DA
   quantised slopes to ~13°; 16 bits step millimetres.
 - **`terrain`**: ground and DSM relief PNGs for georeferenced input.
 - **`city`**: the 3D city model (§6.3); `downloads`: links to the files of §3.
+- **`bridges`**: `{source, ways, deck_m2}`, or `{source, error}` when OpenStreetMap was unreachable.
 - **`validation`** + **`error`** (when a reference is attached):
   - Reference placement: reprojected onto the image grid by coordinates when both are
     georeferenced (`geo.warp_to_grid`), otherwise resampled.
@@ -340,6 +360,10 @@ Built on a grid of up to 2048 px from the nDSM and classes:
   terrain and roof colour from the photo.
 - **Trees**: one crown per canopy peak (≥ 3 m, peaks ≥ 5 m apart). Crown radius comes from the
   canopy extent, bounded by the tree's height; colour comes from the photo.
+- **Bridges**: OpenStreetMap decks (§4.3) as 1.5 m slabs, cut into pieces 0.5 m apart in elevation
+  so a rising span is drawn at its own height along its length, with the river or road visible
+  beneath. Clicking one opens a "Bridge" card. They are added after `buildings.geojson` is
+  written, so that export stays buildings only.
 
 The city model **never feeds the GeoTIFFs**. Regularising heights this way raised RMSE from 2.66
 to 2.86–3.38 m on validation tiles, so the exports stay the model's raw output.
@@ -416,7 +440,8 @@ Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `st
     without contacting GitHub: `torch.hub` otherwise checks GitHub's default branch on every
     load, with no timeout, and that hung model loading on a slow network.
   - GeoTIFF uploads read GLO-30 from AWS Open Data, falling back to Planetary Computer, and
-    SRTM GL1 from OpenTopography (for the base DEM or the agreement score).
+    SRTM GL1 from OpenTopography (for the base DEM or the agreement score), and bridges from
+    OpenStreetMap's Overpass API (cached per area).
   - The LiDAR benchmark reads 3DEP (cached after).
   - Every remote read times out after 60 s (GDAL HTTP options plus a default `requests` timeout,
     both set in `viewer/dem.py`), so a stalled Planetary Computer transfer ends as "Absolute
@@ -591,7 +616,8 @@ no Indian LiDAR, so the DSM is checked against the two DEMs the FAQ names:
 | `viewer/server.py` | FastAPI app: API + static app |
 | `frontend/` | React + three.js viewer |
 | `Dockerfile`, `.dockerignore` | The whole app as one image, weights included (§8) |
-| `scripts/` | Training-data download, the unattended v2 training run, Indian test scenes |
+| `viewer/bridges.py` | Bridge decks from OpenStreetMap, heights from the terrain at their ends |
+| `scripts/` | Training-data download, the unattended v2 training run, Indian and NAIP test scenes |
 | `tests/` | Synthetic-fixture test suite (no GPU, no network) |
 | `viewer/web/`, `viewer/export_*.py`, `refine*.py`, `validate.py`, `backend/` | Earlier DA3-based dashboards and exporters, the Django backend (legacy, kept working) |
 | `docs/` | Problem statement, model card, design specs, plans, spikes |

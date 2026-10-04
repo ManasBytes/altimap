@@ -1600,6 +1600,7 @@ function TerrainCanvas({
       city.add(outline);
       const widthM = sample.groundWidthM ?? 1024 * GAMUS_GSD_M;
       onBuildingPick?.({
+        bridge: b.kind === "bridge",
         height: b.h,
         floors: Math.max(1, Math.round(b.h / 3.2)),
         areaM2: footprintAreaM2(b, widthM, sample.groundHeightM ?? widthM),
@@ -2788,11 +2789,23 @@ function App() {
               {pickedBuilding && (
                 <div className="building-card">
                   <div className="label-row">
-                    <strong>Building</strong>
+                    <strong>{pickedBuilding.bridge ? "Bridge" : "Building"}</strong>
                     <button onClick={() => setPickedBuilding(null)} title="Close">
                       <X size={13} />
                     </button>
                   </div>
+                  {pickedBuilding.bridge ? (
+                  <dl>
+                    <dt>Source</dt>
+                    <dd>OpenStreetMap</dd>
+                    {pickedBuilding.roofElevation != null && (
+                      <>
+                        <dt>Deck elevation</dt>
+                        <dd>{pickedBuilding.roofElevation.toFixed(1)} m ({geoid})</dd>
+                      </>
+                    )}
+                  </dl>
+                  ) : (
                   <dl>
                     <dt>Height</dt>
                     <dd>{pickedBuilding.height.toFixed(1)} m</dd>
@@ -2809,6 +2822,7 @@ function App() {
                       </>
                     )}
                   </dl>
+                  )}
                 </div>
               )}
               {uploadStatus === "loading" && (

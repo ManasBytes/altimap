@@ -324,6 +324,44 @@ def dem_agreement(dsm: np.ndarray, geo: dict, shape: tuple[int, int], gsd_m: flo
     return out
 
 
+def coarse_sampler(geo: dict, coarse: np.ndarray):
+    """-> elevation_at(xs, ys): the padded coarse DEM (padded_dem) sampled bilinearly at CRS
+    coordinates, also in its margin beyond the image."""
+    from scipy import ndimage
+
+    w, s, e, n = geo["bounds"]
+    pad = BARE_EARTH_PAD_M * (geo["res_m"][0] / gsd_metres(geo))
+    grid = np.asarray(coarse, np.float64)
+    rows, cols = grid.shape
+
+    def elevation_at(xs, ys):
+        c = (np.asarray(xs, np.float64) - (w - pad)) / ((e - w) + 2 * pad) * cols - 0.5
+        r = ((n + pad) - np.asarray(ys, np.float64)) / ((n - s) + 2 * pad) * rows - 0.5
+        return ndimage.map_coordinates(grid, [r, c], order=1, mode="nearest")
+
+    return elevation_at
+
+
+def bridge_decks(geo: dict, coarse: np.ndarray, transform, crs, shape: tuple[int, int]):
+    """-> (deck elevation on the image grid, NaN off bridges; a record entry). The decks'
+    ends take the raw GLO-30 elevation: OSM bridge ways often end where a raised approach
+    goes on, and there raw GLO-30 beat even the LiDAR ground (deck RMSE 9.0 vs 11.2 m)."""
+    from rasterio.warp import transform_bounds
+
+    from viewer import bridges
+
+    ways = bridges.fetch(transform_bounds(crs, "EPSG:4326", *geo["bounds"]))
+    if ways is None:
+        return np.full(shape, np.nan, np.float32), {"source": "OpenStreetMap", "error": "unreachable"}
+    try:
+        deck = bridges.decks(ways, transform, crs, shape, coarse_sampler(geo, coarse))
+    except Exception as exc:  # odd OSM geometry must not cost the upload its DSM
+        return np.full(shape, np.nan, np.float32), {"source": "OpenStreetMap", "error": f"{type(exc).__name__}: {exc}"}
+    px_m2 = abs(transform.a * transform.e) * (gsd_metres(geo) / geo["res_m"][0]) ** 2
+    return deck, {"source": "OpenStreetMap", "ways": len(ways),
+                  "deck_m2": round(float(np.isfinite(deck).sum() * px_m2))}
+
+
 def dem_on_image(coarse: np.ndarray, pad_px: tuple[int, int], shape: tuple[int, int]) -> np.ndarray:
     """The padded coarse DEM bilinearly resampled onto the image grid, cropping the margin.
     Separable (rows, then columns), so memory is the output size even for huge images."""
@@ -469,12 +507,6 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
         with rasterio.open(path) as src:
             transform, crs = src.transform, src.crs
     gsd_out = src_gsd or GAMUS_GSD_M
-    finite = ndsm[np.isfinite(ndsm)]
-    ndsm_range = (float(finite.min()), float(finite.max())) if finite.size else (0.0, 0.0)
-    write_elevation_cog(out_dir / "ndsm.tif", ndsm, transform, crs, Sidecar(
-        gsd_m=gsd_out, source_gsd_m=gsd_out, datum="relative", vertical_unit="m",
-        model_version=MODEL_VERSION, height_range_m=ndsm_range, tile_overlap_px=259,
-        dtm_source=None))
 
     record = {
         "georeferenced": bool(geo.get("georeferenced")),
@@ -488,13 +520,11 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
         "models": models_used,
         "forest_share": round(float(forest.mean()), 4),
         "shape": list(shape),
-        "ndsm_max_m": ndsm_range[1],
-        "ndsm_p99_m": float(np.percentile(finite, 99)) if finite.size else 0.0,
         "files": ["ndsm.tif", "ndsm.json"],
         "dsm": None,
     }
 
-    ground, dsm = None, None  # ground: bare earth for the 3D view only; dsm: the export
+    ground, dsm, deck = None, None, None  # ground: bare earth for the 3D view only; dsm: the export
     if geo.get("georeferenced") and not geospatial_warnings:
         report(f"Fetching ground elevation ({dem_label})", 0.78)
         try:
@@ -516,6 +546,17 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
             else:
                 ground = ground_for(coarse, pad_px, shape, 300.0 if method == "open300" else 150.0)
             dsm = compose_dsm(dem, detail, gsd_out, ground)
+            # Bridges: the model reads decks as ground. OpenStreetMap places them; their height
+            # comes from the terrain where they land (viewer/bridges.py). Laid over the finished
+            # DSM: added before the DEM-consistent step, the cell means pulled them back toward
+            # the water (bridge RMSE vs 3DEP LiDAR 16.6 m now, 13.4 m that way, 9.0 m this way).
+            report("Adding bridges (OpenStreetMap)", 0.84)
+            deck, record["bridges"] = bridge_decks(geo, coarse, transform, crs, shape)
+            deck[~valid] = np.nan
+            on_deck = np.isfinite(deck)
+            if on_deck.any():
+                dsm = np.where(on_deck, np.fmax(dsm, deck), dsm).astype(np.float32)
+                ndsm = np.where(on_deck, np.fmax(ndsm, deck - ground), ndsm).astype(np.float32)
             fix, gcp_info = (None, None)
             if gcps:
                 # Control points measure the ground, so they are compared with the bare-earth
@@ -526,6 +567,7 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
                 if fix is not None:
                     dsm = dsm + fix
                     ground = ground + fix  # the 3D view's terrain follows the corrected DSM
+                    deck = deck + fix
             dem_note = (f"{dem_label}, DEM-consistent: model detail added with its "
                         f"{DEM_POSTING_M:.0f} m mean removed")
             if fix is not None:
@@ -548,8 +590,17 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
     elif geo.get("georeferenced") and geospatial_warnings:
         record["dsm_error"] = "; ".join(geospatial_warnings)
 
+    finite = ndsm[np.isfinite(ndsm)]
+    ndsm_range = (float(finite.min()), float(finite.max())) if finite.size else (0.0, 0.0)
+    record["ndsm_max_m"] = ndsm_range[1]
+    record["ndsm_p99_m"] = float(np.percentile(finite, 99)) if finite.size else 0.0
+    write_elevation_cog(out_dir / "ndsm.tif", ndsm, transform, crs, Sidecar(
+        gsd_m=gsd_out, source_gsd_m=gsd_out, datum="relative", vertical_unit="m",
+        model_version=MODEL_VERSION, height_range_m=ndsm_range, tile_overlap_px=259,
+        dtm_source=None))
+
     return {"record": record, "rgb": rgb, "ndsm": ndsm, "classes": classes, "ground": ground,
-            "dsm": dsm}
+            "dsm": dsm, "deck": deck}
 
 
 CACHE_DIR = Path(__file__).resolve().parent / "cache"

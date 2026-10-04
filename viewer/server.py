@@ -531,7 +531,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
 def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | None,
                   ref_path: Path | None, report, tta: bool = True, gcps: list | None = None,
                   base_dem: str = "glo30") -> dict:
-    from viewer.city_model import city_model
+    from viewer.city_model import bridges, city_model
     from viewer.classify import classes_to_rgb
     from viewer.estimate import estimate
     from viewer.height_metrics import height_scores
@@ -606,6 +606,9 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
                       to_city(out["rgb"]), city_gsd, ground=city_ground)
     _write_buildings_geojson(scene_dir, city["buildings"], out["ndsm"].shape)
     record["files"].append("buildings.geojson")
+    if out.get("deck") is not None and ground_zero is not None:  # bridges join the 3D view only
+        deck_city = np.asarray(Image.fromarray(out["deck"].astype(np.float32), mode="F").resize(csize, Image.NEAREST))
+        city["buildings"] += bridges(deck_city, city_gsd, to_city(out["rgb"]), zero=ground_zero)
     # The GeoJSON keeps image coordinates; the viewer gets them inside its centred square.
     h, w = out["ndsm"].shape
     fh, fw = h / max(h, w), w / max(h, w)
