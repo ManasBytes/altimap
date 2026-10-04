@@ -496,6 +496,15 @@ footer {
   color: #cfe3ee;
   font: 11px "IBM Plex Mono";
 }
+.upload-options label.quality-row {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+}
+.upload-options label.quality-row input[type="checkbox"] {
+  flex: none;
+  margin: 2px 0;
+}
 .upload-reference {
   padding: 8px 10px;
   border: 1px dashed #2b4a5f;

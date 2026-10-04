@@ -1298,6 +1298,9 @@ function TerrainCanvas({
     controls.target.set(0, 0, 0);
     controls.autoRotate = autoRotate;
     controls.autoRotateSpeed = 1.4;
+    // Wheel zoom updates the camera inside OrbitControls' event handler, before RAF.
+    const markCameraDirty = () => { state.current.renderDirty = true; };
+    controls.addEventListener("change", markCameraDirty);
     const transform = new TransformControls(camera, renderer.domElement);
     transform.setMode("translate");
     transform.setSize(0.72);
@@ -2083,6 +2086,7 @@ function TerrainCanvas({
       renderer.domElement.removeEventListener("pointerdown", startRouteLook);
       window.removeEventListener("pointermove", moveRouteLook);
       window.removeEventListener("pointerup", endRouteLook);
+      controls.removeEventListener("change", markCameraDirty);
       controls.dispose();
       transform.dispose();
       geo.dispose();
@@ -2439,6 +2443,7 @@ function App() {
   const [gcpFile, setGcpFile] = useState(null); // CSV lon, lat, height: corrects a GeoTIFF's DSM
   const [uploadQuality, setUploadQuality] = useState("high"); // high = 4-flip TTA
   const [baseDem, setBaseDem] = useState("glo30"); // public DEM under a GeoTIFF's absolute DSM
+  const [compareDems, setCompareDems] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null); // {stage, progress}
   const fileRef = useRef(null);
   const uploadFileRef = useRef(null);
@@ -2483,6 +2488,7 @@ function App() {
       if (referenceFile) body.append("reference", referenceFile);
       if (gcpFile) body.append("gcps", gcpFile);
       body.append("base_dem", baseDem);
+      body.append("compare_dems", String(compareDems));
       const res = await fetch(ESTIMATE_API_URL, { method: "POST", body });
       if (!res.ok) {
         const detail = await res.json().catch(() => null);
@@ -3006,7 +3012,7 @@ function App() {
               <p className="upload-copy">
                 A fine-tuned height model estimates metric height above
                 ground (nDSM) for every pixel. GeoTIFFs with coordinates also
-                get an absolute DSM on Copernicus GLO-30 or SRTM, scored
+                get an absolute DSM on Copernicus GLO-30 or SRTM, optionally compared
                 against both. Both download as GeoTIFF.
               </p>
               <div className="upload-options">
@@ -3119,6 +3125,15 @@ function App() {
                     </button>
                   </div>
                 </div>
+                <label className="quality-row">
+                  <input
+                    type="checkbox"
+                    checked={compareDems}
+                    onChange={(e) => setCompareDems(e.target.checked)}
+                    disabled={uploadStatus === "loading"}
+                  />
+                  <span>Compare against public DEMs (GeoTIFF) — may take longer</span>
+                </label>
               </div>
               <input
                 ref={uploadFileRef}
@@ -3230,21 +3245,22 @@ function App() {
                   {uploadMeta.dem_agreement && (
                     <div
                       className="gcp-result"
-                      title="The DSM averaged over each 30 m DEM cell and compared with that DEM, the way GeoTIFF output is scored"
+                      title="Agreement over approximate image-aligned 30 m blocks, not native DEM cells. Agreement with the base DEM is not independent building-height accuracy."
                     >
-                      DSM vs public DEMs (30 m cells)
+                      DEM agreement (approximate 30 m blocks)
                       {[["glo30", "Copernicus GLO-30"], ["srtm", "SRTM"]].map(([key, label]) => {
                         const a = uploadMeta.dem_agreement[key];
                         return (
                           <div key={key}>
                             {label}
                             {uploadMeta.dsm?.base_dem === key ? " (base)" : ""}:{" "}
-                            {a
+                            {a?.cell_rmse != null && a?.cell_bias != null
                               ? `RMSE ${a.cell_rmse.toFixed(2)} m · bias ${a.cell_bias >= 0 ? "+" : ""}${a.cell_bias.toFixed(2)} m`
                               : "unavailable"}
                           </div>
                         );
                       })}
+                      <small>Base-DEM agreement is not independent building-height validation.</small>
                     </div>
                   )}
                   {uploadMeta.validation && (
