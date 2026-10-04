@@ -165,10 +165,7 @@ overlapping uploads crashed each other); `GET /api/progress/{job}` serves its pr
 - the record: `models` used, warnings, DSM range, `gcp`;
 - previews, plus 16-bit `grids` (1025 a side; `geo.encode_grid16`) that the viewer meshes and
   probes from;
-- the city model (`building_source=hybrid` by default for GeoTIFF uploads: mapped OSM outlines,
-  parts and simple roof meshes; `image` retains predicted LoD1 blocks). `building_geometry`
-  reports tagged vs estimated height sources. Mapped geometry never enters raster exports
-  or height validation; image fallback buildings are optional in the viewer;
+- the city model;
 - validation against an optional reference.
 
 How `_validate` treats the reference:

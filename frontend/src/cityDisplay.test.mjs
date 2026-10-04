@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildingContains, flatCity, roofElevation } from "./cityDisplay.js";
+import { flatCity } from "./cityDisplay.js";
 
 test("flat ground retains object heights, places facilities on roofs or ground, and preserves source", () => {
   const sample = {
@@ -43,20 +43,4 @@ test("bridge slab stays raised above its local ground in flat view", () => {
   assert.equal(bridge.b, 8.5);
   assert.equal(bridge.t, 10);
   assert.equal(bridge.h, 1.5);
-});
-
-test("mapped roofs preserve their shape and raised bases on flat ground; markers follow the roof", () => {
-  const building = { h: 30, b: 18, t: 40, min_height_m: 8,
-    rings: [[[0, 0], [1, 0], [1, 1], [0, 1]]],
-    roof: { vertices: [[0, 0, 30], [1, 0, 30], [0.5, 1, 40]], faces: [[0, 1, 2]] } };
-  const sample = { city: { buildings: [building], trees: [] },
-    facilities: [{ u: 0.5, v: 0.25, z: 32.5 }] };
-  const flat = flatCity(sample);
-  assert.equal(flat.buildings[0].b, 8);
-  assert.equal(flat.buildings[0].t, 30);
-  assert.deepEqual(flat.buildings[0].roof.vertices.map((p) => p[2]), [20, 20, 30]);
-  assert.equal(flat.facilities[0].z, 22.5);
-  assert.equal(roofElevation(building, 0.5, 0.25), 32.5);
-  assert.equal(building.roof.vertices[2][2], 40);
-  assert.equal(buildingContains(building, 0.2, 0.2), true);
 });

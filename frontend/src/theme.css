@@ -356,9 +356,6 @@
   font-size: 14px;
   line-height: 1.55;
 }
-.app .tab-empty a {
-  color: var(--info);
-}
 .app .source-switch {
   margin: 14px 0 4px;
 }

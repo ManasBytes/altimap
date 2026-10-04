@@ -160,12 +160,6 @@ profiles and camera routes, **Accuracy** shows validation, and **Context** lists
 - **GeoTIFF** also gives an absolute DSM (orthometric metres: EGM96 on SRTM, EGM2008 on GLO-30)
   on real terrain when its CRS and grid are north-up and square. Rotated/sheared or strongly non-square inputs are
   rejected for absolute DSM export with a warning instead of silently producing wrong geometry.
-- **Building geometry**: **Map-assisted** (default for GeoTIFFs) uses OSM footprints, building
-  parts and height/roof tags where available. **Image only** uses predicted blocks. After upload,
-  **View** reports mapped coverage and tagged versus estimated dimensions. Click a building
-  part for its sources; enable **Include image-derived buildings** for uncertain fallback blocks.
-  **Flat ground** is a display option for removing coarse-DEM street ramps. GeoTIFF exports
-  and Accuracy remain the model's raster estimates, independent of mapped dimensions.
 - **Add reference heights** (optional): a single-band height map, either height above ground
   or an absolute DSM. Select **Reference heights represent** to match your file:
   **Height above ground** for GAMUS AGL/nDSM, **Absolute elevation** for LiDAR DSM.
