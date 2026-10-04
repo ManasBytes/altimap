@@ -302,3 +302,60 @@ def test_dem_agreement_scores_each_dem_in_30m_cells_and_survives_a_failed_read(m
     out = est.dem_agreement(dsm, {}, dsm.shape, gsd_m=1.0, dems={"glo30": dem})
     assert out["srtm"] is None  # an unreadable DEM is reported, not raised
     assert out["glo30"]["cell_rmse"] == 2.0 and out["glo30"]["cell_bias"] == 2.0
+    assert out["glo30"]["r"] is None
+
+
+def test_dem_comparison_is_json_safe_for_unmeasurable_metrics():
+    import json
+    import warnings
+
+    from viewer.dem_check import compare
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        flat = np.full((60, 60), 500.0)
+        result = compare(flat + 2, flat, 30)
+        assert result["pixel_rmse"] == result["cell_rmse"] == 2.0
+        assert result["r"] is None
+        json.dumps(result, allow_nan=False)
+        for dsm, ref in ((flat, np.full_like(flat, np.nan)),
+                         (np.array([[2.0]]), np.array([[1.0]]))):
+            result = compare(dsm, ref, 30)
+            assert result["r"] is None and result["cell_rmse"] is None
+            json.dumps(result, allow_nan=False)
+
+
+def test_dem_comparison_preserves_numeric_results_and_shared_nodata_mask():
+    from viewer.dem_check import compare
+
+    ref = np.arange(16, dtype=float).reshape(4, 4)
+    dsm = ref + 3
+    dsm[0, 0] = np.nan
+    result = compare(dsm, ref, 2)
+    assert result["r"] == 1.0
+    assert result["pixel_rmse"] == result["cell_rmse"] == 3.0
+    assert result["pixel_bias"] == result["cell_bias"] == 3.0
+
+
+def test_dem_check_cli_enables_comparison_and_prints_null_metrics(monkeypatch, capsys):
+    import viewer.dem_check as check
+    import viewer.estimate as est
+
+    seen = {}
+
+    def estimate(path, **kwargs):
+        seen.update(kwargs)
+        return {"record": {"gsd_m": 1.0, "work_gsd_m": 0.33,
+                           "dsm": {"min_m": 500.0, "max_m": 500.0},
+                           "dem_agreement": {"glo30": {"cell_rmse": None, "cell_bias": None,
+                                                      "pixel_rmse": None, "pixel_bias": None, "r": None},
+                                             "srtm": None}},
+                "dsm": np.full((1, 1), 500.0), "ndsm": np.zeros((1, 1)),
+                "classes": np.zeros((1, 1), np.uint8)}
+
+    monkeypatch.setattr(est, "load_pipeline", lambda *args: {})
+    monkeypatch.setattr(est, "estimate", estimate)
+    monkeypatch.setattr("sys.argv", ["dem_check", "scene.tif"])
+    check.main()
+    assert seen["compare_dems"] is True
+    assert "r unavailable" in capsys.readouterr().out

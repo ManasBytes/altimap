@@ -441,7 +441,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
                             reference: UploadFile | None = File(None),
                             gcps: UploadFile | None = File(None),
                             job: str | None = Form(None), tta: bool = Form(True),
-                            base_dem: str = Form("glo30")):
+                            base_dem: str = Form("glo30"), compare_dems: bool = Form(False)):
     """Height model on an upload: metric nDSM always, absolute DSM for GeoTIFFs.
 
     Response keeps the classify-static shape (rgb/height/classes data URIs) so
@@ -449,7 +449,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
     paths, the 3D city model, ground relief for georeferenced input, and -- if a
     reference height map is attached -- RMSE/MAE/r against it. A `gcps` CSV (lon, lat,
     height) corrects a GeoTIFF's absolute DSM; `base_dem` ("glo30" or "srtm") picks the public DEM
-    it sits on, and the response scores it against both. With a `job` id,
+    it sits on. `compare_dems` opts into a slower agreement check against both DEMs. With a `job` id,
     progress is readable at /api/progress/<job> while this request runs.
     """
     from starlette.concurrency import run_in_threadpool
@@ -510,7 +510,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
         # Model inference is blocking: run it off the event loop so the server keeps
         # answering progress polls and static files meanwhile.
         payload = await run_in_threadpool(_run_estimate, staged, scene_dir, scene_id, gsd,
-                                          ref_path, report, tta, gcp_points, base_dem)
+                                          ref_path, report, tta, gcp_points, base_dem, compare_dems)
     except HTTPException:
         raise
     except Exception as exc:
@@ -526,7 +526,7 @@ async def estimate_endpoint(file: UploadFile = File(...), gsd: float | None = Fo
 
 def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | None,
                   ref_path: Path | None, report, tta: bool = True, gcps: list | None = None,
-                  base_dem: str = "glo30") -> dict:
+                  base_dem: str = "glo30", compare_dems: bool = False) -> dict:
     from viewer.city_model import city_model
     from viewer.classify import classes_to_rgb
     from viewer.estimate import estimate
@@ -541,7 +541,7 @@ def _run_estimate(staged: Path, scene_dir: Path, scene_id: str, gsd: float | Non
         models = _get_height_model()
         started = time.perf_counter()
         out = estimate(staged, out_dir=scene_dir, gsd_m=gsd, tta=tta, report=report, gcps=gcps,
-                       base_dem=base_dem, **models)
+                       base_dem=base_dem, compare_dems=compare_dems, **models)
     finally:
         _ESTIMATE_LOCK.release()
     validation, error_view = None, None

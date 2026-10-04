@@ -292,8 +292,8 @@ def padded_dem(geo: dict, base_dem: str = "glo30") -> tuple[np.ndarray | None, t
 
 def dem_agreement(dsm: np.ndarray, geo: dict, shape: tuple[int, int], gsd_m: float,
                   dems: dict[str, np.ndarray | None]) -> dict:
-    """How closely the DSM matches each public DEM, the way the FAQ scores GeoTIFFs ("values
-    must match DEM heights"): in the DEMs' own 30 m cells, and per pixel. `dems` maps a
+    """Agreement with public DEMs in approximate image-aligned 30 m blocks and per pixel.
+    This is a consistency check, not independent building-height validation. `dems` maps a
     BASE_DEMS name to that DEM on the image grid; a missing one is read here, and one that
     can't be read is reported as None rather than failing the upload."""
     from viewer.dem_check import compare
@@ -308,10 +308,11 @@ def dem_agreement(dsm: np.ndarray, geo: dict, shape: tuple[int, int], gsd_m: flo
             except Exception:  # network / coverage: the score is optional
                 ref = None
         cell_px = max(1, round(DEM_POSTING_M / gsd_m))
-        if ref is None or min(shape) < cell_px:
+        if ref is None:
             out[name] = None
             continue
-        out[name] = {k: round(v, 2) for k, v in compare(dsm, ref, cell_px).items()}
+        out[name] = {k: None if v is None else round(v, 2)
+                     for k, v in compare(dsm, ref, cell_px).items()}
     return out
 
 
@@ -390,7 +391,8 @@ def _on(model, device: str):
 
 def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None = None,
              tta: bool = True, report=None, gcps: list | None = None,
-             building_model=None, canopy_model=None, base_dem: str = "glo30") -> dict:
+             building_model=None, canopy_model=None, base_dem: str = "glo30",
+             compare_dems: bool = False) -> dict:
     """Run the height model on `path`, write GeoTIFFs into `out_dir`, return arrays + a record.
 
     `gcps`: (lon, lat, height) control points that correct the DSM (georeferenced input only).
@@ -398,6 +400,7 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
     `canopy_model`: CHMv2 (viewer/canopy.py) for canopy heights in forest.
     `base_dem`: the public DEM the absolute DSM sits on, "glo30" (Copernicus GLO-30) or
     "srtm" (SRTM GL1); the organisers score against "SRTM/Copernicus".
+    `compare_dems`: opt-in agreement check against both DEMs; may fetch the other source.
     Both are kept on the CPU and moved to `device` only while they run. `load_pipeline()` loads
     all three the way the app does.
 
@@ -534,8 +537,9 @@ def estimate(path: Path, model, device: str, out_dir: Path, gsd_m: float | None 
                              "base_dem": base_dem,
                              "datum": f"orthometric ({dem_geoid})"}
             record["files"] += ["dsm.tif", "dsm.json"]
-            report("Checking the DSM against Copernicus and SRTM", 0.88)
-            record["dem_agreement"] = dem_agreement(dsm, geo, shape, gsd_out, {base_dem: dem})
+            if compare_dems:
+                report("Checking the DSM against Copernicus and SRTM", 0.88)
+                record["dem_agreement"] = dem_agreement(dsm, geo, shape, gsd_out, {base_dem: dem})
     elif geo.get("georeferenced") and geospatial_warnings:
         record["dsm_error"] = "; ".join(geospatial_warnings)
 
@@ -589,6 +593,8 @@ def main() -> None:
                     help="CSV of ground control points (lon, lat, height m) to correct the DSM")
     ap.add_argument("--base-dem", choices=("glo30", "srtm"), default="glo30",
                     help="public DEM under the absolute DSM (default Copernicus GLO-30)")
+    ap.add_argument("--compare-dems", action="store_true",
+                    help="compare DSM against both public DEMs; may add network time (default off)")
     args = ap.parse_args()
     gcps = read_gcps(args.gcps) if args.gcps else None
 
@@ -599,7 +605,7 @@ def main() -> None:
     for path in args.images:
         out_dir = args.out / path.stem
         result = estimate(path, out_dir=out_dir, gsd_m=args.gsd, tta=not args.no_tta, gcps=gcps,
-                          base_dem=args.base_dem, **models)
+                          base_dem=args.base_dem, compare_dems=args.compare_dems, **models)
         record = result["record"]
         (out_dir / "meta.json").write_text(json.dumps(record, indent=2))
         dsm = record["dsm"]

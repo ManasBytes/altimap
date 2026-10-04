@@ -5,7 +5,7 @@
 
 The FAQ scores GeoTIFF output "as an absolute DSM against SRTM/Copernicus" ("values must match
 DEM heights"). For each scene this runs the app's pipeline and compares the DSM with Copernicus
-GLO-30 and with SRTM GL1, both per pixel and as 30 m cell means (the DEMs' own resolution;
+GLO-30 and with SRTM GL1, both per pixel and as approximate 30 m block means (not native DEM cells;
 the same `estimate.dem_agreement` numbers the app shows), and reports the model's object
 heights by land-cover class as a sanity check where no LiDAR exists (e.g. India). Heights:
 GLO-30 is EGM2008, SRTM EGM96; the two geoids differ by up to ~2 m, which is left in the
@@ -26,20 +26,31 @@ CLASSES = {3: "buildings", 6: "trees", 2: "low vegetation", 1: "ground", 5: "roa
 
 
 def cell_means(a: np.ndarray, px: int) -> np.ndarray:
-    """Means over px x px blocks (the DEM's 30 m cells), ignoring NaN."""
+    """Means over image-aligned px x px blocks, excluding missing pixels."""
     h, w = (a.shape[0] // px) * px, (a.shape[1] // px) * px
     b = a[:h, :w].reshape(h // px, px, w // px, px)
-    return np.nanmean(b, axis=(1, 3))
+    valid = np.isfinite(b)
+    count = valid.sum(axis=(1, 3))
+    return np.divide(np.where(valid, b, 0).sum(axis=(1, 3)), count,
+                     out=np.full(count.shape, np.nan), where=count > 0)
 
 
 def compare(dsm: np.ndarray, ref: np.ndarray, cell_px: int) -> dict:
+    """JSON-safe agreement metrics; undefined values are None, never zero or NaN."""
+    dsm, ref = np.asarray(dsm, np.float64), np.asarray(ref, np.float64)
     ok = np.isfinite(dsm) & np.isfinite(ref)
     e = (dsm - ref)[ok]
-    cd, cr = cell_means(dsm, cell_px), cell_means(ref, cell_px)
+    # Both block means must use the same pixels, otherwise nodata changes the comparison.
+    cd, cr = cell_means(np.where(ok, dsm, np.nan), cell_px), cell_means(np.where(ok, ref, np.nan), cell_px)
     ce = (cd - cr)[np.isfinite(cd) & np.isfinite(cr)]
-    return {"pixel_rmse": float(np.sqrt(np.mean(e ** 2))), "pixel_bias": float(np.mean(e)),
-            "cell_rmse": float(np.sqrt(np.mean(ce ** 2))), "cell_bias": float(np.mean(ce)),
-            "r": float(np.corrcoef(dsm[ok], ref[ok])[0, 1])}
+    r = None
+    if e.size > 1 and np.ptp(dsm[ok]) > 0 and np.ptp(ref[ok]) > 0:
+        r = float(np.corrcoef(dsm[ok], ref[ok])[0, 1])
+    result = {"pixel_rmse": float(np.sqrt(np.mean(e ** 2))) if e.size else None,
+              "pixel_bias": float(np.mean(e)) if e.size else None,
+              "cell_rmse": float(np.sqrt(np.mean(ce ** 2))) if ce.size else None,
+              "cell_bias": float(np.mean(ce)) if ce.size else None, "r": r}
+    return {k: v if v is not None and np.isfinite(v) else None for k, v in result.items()}
 
 
 def main() -> None:
@@ -55,7 +66,8 @@ def main() -> None:
     models = load_pipeline(args.ckpt)
     with tempfile.TemporaryDirectory() as tmp:
         for path in args.images:
-            out = estimate(path, out_dir=Path(tmp) / path.stem, tta=args.tta, base_dem=args.base_dem, **models)
+            out = estimate(path, out_dir=Path(tmp) / path.stem, tta=args.tta,
+                           base_dem=args.base_dem, compare_dems=True, **models)
             rec = out["record"]
             if out["dsm"] is None:
                 print(f"{path.name}: no DSM ({rec.get('dsm_error')})")
@@ -67,8 +79,11 @@ def main() -> None:
                 if c is None:
                     print(f"  vs {label:18s} no coverage")
                     continue
-                print(f"  vs {label:18s} 30 m cells: RMSE {c['cell_rmse']:6.2f} bias {c['cell_bias']:+6.2f} | "
-                      f"per pixel: RMSE {c['pixel_rmse']:6.2f} bias {c['pixel_bias']:+6.2f} r {c['r']:.4f}")
+                text = {k: "unavailable" if v is None else format(v, ".4f" if k == "r" else
+                        "+.2f" if "bias" in k else ".2f") for k, v in c.items()}
+                print(f"  vs {label:18s} approximate 30 m blocks: RMSE {text['cell_rmse']} "
+                      f"bias {text['cell_bias']} | per pixel: RMSE {text['pixel_rmse']} "
+                      f"bias {text['pixel_bias']} r {text['r']}")
             ndsm, cls = out["ndsm"], out["classes"]
             parts = []
             for k, label in CLASSES.items():
