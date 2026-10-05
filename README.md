@@ -14,6 +14,10 @@ All elevation outputs are float32 Cloud-Optimized GeoTIFFs in metres, NaN nodata
 Docs: **[SETUP.md](SETUP.md)** (install and run), **[ARCHITECTURE.md](ARCHITECTURE.md)** (how every
 part works, data formats, API, models, measured results and limits), [model card](https://huggingface.co/Dilavesh/altimap-height).
 
+[Open the hosted scene studio](https://altimap-demo.vercel.app): Sikkim satellite scenes and
+Pittsburgh bridges are ready to explore without a running GPU VM. See
+[hosting and demo setup](docs/DEPLOYMENT.md).
+
 ## How it works
 
 1. **Height model.** RS3DAda ([SynRS3D, NeurIPS 2024](https://github.com/JTRNEO/SynRS3D)): a DINOv2 ViT-L

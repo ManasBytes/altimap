@@ -1,0 +1,310 @@
+/* AltiMap Scene Studio: cool survey-paper controls around an unobstructed terrain field. */
+.app {
+  --paper: #f8fafb;
+  --panel: #eef3f5;
+  --raised: #e6edf0;
+  --rule: #d2dee4;
+  --ink: #213745;
+  --muted: #617985;
+  --accent: #257b92;
+  --accent-soft: #deedf1;
+  --copper: #a96140;
+  --field: #10212d;
+  --top-h: 74px;
+  --foot-h: 36px;
+  --dock-w: 386px;
+  color: var(--ink);
+  background: var(--panel);
+  display: block;
+  font: 400 14px "DM Sans", sans-serif;
+  font-variant-numeric: tabular-nums;
+  min-height: 100dvh;
+}
+.app.theme-dark {
+  --paper: #182c38;
+  --panel: #142630;
+  --raised: #203846;
+  --rule: #324955;
+  --ink: #e3ebef;
+  --muted: #a1b4bf;
+  --accent: #85c0d0;
+  --accent-soft: #294956;
+  --copper: #dfad8e;
+}
+.app * { box-sizing: border-box; }
+.app button, .app input, .app select { font-family: "DM Sans", sans-serif; }
+.app button { transition: background 140ms, border-color 140ms; }
+.app button:focus-visible, .app select:focus-visible, .app input:focus-visible, .app a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.app button:disabled { opacity: .45; cursor: not-allowed; }
+.app main { width: 100%; max-width: none; margin: 0; padding: 0; }
+.app .workspace { position: relative; width: 100%; height: 100dvh; min-height: 0; margin: 0; }
+.app .workspace .viewport-card {
+  position: absolute;
+  inset: var(--top-h) var(--dock-w) var(--foot-h) 0;
+  height: auto; width: auto;
+  border: 0; border-radius: 0;
+  background: var(--field);
+  overflow: visible;
+}
+.app .workspace .canvas-wrap {
+  position: absolute; inset: 0;
+  width: 100%; height: 100% !important;
+  min-height: 0 !important;
+  background: var(--field);
+  overflow: hidden;
+}
+.app .terrain-canvas { height: 100%; width: 100%; }
+.app .workspace .viewport-top {
+  position: fixed;
+  inset: 0 0 auto;
+  height: var(--top-h);
+  display: flex; align-items: center; gap: 26px;
+  padding: 0 24px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 0; border-bottom: 1px solid var(--rule); border-radius: 0;
+  backdrop-filter: none;
+  box-shadow: none;
+  z-index: 30;
+}
+.app .brand { display: flex; align-items: center; gap: 11px; flex: 0 0 auto; }
+.app .brand-mark {
+  width: 37px; height: 37px; display: grid; place-items: center;
+  color: var(--accent); border: 1px solid var(--rule); border-radius: 9px;
+  background: var(--panel);
+}
+.app .brand-mark svg { width: 23px; height: 23px; stroke-width: 1.5; }
+.app .brand-name { display: flex; flex-direction: column; line-height: 1; }
+.app .brand-name b { font: 600 28px "Barlow Condensed", sans-serif; letter-spacing: -.3px; }
+.app .brand-name small { margin-top: 5px; font: 400 9px "IBM Plex Mono", monospace; letter-spacing: 1.3px; color: var(--muted); }
+.app .scene-title {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  min-width: 0; flex: 1; padding-left: 25px; border-left: 1px solid var(--rule);
+}
+.app .scene-title strong { font-size: 16px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.app .scene-facts { display: flex; gap: 9px; min-width: 0; overflow: hidden; }
+.app .scene-facts span {
+  flex-shrink: 0; font: 400 10px "IBM Plex Mono", monospace;
+  color: var(--muted); white-space: nowrap; padding: 0; border: 0; background: none;
+}
+.app .scene-facts span + span { padding-left: 9px; border-left: 1px solid var(--rule); }
+.app .view-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.app .view-actions button {
+  display: inline-flex; gap: 7px; align-items: center; justify-content: center;
+  min-height: 36px; padding: 0 11px;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--paper);
+  color: var(--ink); font-size: 12px; font-weight: 500;
+}
+.app .view-actions button:hover { background: var(--raised); }
+.app .view-actions .primary-action { background: var(--accent); border-color: var(--accent); color: var(--paper); }
+.app .view-actions .primary-action:hover { filter: brightness(.93); background: var(--accent); }
+.app .workspace .viewport-footer {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  min-height: var(--foot-h); height: var(--foot-h);
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 0 19px; border: 0; border-top: 1px solid var(--rule); border-radius: 0;
+  background: var(--paper); color: var(--muted);
+  font: 400 10px "IBM Plex Mono", monospace;
+  backdrop-filter: none; z-index: 30;
+}
+.app .legend, .app .footer-note { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.app .height-ramp { width: 96px; height: 5px; border-radius: 3px; }
+.app .canvas-badge {
+  top: 18px; left: 20px; right: auto;
+  padding: 7px 10px; color: #c4d4de; background: #142936cc;
+  border: 1px solid #55708066; border-radius: 4px;
+  font: 400 10px "IBM Plex Mono", monospace;
+}
+.app .flight-help {
+  bottom: 18px; left: 20px; font-size: 10px;
+  background: #142936dd; color: #bfd0dc; border: 1px solid #55708066;
+  border-radius: 5px; padding: 7px 10px;
+}
+.app kbd { border: 0; background: #294453; color: #d1e1e9; font: 400 10px "IBM Plex Mono", monospace; padding: 2px 4px; border-radius: 2px; }
+.app .walk-toggle {
+  left: auto; right: 20px; bottom: 18px; transform: none;
+  display: flex; gap: 7px; align-items: center; padding: 8px 14px;
+  border: 1px solid #55708088; background: #142936ee; color: #d7e6ed; border-radius: 5px;
+  font-size: 12px;
+}
+.app .walk-toggle.active { background: #257b92; color: #fff; }
+.app .workspace .inspector {
+  position: absolute; top: var(--top-h); bottom: var(--foot-h); right: 0;
+  width: var(--dock-w); padding: 0;
+  display: flex; flex-direction: column;
+  max-height: none; overflow: hidden;
+  background: var(--paper); color: var(--ink);
+  border: 0; border-left: 1px solid var(--rule); border-radius: 0;
+  box-shadow: none; backdrop-filter: none;
+}
+.app .inspector-tabs {
+  display: flex; align-items: stretch;
+  height: 54px; min-height: 54px;
+  border-bottom: 1px solid var(--rule); background: var(--panel);
+  padding: 0 10px;
+}
+.app .inspector-tabs button {
+  position: relative; flex: 1; padding: 0 8px;
+  border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  background: transparent; font-size: 12px; color: var(--muted); font-weight: 500;
+}
+.app .inspector-tabs button.selected { color: var(--accent); border-bottom-color: var(--accent); background: var(--paper); }
+.app .inspector-tabs button:hover { color: var(--ink); }
+.app .tab-dot { position: absolute; top: 12px; right: 9px; height: 4px; width: 4px; border-radius: 50%; background: var(--copper); }
+.app .tab-panel { padding: 20px; flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+.app .tab-panel:focus { outline: none; }
+.app .tab-panel .segmented {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 3px; padding: 3px; border: 1px solid var(--rule); border-radius: 7px;
+  background: var(--panel);
+}
+.app .tab-panel .source-switch { grid-template-columns: repeat(3, 1fr); margin-bottom: 14px; }
+.app .tab-panel .segmented button {
+  min-height: 32px; font-size: 12px; border: 0; border-radius: 4px;
+  color: var(--muted); background: none; padding: 7px 5px;
+}
+.app .tab-panel .segmented button.selected { background: var(--paper); color: var(--accent); box-shadow: 0 1px 3px #14293610; font-weight: 600; }
+.app .tab-panel .layer-tabs { grid-template-columns: repeat(3, 1fr); }
+.app .backend-status {
+  display: flex; flex-wrap: wrap; gap: 7px; align-items: center;
+  margin: 0 0 15px; font-size: 11px; line-height: 1.6; color: var(--muted);
+}
+.app .backend-status > i { width: 5px; height: 5px; background: var(--copper); border-radius: 50%; flex-shrink: 0; }
+.app .backend-status.online > i { background: var(--accent); }
+.app .connection-retry { padding: 0; border: 0; background: none; color: var(--accent); font-size: 11px; text-decoration: underline; }
+.app .demo-intro { padding: 5px 0 17px; }
+.app .eyebrow { font: 400 9px "IBM Plex Mono", monospace; color: var(--accent); letter-spacing: 1.2px; }
+.app .demo-intro h2 { font: 600 29px "Barlow Condensed", sans-serif; color: var(--ink); margin: 8px 0 6px; }
+.app .demo-intro p { font-size: 12px; color: var(--muted); line-height: 1.65; margin: 0; }
+.app .scene-switcher { padding: 0; border: 0; }
+.app .demo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.app .demo-card {
+  min-width: 0; padding: 0; overflow: hidden; text-align: left;
+  background: var(--paper); color: var(--ink); border: 1px solid var(--rule); border-radius: 7px;
+}
+.app .demo-card:hover { border-color: var(--accent); }
+.app .demo-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.app .demo-card-image { position: relative; aspect-ratio: 1.65; overflow: hidden; background: var(--raised); }
+.app .demo-card img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.app .demo-card-image > span, .app .demo-card-image > i {
+  position: absolute; top: 6px; left: 6px; padding: 3px 5px; border-radius: 3px;
+  color: #fff; background: #10212dc4; font: 400 8px "IBM Plex Mono", monospace;
+}
+.app .demo-card-image > i { top: auto; left: auto; bottom: 6px; right: 6px; background: #257b92; font-style: normal; }
+.app .demo-card-copy { padding: 10px 9px 11px; display: flex; flex-direction: column; gap: 5px; }
+.app .demo-card-copy strong { font-size: 12px; font-weight: 600; }
+.app .demo-card-copy small { color: var(--muted); font-size: 9px; line-height: 1.4; }
+.app .scene-notes { border-top: 1px solid var(--rule); margin-top: 22px; padding-top: 17px; }
+.app .scene-notes p, .app .scene-notes > small { color: var(--muted); font-size: 11px; line-height: 1.7; }
+.app .scene-notes .loaded-scene { color: var(--ink); font-weight: 500; }
+.app .source-credit { color: var(--accent); font-size: 11px; text-underline-offset: 3px; }
+.app .control-section { border-color: var(--rule); padding: 17px 0; }
+.app .control-section label, .app .label-row label { color: var(--ink); font-size: 12px; font-weight: 500; margin-bottom: 8px; }
+.app .label-row > span { font: 400 10px "IBM Plex Mono", monospace; color: var(--muted); }
+.app .tab-empty, .app .upload-copy, .app .waypoint-panel > p { font-size: 12px; line-height: 1.7; color: var(--muted); }
+.app .tab-empty { margin: 12px 0; }
+.app .metric-grid { gap: 9px; margin: 0 0 20px; }
+.app .metric-grid > div { border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); padding: 12px; }
+.app .metric-grid small { font-size: 10px; color: var(--muted); }
+.app .metric-grid strong { font: 400 20px "IBM Plex Mono", monospace; color: var(--ink); margin: 8px 0 5px; }
+.app .metric-grid em { font-size: 10px; font-style: normal; color: var(--accent); }
+.app .metric-grid em.neutral { color: var(--muted); }
+.app .download-row { display: flex; flex-direction: column; gap: 7px; margin-top: 15px; }
+.app .download-row a {
+  border: 1px solid var(--rule); border-radius: 5px; padding: 10px 11px;
+  color: var(--accent); background: var(--panel); text-decoration: none; font-size: 11px; font-weight: 500;
+}
+.app .download-row a:hover { border-color: var(--accent); background: var(--accent-soft); }
+.app .class-legend, .app .class-breakdown { color: var(--muted); font-size: 11px; }
+.app .class-breakdown-row { border-color: var(--rule); }
+.app .class-breakdown-row strong { color: var(--ink); }
+.app .upload-options { display: flex; flex-direction: column; gap: 12px; }
+.app .upload-options label small { color: var(--muted); font-size: 11px; }
+.app input[type="number"], .app select {
+  width: 100%; background: var(--paper); border: 1px solid var(--rule); border-radius: 5px;
+  color: var(--ink); padding: 10px; font-size: 12px; min-height: 38px;
+}
+.app .upload-reference, .app .upload-reference-clear {
+  border: 1px solid var(--rule); color: var(--muted); background: var(--panel); border-radius: 5px; font-size: 11px;
+}
+.app .upload-options .segmented { margin-top: 6px; }
+.app .upload-dropzone {
+  margin-top: 16px; width: 100%; padding: 24px 12px;
+  background: var(--accent-soft); border: 1px dashed var(--accent); border-radius: 7px;
+  color: var(--accent); font-size: 12px;
+}
+.app .upload-error { background: var(--panel); color: var(--copper); border: 1px solid var(--rule); border-radius: 5px; padding: 12px; font-size: 12px; line-height: 1.6; }
+.app .models-line, .app .dino-credit { color: var(--muted); font-size: 10px; line-height: 1.6; }
+.app .contour-toggle { display: flex; gap: 8px; align-items: center; font-size: 11px; line-height: 1.5; color: var(--muted); margin: 10px 0; }
+.app .contour-toggle input { accent-color: var(--accent); flex-shrink: 0; }
+.app input[type="range"] { accent-color: var(--accent); }
+.app .range-labels, .app .profile-values { color: var(--muted); font: 400 10px "IBM Plex Mono", monospace; }
+.app .sparkline { background: var(--panel); border-color: var(--rule); }
+.app .profile-values strong { color: var(--ink); }
+.app .text-btn { color: var(--accent); font-size: 11px; }
+.app .waypoint-actions, .app .tool-row { gap: 8px; }
+.app .waypoint-actions button, .app .tool-row button {
+  color: var(--ink); background: var(--panel); border: 1px solid var(--rule); border-radius: 5px; min-height: 36px; font-size: 11px;
+}
+.app .waypoint-actions button.tool-active, .app .tool-row button.tool-active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.app .tool-row { border-color: var(--rule); }
+.app .scene-preview { border-color: var(--rule); background: var(--panel); color: var(--ink); }
+.app .scene-preview small { color: var(--muted); }
+.app .photo-nav button { color: var(--accent); background: var(--panel); border: 1px solid var(--rule); font-size: 11px; border-radius: 5px; min-height: 33px; }
+.app .gcp-result { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; color: var(--ink); padding: 14px; font-size: 12px; line-height: 1.8; margin: 12px 0; }
+.app .facility-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
+.app .validation-detail { color: var(--muted); }
+.app .validation-detail svg { background: var(--panel); border-color: var(--rule); }
+.app .validation-detail table { color: var(--ink); font-size: 10px; width: 100%; border-collapse: collapse; }
+.app .validation-detail th, .app .validation-detail td { padding: 7px 4px; border-bottom: 1px solid var(--rule); }
+.app .building-card { top: 55px; left: 20px; right: auto; background: var(--paper); color: var(--ink); border: 1px solid var(--rule); border-radius: 7px; padding: 14px; }
+.app .building-card button { background: transparent; color: var(--muted); }
+.app .building-card dt { color: var(--muted); }
+.app .processing-overlay { background: #10212dde; color: #e3eef3; border-color: #557080; }
+.app .toast { bottom: 50px; padding: 12px 17px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); color: var(--ink); box-shadow: 0 6px 24px #10212d20; }
+.app .measure-hint { bottom: 95px; padding: 10px 15px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); color: var(--ink); max-width: min(680px, 92vw); font-size: 11px; }
+.app .measure-hint svg:last-child { color: var(--muted); }
+.app .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (min-width: 1600px) { .app { --dock-w: 420px; } .app .tab-panel { padding: 24px; } }
+@media (max-width: 1100px) {
+  .app { --dock-w: 345px; }
+  .app .viewport-top { gap: 17px; padding: 0 16px; }
+  .app .scene-title { padding-left: 17px; }
+  .app .scene-facts span:nth-child(n+3) { display: none; }
+  .app .view-actions { gap: 5px; }
+  .app .view-actions button[aria-label="Play route"] { display: none; }
+  .app .flight-help { max-width: calc(100% - 120px); line-height: 1.6; }
+  .app .tab-panel { padding: 17px; }
+}
+@media (max-width: 760px) {
+  .app { --top-h: 66px; }
+  .app .workspace { height: auto; min-height: 100dvh; padding-top: var(--top-h); padding-bottom: var(--foot-h); }
+  .app .workspace .viewport-card { position: relative; inset: auto; height: 52dvh; min-height: 320px; width: 100%; }
+  .app .workspace .inspector { position: relative; inset: auto; width: 100%; height: 58dvh; min-height: 440px; border-left: 0; border-top: 1px solid var(--rule); }
+  .app .workspace .viewport-top { height: var(--top-h); padding: 0 12px; gap: 12px; }
+  .app .brand-mark { width: 28px; height: 32px; background: none; border: 0; }
+  .app .brand-mark svg { width: 22px; }
+  .app .brand { gap: 4px; }
+  .app .brand-name b { font-size: 24px; }
+  .app .brand-name small { font-size: 7px; letter-spacing: .8px; }
+  .app .scene-title { padding-left: 12px; gap: 5px; }
+  .app .scene-title strong { font-size: 13px; }
+  .app .scene-facts { display: none; }
+  .app .view-actions .primary-action, .app .view-actions button[aria-label="Play route"], .app .view-actions button[aria-label="Enter fullscreen"] { display: none; }
+  .app .view-actions button { padding: 0 8px; min-height: 32px; font-size: 11px; }
+  .app .tab-panel { padding: 20px; }
+  .app .demo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app .demo-card-image { aspect-ratio: 1.9; }
+  .app .demo-card-copy strong { font-size: 13px; }
+  .app .demo-card-copy small { font-size: 10px; }
+  .app .workspace .viewport-footer { height: var(--foot-h); padding: 0 12px; font-size: 8px; }
+  .app .footer-note { display: none; }
+  .app .flight-help { display: none; }
+  .app .canvas-badge { top: 12px; left: 12px; }
+  .app .walk-toggle { bottom: 12px; right: 12px; }
+  .app .measure-hint { bottom: 54px; }
+}
+@media (prefers-reduced-motion: reduce) { .app button { transition: none; } }

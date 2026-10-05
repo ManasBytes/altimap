@@ -347,7 +347,8 @@ to 2.86–3.38 m on validation tiles, so the exports stay the model's raw output
 
 ## 7. Viewer (`frontend/`, React + Vite + three.js)
 
-Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `styles.css`.
+Almost all of it is `frontend/src/main.jsx`; the current studio layout is in `studio.css`, with older renderer styles in
+`blender.css` and `styles.css`.
 
 ### 7.1 Scene
 - **Terrain**: a plane displaced by the 16-bit grid at true vertical scale × the exaggeration
@@ -365,7 +366,8 @@ Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `st
   - *Exact DSM*: the model's raw per-pixel surface, which is what the GeoTIFF holds.
 - **Catalog scenes** (GAMUS tiles in `frontend/public/`): LiDAR reference layers, not model
   output. They are restyled for looks and always labelled "LiDAR reference heights, not model
-  output". Only uploads show model output, drawn faithfully in metres.
+  output". Uploads and **prepared demo scenes** show model output in metres. Saved scenes retain their
+  original geometry, elevation grids and validation; rendering does not alter those outputs.
 
 ### 7.2 Layers
 - **Surface**: relief shading.
@@ -387,7 +389,17 @@ Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `st
   roof elevation.
 - **GLB export** of the whole scene, in metres.
 
-### 7.4 Upload and validation panel
+### 7.4 Studio inspector
+
+The light/dark studio uses a header, an unobstructed terrain viewport, a docked inspector and
+a status legend. Mobile screens stack the viewport and inspector. The inspector has five
+keyboard-navigable tabs: **Scenes**, **View**, **Measure**, **Accuracy** and **Context**.
+Scenes offers prepared demo cards, live upload settings and the separate LiDAR reference
+gallery. Demos default to the Sikkim town and forest scenes plus Pittsburgh bridges. Asset
+URLs resolve against their saved-result origin; live URLs resolve against the API origin.
+Missing independent height references are distinguished from optional coarse DEM agreement.
+
+Upload controls retain:
 - **Inputs**: image, optional pixel size, optional reference heights, optional GCP CSV, quality
   (High = 4-flip TTA, Fast = one pass), base terrain for GeoTIFFs (Copernicus or SRTM).
 - **Progress**: a staged progress bar.
@@ -397,6 +409,11 @@ Almost all of it is `frontend/src/main.jsx`; styles are in `blender.css` and `st
   links.
 
 ## 8. Deployment
+
+The [public Vercel frontend](https://altimap-demo.vercel.app) can load prepared results from HF
+without a running inference VM. `VITE_API_BASE` selects the live API origin or `disabled` for
+prepared demos only; `VITE_DEMO_CATALOG` selects the saved collection. See
+[DEPLOYMENT.md](docs/DEPLOYMENT.md). Live uploads remain unavailable until the VM is connected.
 
 - **One process**: `python -m viewer.server [--host 0.0.0.0] [--port 8000]` serves the built
   viewer and the API on the same origin. The frontend uses relative URLs, so the app works from

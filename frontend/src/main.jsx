@@ -33,6 +33,14 @@ import "./styles.css";
 import "./light.css";
 import "./enhancements.css";
 import "./blender.css";
+import "@fontsource/dm-sans/400.css";
+import "@fontsource/dm-sans/500.css";
+import "@fontsource/dm-sans/600.css";
+import "@fontsource/barlow-condensed/600.css";
+import "@fontsource/ibm-plex-mono/400.css";
+import "./studio.css";
+import { flatCity } from "./cityDisplay.js";
+import { demoCatalog, resultAssets } from "./hosting.js";
 import { gamusScenes } from "./gamusScenes";
 
 const samples = {
@@ -967,7 +975,106 @@ const FACADE_COLOR = 0xd6cfc0;
 const TRUNK_COLOR = 0x5b4636;
 // 1x1 black height map: flat ground under the city model.
 const FLAT_HEIGHT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC";
-function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
+// Home view: back the camera off with the scene's height at true scale, so a 130 m downtown
+// doesn't open inside its towers (the fixed view was framed for flat tiles at 0.5x).
+function homeCamera(camera, controls, sample, exaggeration) {
+  let k = 1;
+  if (sample?.metricHeights && sample.groundWidthM) {
+    const metres = Math.max(sample.ndsmMaxM ?? sample.maxM ?? 0, sample.terrain?.dsm?.relief_m ?? 0);
+    k = Math.max(1, 1 + ((metres * 8) / sample.groundWidthM) * exaggeration / 2.5);
+  }
+  camera.position.set(0, 3.4 * k, 5.6 * k);
+  controls.target.set(0, 0, 0);
+}
+
+// Critical facilities (viewer/facilities.py, from OpenStreetMap): a badge per kind, floating
+// above the facility; the colour also tints the walls of the building it stands in.
+const FACILITY_STYLE = {
+  hospital: { colour: "#d7263d", glyph: "H", label: "Hospitals" },
+  clinic: { colour: "#e4576b", glyph: "cross", label: "Clinics" },
+  "fire station": { colour: "#f07f13", glyph: "flame", label: "Fire stations" },
+  police: { colour: "#2d6cdf", glyph: "star", label: "Police" },
+  shelter: { colour: "#1f9d61", glyph: "house", label: "Shelters" },
+  "assembly point": { colour: "#1f9d61", glyph: "house", label: "Assembly points" },
+  school: { colour: "#d9a400", glyph: "book", label: "Schools" },
+  college: { colour: "#d9a400", glyph: "book", label: "Colleges" },
+  university: { colour: "#d9a400", glyph: "book", label: "Universities" },
+};
+const facilityIconCache = new Map();
+function facilityIcon(kind) {
+  if (facilityIconCache.has(kind)) return facilityIconCache.get(kind);
+  const style = FACILITY_STYLE[kind] ?? FACILITY_STYLE.shelter;
+  const size = 128;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  const m = size / 2;
+  g.beginPath(); // map-pin badge: a disc with a point underneath
+  g.arc(m, m - 8, m - 14, Math.PI * 0.8, Math.PI * 2.2);
+  g.lineTo(m, size - 4);
+  g.closePath();
+  g.fillStyle = style.colour;
+  g.fill();
+  g.lineWidth = 6;
+  g.strokeStyle = "#ffffff";
+  g.stroke();
+  g.fillStyle = "#ffffff";
+  const cy = m - 8;
+  g.beginPath();
+  if (style.glyph === "H") {
+    g.font = "bold 58px sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("H", m, cy + 3);
+  } else if (style.glyph === "cross") {
+    g.rect(m - 9, cy - 28, 18, 56);
+    g.rect(m - 28, cy - 9, 56, 18);
+  } else if (style.glyph === "flame") {
+    g.moveTo(m, cy - 30);
+    g.bezierCurveTo(m + 30, cy - 4, m + 22, cy + 26, m, cy + 28);
+    g.bezierCurveTo(m - 22, cy + 26, m - 30, cy - 2, m - 8, cy - 14);
+    g.bezierCurveTo(m - 6, cy - 2, m + 2, cy + 2, m, cy - 30);
+  } else if (style.glyph === "star") {
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 ? 13 : 31;
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      g.lineTo(m + r * Math.cos(a), cy + r * Math.sin(a));
+    }
+  } else if (style.glyph === "book") {
+    g.moveTo(m, cy - 16); g.lineTo(m - 30, cy - 24); g.lineTo(m - 30, cy + 20); g.lineTo(m, cy + 28);
+    g.lineTo(m + 30, cy + 20); g.lineTo(m + 30, cy - 24); g.closePath();
+    g.fill();
+    g.beginPath();
+    g.fillStyle = style.colour;
+    g.rect(m - 2, cy - 14, 4, 40);
+  } else {
+    g.moveTo(m, cy - 30); g.lineTo(m + 30, cy - 2); g.lineTo(m + 20, cy - 2); g.lineTo(m + 20, cy + 26);
+    g.lineTo(m - 20, cy + 26); g.lineTo(m - 20, cy - 2); g.lineTo(m - 30, cy - 2); g.closePath();
+  }
+  g.fill();
+  const texture = new THREE.CanvasTexture(c);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  facilityIconCache.set(kind, texture);
+  return texture;
+}
+// Sprites take their parent's scale: the city group squashes y (metres -> world), so each icon
+// is stretched back by the same factor to stay a round badge.
+function fitFacilityIcons(city) {
+  for (const sp of city.userData.icons ?? []) {
+    sp.visible = city.scale.y > 0;
+    sp.scale.y = sp.scale.x / (city.scale.y || 1);
+  }
+}
+
+const INSPECTOR_TABS = [
+  ["image", "Scenes"],
+  ["view", "View"],
+  ["measure", "Measure"],
+  ["accuracy", "Accuracy"],
+  ["context", "Context"],
+];
+
+function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM, facilities, embankments) {
   // hcol: the Height layer's colours (jet over 0..maxM metres), swapped in by setHeightMode
   const roof = { pos: [], nrm: [], uv: [], hcol: [], ranges: [] }; // ranges: [firstTri, endTri, building]
   const wall = { pos: [], nrm: [], col: [], hcol: [], ranges: [] };
@@ -1009,6 +1116,7 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
     wallColour
       .setRGB(c[0] / 255, c[1] / 255, c[2] / 255, THREE.SRGBColorSpace)
       .lerp(facade, 0.45);
+    if (b.facility) wallColour.set(FACILITY_STYLE[b.facility.kind]?.colour ?? FACADE_COLOR);
     const pos = g.attributes.position.array;
     const nrm = g.attributes.normal.array;
     const uv = g.attributes.uv.array;
@@ -1094,6 +1202,43 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
     meshes.push(crowns, trunks);
     crowns.userData.colours = [Float32Array.from(crowns.instanceColor.array), crownHeightColours];
   }
+  // Flood defences (OpenStreetMap levees, embankments, dams): a bright band along each crest.
+  for (const e of embankments ?? []) {
+    const pts = e.pts.map(([u, v]) => new THREE.Vector3(-4 + 8 * u, e.crest + 1.5, -4 + 8 * v));
+    const band = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, "centripetal"), Math.max(8, pts.length * 6), 0.01, 6),
+      new THREE.MeshBasicMaterial({ color: 0x2bd4ff }),
+    );
+    band.userData.noPick = true;
+    meshes.push(band);
+  }
+  const icons = [];
+  if (facilities?.length) {
+    const toWorld = 8 / groundWidthM;
+    const poleM = 14; // the badge floats this far above the roof or ground it marks
+    const poles = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(1, 1, 1, 6).translate(0, 0.5, 0),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }),
+      facilities.length,
+    );
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    facilities.forEach((f, i) => {
+      const x = -4 + 8 * f.u;
+      const z = -4 + 8 * f.v;
+      m4.compose(new THREE.Vector3(x, f.z, z), q, new THREE.Vector3(0.012, poleM, 0.012));
+      poles.setMatrixAt(i, m4);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: facilityIcon(f.kind), transparent: true }));
+      sp.position.set(x, f.z + poleM, z);
+      sp.center.set(0.5, 0.03); // the badge's point sits on the pole's top
+      const w = Math.max(0.12, Math.min(0.3, 40 * toWorld)); // ~40 m wide, kept legible at any scale
+      sp.scale.set(w, w, 1);
+      sp.userData.facility = f;
+      icons.push(sp);
+    });
+    poles.userData.noPick = true;
+    meshes.push(poles);
+  }
   for (const m of meshes) {
     m.castShadow = true;
     m.receiveShadow = true;
@@ -1109,6 +1254,15 @@ function buildCityGroup(buildings, trees, roofTexture, groundWidthM, maxM) {
       crowns.instanceColor.array.set(crowns.userData.colours[on ? 1 : 0]);
       crowns.instanceColor.needsUpdate = true;
     }
+  };
+  group.userData.dispose = () => {
+    const materials = new Set([photoRoof, heightRoof]);
+    group.traverse((object) => {
+      object.geometry?.dispose();
+      for (const mat of Array.isArray(object.material) ? object.material : [object.material])
+        if (mat) materials.add(mat);
+    });
+    materials.forEach((mat) => mat.dispose());
   };
   return group;
 }
@@ -1175,6 +1329,16 @@ function profileStats(profile) {
 
 // Validation beyond the four headline numbers: what was compared, the bias, a scatter
 // of model vs reference (1500 random pixels) and where the error sits by land cover.
+function RasterDownloads({ downloads }) {
+  return <div className="download-row">
+    {Object.entries(downloads ?? {}).filter(([name]) => name.endsWith(".tif") || name.endsWith(".geojson"))
+      .map(([name, path]) => <a key={name} href={path} download>
+        ⬇ {name === "dsm.tif" ? "Absolute DSM (GeoTIFF)"
+          : name === "ndsm.tif" ? "nDSM (GeoTIFF)" : "3D buildings (GeoJSON)"}
+      </a>)}
+  </div>;
+}
+
 function ValidationDetail({ v }) {
   const pts = v.scatter;
   let lo = Infinity;
@@ -1294,6 +1458,7 @@ function TerrainCanvas({
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     host.appendChild(renderer.domElement);
     const controls = new OrbitControls(camera, renderer.domElement);
+    homeCamera(camera, controls, sample, exaggeration);
     controls.enableDamping = true;
     controls.target.set(0, 0, 0);
     controls.autoRotate = autoRotate;
@@ -1430,6 +1595,7 @@ function TerrainCanvas({
     };
     const loadPixels = (url, done) => {
       const img = new Image();
+      img.crossOrigin = "anonymous";
       img.onload = () => {
         const c = document.createElement("canvas");
         c.width = HEIGHT_SAMPLE_WIDTH;
@@ -1554,9 +1720,12 @@ function TerrainCanvas({
         roofTexture,
         sample.groundWidthM ?? 1024 * GAMUS_GSD_M,
         sample.ndsmMaxM ?? sample.maxM,
+        sample.facilities,
+        sample.embankments,
       );
       city.scale.y =
         (exaggeration * 8) / (sample.groundWidthM ?? 1024 * GAMUS_GSD_M);
+      fitFacilityIcons(city);
       scene.add(city);
     }
     const pickable = city ? [mesh, ...city.children] : [mesh];
@@ -1571,7 +1740,7 @@ function TerrainCanvas({
     };
     const pickBuilding = () => {
       if (!city) return;
-      const hit = raycaster.intersectObjects(city.children)[0];
+      const hit = raycaster.intersectObjects(city.children).find((hit) => !hit.object.userData.noPick);
       const ranges = hit?.object.userData.ranges;
       const found = ranges?.find(([a, z]) => hit.faceIndex >= a && hit.faceIndex < z);
       clearOutline();
@@ -1585,6 +1754,8 @@ function TerrainCanvas({
       city.add(outline);
       const widthM = sample.groundWidthM ?? 1024 * GAMUS_GSD_M;
       onBuildingPick?.({
+        facility: b.facility,
+        bridge: b.kind === "bridge",
         height: b.h,
         floors: Math.max(1, Math.round(b.h / 3.2)),
         areaM2: footprintAreaM2(b, widthM, sample.groundHeightM ?? widthM),
@@ -1818,7 +1989,7 @@ function TerrainCanvas({
         if (!measureModeRef.current) pickBuilding(); // Measure double-clicks probe, not pick
         return;
       }
-      const roofHit = city ? raycaster.intersectObjects(city.children)[0] : null;
+      const roofHit = city ? raycaster.intersectObjects(city.children).find((hit) => !hit.object.userData.noPick) : null;
       if (roofHit) {
         // Clicked a building: put the waypoint on its roof.
         const onRoof = roofHit.point.clone();
@@ -1930,6 +2101,7 @@ function TerrainCanvas({
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+      state.current.renderDirty = true;
     };
     onResize();
     window.addEventListener("resize", onResize);
@@ -2091,11 +2263,7 @@ function TerrainCanvas({
       transform.dispose();
       geo.dispose();
       material.dispose();
-      if (city)
-        city.children.forEach((m) => {
-          m.geometry.dispose();
-          m.material.dispose();
-        });
+      city?.userData.dispose?.();
       roofTexture?.dispose();
       if (exportRef) exportRef.current = null;
       if (material.map && material.map !== height) material.map.dispose();
@@ -2215,16 +2383,18 @@ function TerrainCanvas({
       );
     p.needsUpdate = true;
     m.geometry.computeVertexNormals();
-    if (state.current.city)
+    if (state.current.city) {
       state.current.city.scale.y =
         (exaggeration * 8) / (state.current.groundWidthM ?? 1024 * GAMUS_GSD_M);
+      fitFacilityIcons(state.current.city);
+    }
     state.current.exaggeration = exaggeration;
     state.current.renderDirty = true;
   }, [exaggeration]);
   useEffect(() => {
     const s = state.current;
     if (!s.camera || !s.controls) return;
-    s.camera.position.set(0, 3.4, 5.6);
+    homeCamera(s.camera, s.controls, sample, exaggeration);
     s.controls.target.set(0, 0, 0);
     s.controls.update();
   }, [resetToken]);
@@ -2312,7 +2482,7 @@ function TerrainCanvas({
       s.camera.near = 0.002;
     } else {
       s.camera.near = 0.1;
-      s.camera.position.set(0, 3.4, 5.6);
+      homeCamera(s.camera, s.controls, sample, exaggeration);
       c.target.set(0, 0, 0);
     }
     s.camera.updateProjectionMatrix();
@@ -2339,7 +2509,9 @@ function TerrainCanvas({
 // ground). Served by `python -m viewer.server` on :8000.
 // Same origin as the page: viewer.server serves both the app and /api. For `npm run dev` /
 // `npm run preview`, vite.config.js proxies /api and /data-uploads to :8000.
-const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/+$/, "");
+const API_ENABLED = API_BASE !== "disabled";
+const DEMO_CATALOG = import.meta.env.VITE_DEMO_CATALOG ?? "https://huggingface.co/datasets/Dilavesh/altimap-demo/resolve/main/index.json";
 const ESTIMATE_API_URL = `${API_BASE}/api/estimate`;
 const CLASSIFY_CLASS_LABELS = [
   "background",
@@ -2362,8 +2534,23 @@ const CLASS_DOT_STYLE = {
   trees: "tree",
 };
 
+
+const DEMO_SCENES = {
+  sikkim_chungthang_town: { name: "Chungthang", location: "Sikkim, India · March 2022", type: "Satellite" },
+  sikkim_namchi_town: { name: "Namchi", location: "Sikkim, India · March 2022", type: "Satellite" },
+  sikkim_chungthang_forest: { name: "Himalayan forest", location: "Chungthang, Sikkim · March 2022", type: "Satellite" },
+  naip_pittsburgh_bridges: { name: "Pittsburgh bridges", location: "Pennsylvania, USA", type: "Aerial" },
+  gamus_DC_04_27: { name: "Washington blocks", location: "GAMUS · reference scored", type: "Benchmark" },
+  naip_dc_suburbs_chevychase: { name: "Chevy Chase", location: "Maryland, USA · reference scored", type: "Aerial" },
+  naip_pittsburgh_hills: { name: "Pittsburgh hills", location: "Pennsylvania, USA · reference scored", type: "Aerial" },
+};
+function demoInfo(id) {
+  return DEMO_SCENES[id.split("__")[0]] ?? { name: id.split("__")[0].replaceAll("_", " "), location: "Prepared scene", type: "Demo" };
+}
+
 function App() {
-  const [view, setView] = useState("upload"); // terrain | upload
+  const [view, setView] = useState(DEMO_CATALOG ? "demo" : "upload"); // demo | terrain | upload
+  const [inspectorTab, setInspectorTab] = useState("image");
   const [split, setSplit] = useState("train");
   const [sample, setSample] = useState(null);
   const [layer, setLayer] = useState("texture");
@@ -2371,7 +2558,7 @@ function App() {
   const [playing, setPlaying] = useState(false);
   const [measure, setMeasure] = useState(false);
   const [toast, setToast] = useState("");
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState("light");
   const [resetToken, setResetToken] = useState(0);
   const [profileCleared, setProfileCleared] = useState(false);
   const [profile, setProfile] = useState(null);
@@ -2380,11 +2567,17 @@ function App() {
   const [contours, setContours] = useState(false);
   const [walkMode, setWalkMode] = useState(false);
   useEffect(() => {
-    if ((layer === "error" && !sample?.error) || (layer === "slope" && !sample?.metricHeights))
+    if (
+      (layer === "error" && !sample?.error) ||
+      (layer === "slope" && !sample?.metricHeights)
+    )
       setLayer("texture");
   }, [layer, sample]);
   const [cityMode, setCityMode] = useState(true);
+  const [flatGround, setFlatGround] = useState(false);
+  useEffect(() => setFlatGround(false), [sample?.id, sample?.rgb]);
   const [pickedBuilding, setPickedBuilding] = useState(null);
+  useEffect(() => setPickedBuilding(null), [sample, cityMode, flatGround]);
   const exportRef = useRef(null);
   const profileView = profileStats(profile);
   const shown = sample ?? EMPTY_SAMPLE;
@@ -2395,13 +2588,34 @@ function App() {
     const terrain = sample.terrain; // georeferenced uploads only
     // 16-bit grids (uploads): mesh relative to the same zero as its relief PNG, probe = nDSM,
     // elevation = absolute DSM. Catalog scenes have none and use their PNGs.
-    const relative = (grid, lo) => grid && Float32Array.from(grid, (v) => v - lo);
-    const grids = { probeGrid: sample.ndsmGrid, elevGrid: terrain ? sample.dsmGrid : null };
+    const relative = (grid, lo) =>
+      grid && Float32Array.from(grid, (v) => v - lo);
+    const grids = {
+      probeGrid: sample.ndsmGrid,
+      elevGrid: terrain ? sample.dsmGrid : null,
+    };
+    if (cityMode && sample.city && terrain && flatGround)
+      return {
+        ...sample,
+        ...grids,
+        ...flatCity(sample),
+        flatGround: true,
+        meshGrid: sample.groundGrid && new Float32Array(sample.groundGrid.length),
+        meshOffsetM: 0,
+        height: FLAT_HEIGHT,
+        maxM: sample.maxM,
+        exactHeight: sample.height,
+        exactMaxM: sample.maxM,
+        elevation: terrain.dsm,
+        groundMinM: null,
+      };
     if (cityMode && sample.city)
       return {
         ...sample,
         ...grids,
-        meshGrid: terrain ? relative(sample.groundGrid, terrain.ground.min_m) : null,
+        meshGrid: terrain
+          ? relative(sample.groundGrid, terrain.ground.min_m)
+          : null,
         meshOffsetM: terrain ? terrain.ground.min_m : 0,
         // bare-earth terrain (or flat ground) under extruded buildings and trees
         height: terrain ? terrain.ground.png : FLAT_HEIGHT,
@@ -2426,8 +2640,10 @@ function App() {
         exactMaxM: sample.maxM,
         elevation: terrain.dsm,
       };
-    return sample.ndsmGrid ? { ...sample, ...grids, meshGrid: sample.ndsmGrid } : sample;
-  }, [sample, cityMode]);
+    return sample.ndsmGrid
+      ? { ...sample, ...grids, meshGrid: sample.ndsmGrid }
+      : sample;
+  }, [sample, cityMode, flatGround]);
   const [waypointMode, setWaypointMode] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
   const [waypointCount, setWaypointCount] = useState(0);
@@ -2437,13 +2653,68 @@ function App() {
   const [uploadStatus, setUploadStatus] = useState("idle"); // idle | loading | error
   const [uploadError, setUploadError] = useState("");
   const [uploadMeta, setUploadMeta] = useState(null);
+  const [backendStatus, setBackendStatus] = useState(API_ENABLED ? "checking" : "offline");
+  const [backendCheck, setBackendCheck] = useState(0);
+  const [demos, setDemos] = useState([]);
+  const [demoError, setDemoError] = useState("");
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [selectedDemo, setSelectedDemo] = useState("");
+  const demoRequest = useRef(0);
+  useEffect(() => {
+    if (!API_ENABLED) return;
+    let stopped = false;
+    const check = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/health`, { cache: "no-store", signal: AbortSignal.timeout(5000) });
+        const health = response.ok && await response.json();
+        if (!stopped) setBackendStatus(health?.ok ? "online" : "offline");
+      } catch {
+        if (!stopped) setBackendStatus("offline");
+      }
+    };
+    check();
+    const timer = setInterval(check, 30000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [backendCheck]);
+  useEffect(() => {
+    if (!DEMO_CATALOG) return;
+    const controller = new AbortController();
+    const catalogUrl = new URL(DEMO_CATALOG, window.location.href).href;
+    fetch(catalogUrl, { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error(`Demo catalog unavailable (${response.status})`);
+      setDemos(demoCatalog(await response.json(), catalogUrl));
+    }).catch((error) => {
+      if (!controller.signal.aborted) setDemoError(error.message);
+    });
+    return () => controller.abort();
+  }, []);
   const geoid = uploadMeta?.dsm?.base_dem === "srtm" ? "EGM96" : "EGM2008"; // of the DSM's heights
+  // Mark tabs that contain results or service errors for the current image.
+  const tabHasResults = (key) =>
+    !!uploadMeta &&
+    ((key === "accuracy" &&
+      !!(
+        uploadMeta.validation ||
+        uploadMeta.dem_agreement ||
+        uploadMeta.gcp
+      )) ||
+      (key === "context" &&
+        !!(
+          uploadMeta.bridges?.deck_m2 ||
+          uploadMeta.bridges?.error ||
+          uploadMeta.flood?.items?.length ||
+          uploadMeta.flood?.error ||
+          uploadMeta.facilities?.length ||
+          uploadMeta.facilities_error
+        )));
   const [uploadGsd, setUploadGsd] = useState("");
   const [referenceFile, setReferenceFile] = useState(null);
   const [gcpFile, setGcpFile] = useState(null); // CSV lon, lat, height: corrects a GeoTIFF's DSM
   const [uploadQuality, setUploadQuality] = useState("high"); // high = 4-flip TTA
-  const [baseDem, setBaseDem] = useState("glo30"); // public DEM under a GeoTIFF's absolute DSM
+  const [baseDem, setBaseDem] = useState("glo30"); // public DEM under a GeoTIFF's absolute DSM (the brief names SRTM)
   const [compareDems, setCompareDems] = useState(false);
+  const [lastUploadFile, setLastUploadFile] = useState(null); // re-run at a measured scale
+  const [knownLengthM, setKnownLengthM] = useState(""); // real length of the measured A -> B
   const [uploadProgress, setUploadProgress] = useState(null); // {stage, progress}
   const fileRef = useRef(null);
   const uploadFileRef = useRef(null);
@@ -2454,8 +2725,14 @@ function App() {
     setTimeout(() => setToast(""), 1800);
   };
   const selectScene = (s) => {
+    demoRequest.current++;
+    setDemoLoading(false);
     setSplit(s.split);
     setSample(s);
+    setUploadMeta(null);
+    setMeasurePoint(null);
+    setMeasure(false);
+    setWaypointMode(false);
     setProfileCleared(false);
     setProfilePoints([]);
     setWalkMode(false);
@@ -2464,7 +2741,116 @@ function App() {
     setPlaying(false);
     notify(`Loaded ${s.id}`);
   };
-  const runClassification = async (file) => {
+  const loadEstimate = (data, label, savedDemo = false) => {
+    const gsdText = data.gsd_m
+      ? `${data.gsd_m.toFixed(2)} m/px`
+      : "GSD unknown (0.33 m/px assumption; experimental metric)";
+    // Reuses the exact same `sample` shape as a catalog scene (rgb/height/
+    // classes URLs + label/coord/max) so every existing viewer feature --
+    // layer switching, waypoints, measuring -- works on it unmodified.
+    setSample({
+      id: savedDemo ? `demo:${data.id}` : "upload",
+      label,
+      savedDemo,
+      coord: data.dsm
+        ? `Georeferenced · ${gsdText} · DSM ${data.dsm.min_m.toFixed(0)}–${data.dsm.max_m.toFixed(0)} m`
+        : `${data.georeferenced ? "Georeferenced" : "Non-georeferenced"} · ${gsdText}`,
+      rgb: data.rgb,
+      height: data.height,
+      classes: data.classes,
+      max: `${data.max_m.toFixed(1)} m`,
+      thumb: data.rgb,
+      // /api/estimate encodes height linearly: pixel/255 * max_m.
+      metricHeights: true,
+      maxM: data.max_m,
+      ndsmMaxM: data.max_m, // viewSample overrides maxM per mode; this stays the nDSM's
+      // 16-bit heights on the mesh grid, when the server's grid lines up with it
+      ...(data.grids &&
+      (data.grids.side - 1) % (HEIGHT_SAMPLE_WIDTH - 1) === 0
+        ? {
+            ndsmGrid: decodeGrid(
+              data.grids.ndsm,
+              data.grids.side,
+              HEIGHT_SAMPLE_WIDTH,
+            ),
+            groundGrid: decodeGrid(
+              data.grids.ground,
+              data.grids.side,
+              HEIGHT_SAMPLE_WIDTH,
+            ),
+            dsmGrid: decodeGrid(
+              data.grids.dsm,
+              data.grids.side,
+              HEIGHT_SAMPLE_WIDTH,
+            ),
+          }
+        : {}),
+      // The server centres the scene in a square at its own aspect: these span the square.
+      groundWidthM:
+        (data.view_shape ?? data.shape)[1] * (data.gsd_m || GAMUS_GSD_M),
+      groundHeightM:
+        (data.view_shape ?? data.shape)[0] * (data.gsd_m || GAMUS_GSD_M),
+      areaKm2:
+        (data.shape[0] * data.shape[1] * (data.gsd_m || GAMUS_GSD_M) ** 2) /
+        1e6,
+      gsdAssumed: data.gsd_assumed,
+      sourceLabel: `${savedDemo ? "Prepared model output · " : ""}${data.shape[1]} × ${data.shape[0]} source`,
+      city: data.city,
+      facilities: data.facilities ?? [],
+      embankments: data.embankments ?? [],
+      terrain: data.terrain,
+      error: data.error?.png ?? null, // signed model - reference map, when validated
+      errorLimitM: data.error?.limit_m ?? null,
+    });
+    setMeasure(false);
+    setWaypointMode(false);
+    setMeasurePoint(null);
+    setProfilePoints([]);
+    setWalkMode(false);
+    setExaggeration(1); // uploads are metric: open at true scale (0.5 suits the restyled previews)
+    setUploadMeta({
+      georeferenced: data.georeferenced,
+      seconds: data.seconds,
+      width: data.width,
+      height_px: data.height_px,
+      class_pixel_counts: data.class_pixel_counts,
+      max_m: data.max_m,
+      p99_m: data.ndsm_p99_m,
+      dsm: data.dsm,
+      dsm_error: data.dsm_error,
+      downloads: data.downloads,
+      validation: data.validation,
+      gcp: data.gcp,
+      checkpoint: data.checkpoint,
+      models: data.models,
+      work_gsd_m: data.work_gsd_m,
+      gsd_m: data.gsd_m,
+      height_mode: data.height_mode,
+      geospatial_warnings: data.geospatial_warnings,
+      base_dem_fallback: data.base_dem_fallback,
+      dem_agreement: data.dem_agreement,
+      facilities: data.facilities ?? [],
+      facilities_error: data.facilities_error,
+      flood: data.flood_defences ?? null,
+      bridges: data.bridges ?? null,
+    });
+    setProfileCleared(false);
+    setWaypointCount(0);
+    setSelectedWaypoint(null);
+    setPlaying(false);
+    setUploadStatus("idle");
+  };
+  const runClassification = async (file, gsdOverride) => {
+    if (uploadStatus === "loading" || demoLoading) return;
+    if (!API_ENABLED || backendStatus !== "online") {
+      setUploadError("Live processing is unavailable. You can explore the prepared demo scenes.");
+      setUploadStatus("error");
+      return;
+    }
+    demoRequest.current++;
+    setView("upload");
+    setInspectorTab("image");
+    setLastUploadFile(file);
     setUploadFileName(file.name);
     setUploadStatus("loading");
     setUploadError("");
@@ -2484,8 +2870,11 @@ function App() {
       body.append("file", file);
       body.append("job", job);
       body.append("tta", uploadQuality === "high" ? "true" : "false");
-      if (uploadGsd.trim()) body.append("gsd", uploadGsd.trim());
-      if (referenceFile) body.append("reference", referenceFile);
+      const gsdValue = gsdOverride ?? uploadGsd.trim();
+      if (gsdValue) body.append("gsd", gsdValue);
+      if (referenceFile) {
+        body.append("reference", referenceFile);
+      }
       if (gcpFile) body.append("gcps", gcpFile);
       body.append("base_dem", baseDem);
       body.append("compare_dems", String(compareDems));
@@ -2499,79 +2888,13 @@ function App() {
         );
       }
       const data = await res.json();
-      const gsdText = data.gsd_m
-        ? `${data.gsd_m.toFixed(2)} m/px`
-        : "GSD unknown (0.33 m/px assumption; experimental metric)";
-      // Reuses the exact same `sample` shape as a catalog scene (rgb/height/
-      // classes URLs + label/coord/max) so every existing viewer feature --
-      // layer switching, waypoints, measuring -- works on it unmodified.
-      setSample({
-        id: "upload",
-        label: file.name,
-        coord: data.dsm
-          ? `Georeferenced · ${gsdText} · DSM ${data.dsm.min_m.toFixed(0)}–${data.dsm.max_m.toFixed(0)} m`
-          : `${data.georeferenced ? "Georeferenced" : "Non-georeferenced"} · ${gsdText}`,
-        rgb: data.rgb,
-        height: data.height,
-        classes: data.classes,
-        max: `${data.max_m.toFixed(1)} m`,
-        thumb: data.rgb,
-        // /api/estimate encodes height linearly: pixel/255 * max_m.
-        metricHeights: true,
-        maxM: data.max_m,
-        ndsmMaxM: data.max_m, // viewSample overrides maxM per mode; this stays the nDSM's
-        // 16-bit heights on the mesh grid, when the server's grid lines up with it
-        ...(data.grids && (data.grids.side - 1) % (HEIGHT_SAMPLE_WIDTH - 1) === 0
-          ? {
-              ndsmGrid: decodeGrid(data.grids.ndsm, data.grids.side, HEIGHT_SAMPLE_WIDTH),
-              groundGrid: decodeGrid(data.grids.ground, data.grids.side, HEIGHT_SAMPLE_WIDTH),
-              dsmGrid: decodeGrid(data.grids.dsm, data.grids.side, HEIGHT_SAMPLE_WIDTH),
-            }
-          : {}),
-        groundWidthM: data.shape[1] * (data.gsd_m || GAMUS_GSD_M),
-        groundHeightM: data.shape[0] * (data.gsd_m || GAMUS_GSD_M),
-        areaKm2:
-          (data.shape[0] * data.shape[1] * (data.gsd_m || GAMUS_GSD_M) ** 2) / 1e6,
-        gsdAssumed: data.gsd_assumed,
-        sourceLabel: `${data.shape[1]} × ${data.shape[0]} source`,
-        city: data.city,
-        terrain: data.terrain,
-        error: data.error?.png ?? null, // signed model - reference map, when validated
-        errorLimitM: data.error?.limit_m ?? null,
-      });
-      setMeasurePoint(null);
-      setProfilePoints([]);
-      setWalkMode(false);
-      setUploadMeta({
-        seconds: data.seconds,
-        width: data.width,
-        height_px: data.height_px,
-        class_pixel_counts: data.class_pixel_counts,
-        max_m: data.max_m,
-        p99_m: data.ndsm_p99_m,
-        dsm: data.dsm,
-        dsm_error: data.dsm_error,
-        downloads: data.downloads,
-        validation: data.validation,
-        gcp: data.gcp,
-        checkpoint: data.checkpoint,
-        models: data.models,
-        work_gsd_m: data.work_gsd_m,
-        gsd_m: data.gsd_m,
-        height_mode: data.height_mode,
-        geospatial_warnings: data.geospatial_warnings,
-        dem_agreement: data.dem_agreement,
-      });
-      setProfileCleared(false);
-      setWaypointCount(0);
-      setSelectedWaypoint(null);
-      setPlaying(false);
-      setUploadStatus("idle");
+      loadEstimate(resultAssets(data, new URL(ESTIMATE_API_URL, window.location.href)), file.name);
+      setBackendStatus("online");
       notify(`Heights estimated for ${file.name}`);
     } catch (err) {
       setUploadError(
         err.message === "Failed to fetch"
-          ? "Couldn't reach the height backend — is `python -m viewer.server` running?"
+          ? "Live processing is unavailable. Prepared demo scenes remain available."
           : err.message,
       );
       setUploadStatus("error");
@@ -2580,6 +2903,44 @@ function App() {
       setUploadProgress(null);
     }
   };
+  const loadDemo = async (id) => {
+    const scene = demos.find((item) => item.id === id);
+    if (!scene || uploadStatus === "loading") return;
+    const request = ++demoRequest.current;
+    setSelectedDemo(id);
+    setDemoLoading(true);
+    setDemoError("");
+    try {
+      const response = await fetch(scene.result, { signal: AbortSignal.timeout(60000) });
+      if (!response.ok) throw new Error(`Demo scene unavailable (${response.status})`);
+      const data = resultAssets(await response.json(), scene.result);
+      if (!data.city || !data.rgb || !data.shape || !Number.isFinite(data.max_m))
+        throw new Error("This demo scene is incomplete");
+      const previews = [data.rgb, data.height, data.classes, data.terrain?.ground?.png,
+        data.terrain?.dsm?.png, data.error?.png].filter(Boolean);
+      await Promise.all(previews.map((url) => new Promise((resolve, reject) => {
+        const preview = new Image();
+        preview.crossOrigin = "anonymous";
+        const timer = setTimeout(() => reject(new Error("Scene textures took too long to load. Try again.")), 30000);
+        preview.onload = () => { clearTimeout(timer); resolve(); };
+        preview.onerror = () => { clearTimeout(timer); reject(new Error("Scene textures could not be loaded. Try again.")); };
+        preview.src = url;
+      })));
+      if (request !== demoRequest.current) return;
+      loadEstimate(data, scene.label, true);
+      setLastUploadFile(null);
+      setUploadFileName("");
+      setUploadError("");
+      notify(`Loaded prepared demo: ${scene.label}`);
+    } catch (error) {
+      if (request === demoRequest.current) setDemoError(error.message);
+    } finally {
+      if (request === demoRequest.current) setDemoLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (demos.length && !sample && !selectedDemo) loadDemo(demos[0].id);
+  }, [demos]);
   const onPickUpload = (e) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // picking the same file again should re-run
@@ -2653,7 +3014,8 @@ function App() {
     }
     if (sample.metricHeights && exportRef.current) {
       const name = (sample.label || "scene").replace(/\.[^.]+$/, "");
-      exportRef.current(`${name}-3d.glb`)
+      exportRef
+        .current(`${name}${viewSample.flatGround ? "-flat-ground" : ""}-3d.glb`)
         .then(() => notify("3D model exported (.glb, metres)"))
         .catch((err) => notify(`Export failed: ${err?.message ?? err}`));
       return;
@@ -2693,67 +3055,50 @@ function App() {
         onChange={importScene}
         hidden
       />
-      <aside className="rail">
-        <div className="brandmark">
-          <Mountain size={18} />
-        </div>
-        <div className="rail-nav">
-          <button
-            className={view === "terrain" ? "active" : ""}
-            onClick={() => setView("terrain")}
-            title="Terrain workspace"
-          >
-            <Layers3 size={18} />
-          </button>
-          <button
-            className={view === "upload" ? "active" : ""}
-            onClick={() => setView("upload")}
-            title="Upload imagery"
-          >
-            <Upload size={18} />
-          </button>
-        </div>
-        <div className="rail-bottom">
-          <button
-            onClick={() => {
-              setTheme(theme === "dark" ? "light" : "dark");
-              notify(`${theme === "dark" ? "Light" : "Dark"} mode enabled`);
-            }}
-            title={theme === "dark" ? "Light mode" : "Dark mode"}
-          >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </div>
-      </aside>
       <main>
         <section className="workspace">
           <div
             className={`viewport-card ${layer === "depth" || layer === "classes" ? "depth-mode" : ""}`}
           >
             <div className="viewport-top">
-              <div className="scene-title">
-                <span className="scene-chip">
-                  <Satellite size={14} />
+              <div
+                className="brand"
+                title="AltiMap: one image to heights and a 3D city"
+              >
+                <span className="brand-mark">
+                  <Mountain size={16} />
                 </span>
-                <div>
-                  <strong>{shown.label}</strong>
-                  <small>
-                    {shown.id ? `${shown.id} · ` : ""}{shown.coord}
-                  </small>
+                <span className="brand-name"><b>AltiMap</b><small>SCENE STUDIO</small></span>
+              </div>
+              <div className="scene-title">
+                <strong>{sample?.savedDemo ? demoInfo(sample.id.replace("demo:", "")).name : shown.label}</strong>
+                <div className="scene-facts">
+                  {String(shown.coord ?? "")
+                    .split(" · ")
+                    .filter(Boolean)
+                    .map((fact) => (
+                      <span key={fact}>{fact}</span>
+                    ))}
                 </div>
               </div>
               <div className="view-actions">
-                <button onClick={() => fileRef.current?.click()}>
-                  <Upload size={14} /> Import
+                <button
+                  className="primary-action"
+                  onClick={() => { setInspectorTab("image"); setView("upload"); }}
+                  disabled={uploadStatus === "loading"}
+                >
+                  <Upload size={14} /> Upload image
                 </button>
                 <button onClick={exportScene}>
                   <Download size={14} /> Export
                 </button>
-                <button onClick={togglePathPlayback}>
+                <button aria-label={playing ? "Pause route" : "Play route"} onClick={togglePathPlayback}>
                   {playing ? <Pause size={15} /> : <Play size={15} />}{" "}
                   {playing ? "Pause path" : "Play route"}
                 </button>
                 <button
+                  aria-label="Enter fullscreen"
+                  title="Enter fullscreen"
                   onClick={() =>
                     Promise.resolve(
                       document
@@ -2763,6 +3108,13 @@ function App() {
                   }
                 >
                   <Maximize2 size={15} />
+                </button>
+                <button
+                  onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                  title={theme === "dark" ? "Light mode" : "Dark mode"}
+                  aria-label={theme === "dark" ? "Light mode" : "Dark mode"}
+                >
+                  {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
                 </button>
               </div>
             </div>
@@ -2774,79 +3126,134 @@ function App() {
               {pickedBuilding && (
                 <div className="building-card">
                   <div className="label-row">
-                    <strong>Building</strong>
-                    <button onClick={() => setPickedBuilding(null)} title="Close">
+                    <strong>
+                      {pickedBuilding.bridge ? "Bridge" : "Building"}
+                    </strong>
+                    <button
+                      onClick={() => setPickedBuilding(null)}
+                      title="Close"
+                    >
                       <X size={13} />
                     </button>
                   </div>
-                  <dl>
-                    <dt>Height</dt>
-                    <dd>{pickedBuilding.height.toFixed(1)} m</dd>
-                    <dt>Floors (≈3.2 m each)</dt>
-                    <dd>~{pickedBuilding.floors}</dd>
-                    <dt>Footprint</dt>
-                    <dd>{Math.round(pickedBuilding.areaM2).toLocaleString()} m²</dd>
-                    <dt>Volume</dt>
-                    <dd>{Math.round(pickedBuilding.volumeM3).toLocaleString()} m³</dd>
-                    {pickedBuilding.roofElevation != null && (
-                      <>
-                        <dt>Roof elevation</dt>
-                        <dd>{pickedBuilding.roofElevation.toFixed(1)} m ({geoid})</dd>
-                      </>
-                    )}
-                  </dl>
+                  {pickedBuilding.bridge ? (
+                    <dl>
+                      <dt>Source</dt>
+                      <dd>OpenStreetMap</dd>
+                      {pickedBuilding.roofElevation != null && (
+                        <>
+                          <dt>Deck elevation</dt>
+                          <dd>
+                            {pickedBuilding.roofElevation.toFixed(1)} m ({geoid}
+                            )
+                          </dd>
+                        </>
+                      )}
+                    </dl>
+                  ) : (
+                    <dl>
+                      {pickedBuilding.facility && (
+                        <>
+                          <dt>
+                            {FACILITY_STYLE[
+                              pickedBuilding.facility.kind
+                            ]?.label.replace(/s$/, "") ?? "Facility"}
+                          </dt>
+                          <dd>
+                            {pickedBuilding.facility.name ||
+                              "unnamed (OpenStreetMap)"}
+                          </dd>
+                        </>
+                      )}
+                      <dt>Height</dt>
+                      <dd>{pickedBuilding.height.toFixed(1)} m</dd>
+                      <dt>Floors (≈3.2 m each)</dt>
+                      <dd>~{pickedBuilding.floors}</dd>
+                      <dt>Footprint</dt>
+                      <dd>
+                        {Math.round(pickedBuilding.areaM2).toLocaleString()} m²
+                      </dd>
+                      <dt>Volume</dt>
+                      <dd>
+                        {Math.round(pickedBuilding.volumeM3).toLocaleString()}{" "}
+                        m³
+                      </dd>
+                      {pickedBuilding.roofElevation != null && (
+                        <>
+                          <dt>Roof elevation</dt>
+                          <dd>
+                            {pickedBuilding.roofElevation.toFixed(1)} m ({geoid}
+                            )
+                          </dd>
+                        </>
+                      )}
+                    </dl>
+                  )}
                 </div>
               )}
-              {uploadStatus === "loading" && (
+              {(uploadStatus === "loading" || demoLoading) && (
                 <div className="processing-overlay">
-                  <strong>{uploadFileName}</strong>
-                  <span>{uploadProgress?.stage ?? "Working"}…</span>
+                  <strong>{demoLoading ? demoInfo(selectedDemo).name : uploadFileName}</strong>
+                  <span>{demoLoading ? "Loading saved textures and terrain…" : `${uploadProgress?.stage ?? "Working"}…`}</span>
+                  {!demoLoading && <>
                   <i className="progress-track">
                     <i
                       className="progress-fill"
-                      style={{ width: `${Math.round((uploadProgress?.progress ?? 0) * 100)}%` }}
+                      style={{
+                        width: `${Math.round((uploadProgress?.progress ?? 0) * 100)}%`,
+                      }}
                     />
                   </i>
-                  <small>{Math.round((uploadProgress?.progress ?? 0) * 100)}%</small>
+                  <small>
+                    {Math.round((uploadProgress?.progress ?? 0) * 100)}%
+                  </small>
+                  </>}
                 </div>
               )}
               {sample ? (
-              <TerrainCanvas
-                sample={viewSample}
-                exaggeration={exaggeration}
-                layer={layer}
-                resetToken={resetToken}
-                onMeasure={(info) => {
-                  if (!measure) return;
-                  if (!info) {
-                    notify("Double-click on the terrain surface");
-                    return;
-                  }
-                  setMeasurePoint(info);
-                  setProfileCleared(false);
-                  setProfilePoints((p) => (p.length === 1 ? [p[0], info] : [info]));
-                }}
-                onProfile={setProfile}
-                profilePoints={profilePoints}
-                contours={contours && Boolean(shown.metricHeights)}
-                contourStep={contourInterval(viewSample?.maxM ?? 1)}
-                walkMode={walkMode}
-                measureMode={measure}
-                waypointMode={waypointMode}
-                pathCommand={pathCommand}
-                onWaypointChange={setWaypointCount}
-                onWaypointSelect={setSelectedWaypoint}
-                onPathEnd={() => setPlaying(false)}
-                autoRotate={autoRotate && !walkMode}
-                onBuildingPick={setPickedBuilding}
-                exportRef={exportRef}
-              />
-              ) : uploadStatus === "loading" ? null : (
+                <TerrainCanvas
+                  sample={viewSample}
+                  exaggeration={exaggeration}
+                  layer={layer}
+                  resetToken={resetToken}
+                  onMeasure={(info) => {
+                    if (!measure) return;
+                    if (!info) {
+                      notify("Double-click on the terrain surface");
+                      return;
+                    }
+                    setMeasurePoint(info);
+                    setProfileCleared(false);
+                    setProfilePoints((p) =>
+                      p.length === 1 ? [p[0], info] : [info],
+                    );
+                  }}
+                  onProfile={setProfile}
+                  profilePoints={profilePoints}
+                  contours={contours && Boolean(shown.metricHeights)}
+                  contourStep={contourInterval(viewSample?.maxM ?? 1)}
+                  walkMode={walkMode}
+                  measureMode={measure}
+                  waypointMode={waypointMode}
+                  pathCommand={pathCommand}
+                  onWaypointChange={setWaypointCount}
+                  onWaypointSelect={setSelectedWaypoint}
+                  onPathEnd={() => setPlaying(false)}
+                  autoRotate={autoRotate && !walkMode}
+                  onBuildingPick={setPickedBuilding}
+                  exportRef={exportRef}
+                />
+              ) : uploadStatus === "loading" || demoLoading ? null : (
                 <div className="empty-viewport">
                   <Upload size={28} />
                   <strong>No imagery loaded</strong>
-                  <span>Import a PNG, JPG or GeoTIFF to estimate heights and build the 3D terrain.</span>
-                  <button onClick={() => fileRef.current?.click()}>Import imagery</button>
+                  <span>
+                    Import a PNG, JPG or GeoTIFF to estimate heights and build
+                    the 3D terrain.
+                  </span>
+                  <button onClick={() => { setInspectorTab("image"); setView("upload"); }}>
+                    Import imagery
+                  </button>
                 </div>
               )}
               <div className="flight-help">
@@ -2855,7 +3262,8 @@ function App() {
                     <kbd>W</kbd>
                     <kbd>A</kbd>
                     <kbd>S</kbd>
-                    <kbd>D</kbd> walk · <kbd>Shift</kbd> run · drag to look · buildings block
+                    <kbd>D</kbd> walk · <kbd>Shift</kbd> run · drag to look ·
+                    buildings block
                   </>
                 ) : (
                   <>
@@ -2898,723 +3306,1163 @@ function App() {
                 {!sample ? null : layer === "slope" ? (
                   <>
                     <span>0°</span>
-                    <b className="height-ramp" style={{ background: SLOPE_CSS }} />
+                    <b
+                      className="height-ramp"
+                      style={{ background: SLOPE_CSS }}
+                    />
                     <span>{SLOPE_MAX_DEG}°+</span>
                     <span className="legend-note">
-                      slope of the {cityMode && sample.city ? "ground" : "surface"} shown
+                      slope of the{" "}
+                      {cityMode && sample.city ? "ground" : "surface"} shown
                     </span>
                   </>
                 ) : layer === "error" && sample.errorLimitM ? (
                   <>
                     <span>−{sample.errorLimitM} m</span>
-                    <b className="height-ramp" style={{ background: ERROR_CSS }} />
+                    <b
+                      className="height-ramp"
+                      style={{ background: ERROR_CSS }}
+                    />
                     <span>+{sample.errorLimitM} m</span>
-                    <span className="legend-note">model − reference · blue reads low, red high</span>
+                    <span className="legend-note">
+                      model − reference · blue reads low, red high
+                    </span>
                   </>
                 ) : layer === "depth" ? (
                   // Same stops as the Height layer's colours (JET_STOPS), so they can't drift.
                   <>
                     <span>{shown.metricHeights ? "0 m" : "low"}</span>
-                    <b className="height-ramp" style={{ background: JET_CSS }} />
+                    <b
+                      className="height-ramp"
+                      style={{ background: JET_CSS }}
+                    />
                     <span>
-                      {shown.metricHeights ? `${(shown.ndsmMaxM ?? shown.maxM).toFixed(1)} m` : "high"}
+                      {shown.metricHeights
+                        ? `${(shown.ndsmMaxM ?? shown.maxM).toFixed(1)} m`
+                        : "high"}
                     </span>
                     <span className="legend-note">
-                      {shown.metricHeights ? "height above ground" : "relative height (LiDAR reference)"}
+                      {shown.metricHeights
+                        ? "height above ground"
+                        : "relative height (LiDAR reference)"}
                     </span>
                   </>
                 ) : shown.metricHeights ? (
                   <span>
-                    Height above ground 0–{(shown.ndsmMaxM ?? shown.maxM).toFixed(1)} m · Height layer shows it in colour
+                    Height above ground 0–
+                    {(shown.ndsmMaxM ?? shown.maxM).toFixed(1)} m · Height layer
+                    shows it in colour
                   </span>
                 ) : (
-                  <span>LiDAR reference heights, relative · Height layer shows them in colour</span>
+                  <span>
+                    LiDAR reference heights, relative · Height layer shows them
+                    in colour
+                  </span>
                 )}
               </div>
               <div className="footer-note">
+                {viewSample?.flatGround && <span>Flat ground visualization · </span>}
                 {contours && shown.metricHeights && (
-                  <span>contours every {contourInterval(viewSample?.maxM ?? 1)} m · </span>
+                  <span>
+                    contours every {contourInterval(viewSample?.maxM ?? 1)} m
+                    ·{" "}
+                  </span>
                 )}
-                <Eye size={14} /> {shown.sourceLabel ?? "1024 × 1024 source"}{" "}
-                · {HEIGHT_SAMPLE_WIDTH}² live mesh
+                <Eye size={14} /> {sample?.savedDemo ? "Saved model prediction" : shown.sourceLabel ?? "1024 × 1024 source"} ·{" "}
+                {HEIGHT_SAMPLE_WIDTH}² live mesh
               </div>
             </div>
           </div>
           <aside className="inspector">
-            <div className="panel-heading">
-              <div>
-                <div className="eyebrow">Scene inspector</div>
-                <h2>Reconstruction</h2>
-              </div>
-            </div>
-            {view === "terrain" ? (
-            <div className="control-section scene-switcher">
-              <div className="label-row">
-                <label>Scene</label>
-                <span>
-                  {sceneIndex + 1} / {displayedScenes.length} ·{" "}
-                  {urbanScenes.length} urban
-                </span>
-              </div>
-              <div className="scene-preview">
-                {sample && (
-                  <img src={shown.thumb || shown.rgb} alt={shown.label} />
-                )}
-                <div>
-                  <strong>{shown.id}</strong>
-                  <small>
-                    {shown.urban ? "Building-rich · " : ""}
-                    {shown.label}
-                  </small>
-                </div>
-              </div>
-              <select
-                value={shown.id}
-                onChange={(event) =>
-                  selectScene(
-                    displayedScenes.find(
-                      (scene) => scene.id === event.target.value,
-                    ),
-                  )
-                }
-              >
-                <option value="" disabled>
-                  Choose a GAMUS preview scene…
-                </option>
-                <optgroup
-                  label={`Urban / building-rich (${urbanScenes.length})`}
+            <nav
+              className="inspector-tabs"
+              role="tablist"
+              aria-label="Inspector"
+            >
+              {INSPECTOR_TABS.map(([key, label]) => (
+                <button
+                  key={key}
+                  role="tab"
+                  id={`inspector-tab-${key}`}
+                  aria-controls={`inspector-panel-${key}`}
+                  aria-selected={inspectorTab === key}
+                  tabIndex={inspectorTab === key ? 0 : -1}
+                  className={inspectorTab === key ? "selected" : ""}
+                  onClick={() => setInspectorTab(key)}
+                  onKeyDown={(event) => {
+                    const index = INSPECTOR_TABS.findIndex(
+                      ([tab]) => tab === key,
+                    );
+                    const next =
+                      event.key === "Home"
+                        ? 0
+                        : event.key === "End"
+                          ? INSPECTOR_TABS.length - 1
+                          : event.key === "ArrowRight"
+                            ? (index + 1) % INSPECTOR_TABS.length
+                            : event.key === "ArrowLeft"
+                              ? (index + INSPECTOR_TABS.length - 1) %
+                                INSPECTOR_TABS.length
+                              : null;
+                    if (next === null) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const nextKey = INSPECTOR_TABS[next][0];
+                    setInspectorTab(nextKey);
+                    document
+                      .getElementById(`inspector-tab-${nextKey}`)
+                      ?.focus();
+                  }}
                 >
-                  {urbanScenes.map((scene) => (
-                    <option key={`${scene.split}-${scene.id}`} value={scene.id}>
-                      {scene.id} — {scene.label}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label={`Other GAMUS tiles (${otherScenes.length})`}>
-                  {otherScenes.map((scene) => (
-                    <option key={`${scene.split}-${scene.id}`} value={scene.id}>
-                      {scene.id} — {scene.label}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
-              <div className="photo-nav">
-                <button onClick={() => changeScene(-1)}>← Previous</button>
-                <button onClick={() => changeScene(1)}>Next →</button>
-              </div>
-            </div>
-            ) : (
-            <div className="control-section upload-switcher">
-              <div className="label-row">
-                <label>Upload imagery</label>
-                <span>PNG · JPG · GeoTIFF</span>
-              </div>
-              <p className="upload-copy">
-                A fine-tuned height model estimates metric height above
-                ground (nDSM) for every pixel. GeoTIFFs with coordinates also
-                get an absolute DSM on Copernicus GLO-30 or SRTM, optionally compared
-                against both. Both download as GeoTIFF.
-              </p>
-              <div className="upload-options">
-                <label>
-                  <small>Pixel size (m/px, optional)</small>
-                  <input
-                    type="number"
-                    min="0.05"
-                    max="10"
-                    step="0.01"
-                    placeholder="from GeoTIFF, else 0.33"
-                    value={uploadGsd}
-                    onChange={(e) => setUploadGsd(e.target.value)}
-                  />
-                </label>
-                <input
-                  ref={referenceFileRef}
-                  type="file"
-                  accept=".tif,.tiff,.png,.h5"
-                  onChange={(e) => setReferenceFile(e.target.files?.[0] ?? null)}
-                  hidden
-                />
-                <div className="upload-reference-row">
-                  <button
-                    className="upload-reference"
-                    onClick={() => referenceFileRef.current?.click()}
-                  >
-                    {referenceFile
-                      ? `Reference: ${referenceFile.name}`
-                      : "Add reference heights (optional)"}
-                  </button>
-                  {referenceFile && (
-                    <button
-                      className="upload-reference-clear"
-                      title="Remove reference"
-                      onClick={() => {
-                        setReferenceFile(null);
-                        if (referenceFileRef.current) referenceFileRef.current.value = "";
-                      }}
-                    >
-                      <X size={13} />
-                    </button>
-                  )}
-                </div>
-                <input
-                  ref={gcpFileRef}
-                  type="file"
-                  accept=".csv,.txt"
-                  onChange={(e) => setGcpFile(e.target.files?.[0] ?? null)}
-                  hidden
-                />
-                <div className="upload-reference-row">
-                  <button
-                    className="upload-reference"
-                    title="CSV rows of lon, lat, height (m above sea level). Corrects the absolute DSM of a GeoTIFF."
-                    onClick={() => gcpFileRef.current?.click()}
-                  >
-                    {gcpFile
-                      ? `Control points: ${gcpFile.name}`
-                      : "Add ground control points (optional, GeoTIFF)"}
-                  </button>
-                  {gcpFile && (
-                    <button
-                      className="upload-reference-clear"
-                      title="Remove control points"
-                      onClick={() => {
-                        setGcpFile(null);
-                        if (gcpFileRef.current) gcpFileRef.current.value = "";
-                      }}
-                    >
-                      <X size={13} />
-                    </button>
-                  )}
-                </div>
-                <div className="quality-row">
-                  <small>Quality</small>
-                  <div className="segmented">
-                    <button
-                      className={uploadQuality === "high" ? "selected" : ""}
-                      onClick={() => setUploadQuality("high")}
-                      title="Averages 4 flipped predictions: most accurate"
-                    >
-                      High
-                    </button>
-                    <button
-                      className={uploadQuality === "fast" ? "selected" : ""}
-                      onClick={() => setUploadQuality("fast")}
-                      title="Single prediction: about 4x faster"
-                    >
-                      Fast
-                    </button>
-                  </div>
-                </div>
-                <div className="quality-row">
-                  <small>Base terrain (GeoTIFF)</small>
-                  <div className="segmented">
-                    <button
-                      className={baseDem === "glo30" ? "selected" : ""}
-                      onClick={() => setBaseDem("glo30")}
-                      title="Copernicus GLO-30 (2011-15, EGM2008)"
-                    >
-                      Copernicus
-                    </button>
-                    <button
-                      className={baseDem === "srtm" ? "selected" : ""}
-                      onClick={() => setBaseDem("srtm")}
-                      title="SRTM GL1 (2000, EGM96)"
-                    >
-                      SRTM
-                    </button>
-                  </div>
-                </div>
-                <label className="quality-row">
-                  <input
-                    type="checkbox"
-                    checked={compareDems}
-                    onChange={(e) => setCompareDems(e.target.checked)}
-                    disabled={uploadStatus === "loading"}
-                  />
-                  <span>Compare against public DEMs (GeoTIFF) — may take longer</span>
-                </label>
-              </div>
-              <input
-                ref={uploadFileRef}
-                type="file"
-                accept=".png,.jpg,.jpeg,.tif,.tiff"
-                onChange={onPickUpload}
-                hidden
-              />
-              <button
-                className="upload-dropzone"
-                onClick={() => uploadFileRef.current?.click()}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={onDropFile}
-                disabled={uploadStatus === "loading"}
-              >
-                <Upload size={20} />
-                <span>
-                  {uploadStatus === "loading"
-                    ? `${uploadProgress?.stage ?? "Working"} · ${Math.round((uploadProgress?.progress ?? 0) * 100)}%`
-                    : uploadFileName
-                      ? `${uploadFileName} — drop or click to replace`
-                      : "Drop an image here, or click to choose"}
-                </span>
-                {uploadStatus === "loading" && (
-                  <i className="progress-track">
+                  {label}
+                  {tabHasResults(key) && (
                     <i
-                      className="progress-fill"
-                      style={{ width: `${Math.round((uploadProgress?.progress ?? 0) * 100)}%` }}
+                      className="tab-dot"
+                      title="Results available"
+                      aria-hidden="true"
                     />
-                  </i>
-                )}
-              </button>
-              {uploadStatus === "error" && (
-                <div className="upload-error">{uploadError}</div>
-              )}
-              {uploadMeta && (
-                <>
-                  <div className="metric-grid">
-                    <div>
-                      <small>Processed in</small>
-                      <strong>{uploadMeta.seconds.toFixed(2)}s</strong>
+                  )}
+                </button>
+              ))}
+            </nav>
+            {inspectorTab === "image" && (
+              <div
+                className="tab-panel"
+                role="tabpanel"
+                id="inspector-panel-image"
+                aria-labelledby="inspector-tab-image"
+                tabIndex={0}
+              >
+                <div className="segmented source-switch">
+                  {DEMO_CATALOG && <button
+                    className={view === "demo" ? "selected" : ""}
+                    disabled={uploadStatus === "loading"}
+                    onClick={() => setView("demo")}>
+                    Demos
+                  </button>}
+                  <button
+                    className={view === "upload" ? "selected" : ""}
+                    onClick={() => setView("upload")}
+                  >
+                    Upload
+                  </button>
+                  <button
+                    className={view === "terrain" ? "selected" : ""}
+                    disabled={uploadStatus === "loading"}
+                    onClick={() => setView("terrain")}
+                  >
+                    Reference
+                  </button>
+                </div>
+                <p className={`backend-status ${backendStatus}`} role="status">
+                  <i aria-hidden="true" />{backendStatus === "online" ? "Live uploads available."
+                    : backendStatus === "checking" ? "Checking live uploads…"
+                    : "Demo scenes are available. Live uploads are offline."}
+                  {API_ENABLED && backendStatus === "offline" && <button className="connection-retry"
+                    onClick={() => { setBackendStatus("checking"); setBackendCheck((n) => n + 1); }}>
+                    Check again
+                  </button>}
+                </p>
+                {view === "demo" ? (
+                  <div className="control-section scene-switcher">
+                    <label className="sr-only" htmlFor="demo-scene">Choose a demo scene</label>
+                    <select id="demo-scene" className="sr-only" tabIndex={-1} aria-hidden="true" value={selectedDemo}
+                      disabled={demoLoading || uploadStatus === "loading" || !demos.length}
+                      onChange={(event) => loadDemo(event.target.value)}>
+                      <option value="" disabled>Choose a demo scene…</option>
+                      {demos.map((scene) => <option key={scene.id} value={scene.id}>{scene.label}</option>)}
+                    </select>
+                    <div className="demo-intro">
+                      <span className="eyebrow">EXPLORE THE COLLECTION</span>
+                      <h2>A new perspective.</h2>
+                      <p>Satellite landscapes and city scenes, ready to explore in 3D.</p>
                     </div>
-                    <div>
-                      <small>Tallest object</small>
-                      <strong>{uploadMeta.max_m.toFixed(1)} m</strong>
+                    {demoError && <div className="upload-error" role="alert">{demoError}</div>}
+                    <div className="demo-grid" aria-label="Demo scene collection">
+                      {demos.map((scene) => {
+                        const info = demoInfo(scene.id);
+                        return <button key={scene.id} className={`demo-card ${selectedDemo === scene.id ? "selected" : ""}`}
+                          aria-pressed={selectedDemo === scene.id} disabled={demoLoading || uploadStatus === "loading"}
+                          onClick={() => loadDemo(scene.id)}>
+                          <div className="demo-card-image">
+                            <img src={new URL("rgb.png", scene.result).href} alt="" loading="lazy" />
+                            <span>{info.type}</span>
+                            {selectedDemo === scene.id && <i>Viewing</i>}
+                          </div>
+                          <div className="demo-card-copy"><strong>{info.name}</strong><small>{info.location}</small></div>
+                        </button>;
+                      })}
                     </div>
-                    {uploadMeta.dsm && (
-                      <>
-                        <div>
-                          <small>Ground ({uploadMeta.dsm.base_dem === "srtm" ? "SRTM" : "GLO-30"})</small>
-                          <strong>
-                            {uploadMeta.dsm.ground_min_m.toFixed(0)}–
-                            {uploadMeta.dsm.ground_max_m.toFixed(0)} m
-                          </strong>
+                    {demoLoading && <p className="tab-empty" role="status">Loading the scene…</p>}
+                    {sample?.savedDemo && <section className="scene-notes">
+                      <div className="label-row"><label>About this scene</label><span>Saved prediction</span></div>
+                      <p className="loaded-scene">Loaded {sample.label}.</p>
+                      <p>Buildings and trees are model estimates. {uploadMeta?.validation
+                        ? "A reference comparison is available in Accuracy."
+                        : "No independent height reference is available for this scene."}</p>
+                      {uploadMeta?.models?.some((model) => model.startsWith("CHMv2")) && <small>Built with DINOv3</small>}
+                      {demoInfo(sample.id.replace("demo:", "")).type === "Satellite" &&
+                        <p>Imagery © Maxar Open Data Program · March 2022.</p>}
+                      <a className="source-credit" href="https://huggingface.co/datasets/Dilavesh/altimap-demo" target="_blank" rel="noreferrer">Scene sources and credits ↗</a>
+                      <RasterDownloads downloads={uploadMeta?.downloads} />
+                    </section>}
+                  </div>
+                ) : view === "terrain" ? (
+                  <div className="control-section scene-switcher">
+                    <div className="label-row">
+                      <label>Scene</label>
+                      <span>
+                        {sceneIndex + 1} / {displayedScenes.length} ·{" "}
+                        {urbanScenes.length} urban
+                      </span>
+                    </div>
+                    <div className="scene-preview">
+                      {sample && (
+                        <img src={shown.thumb || shown.rgb} alt={shown.label} />
+                      )}
+                      <div>
+                        <strong>{shown.id}</strong>
+                        <small>
+                          {shown.urban ? "Building-rich · " : ""}
+                          {shown.label}
+                        </small>
+                      </div>
+                    </div>
+                    <select
+                      value={shown.id}
+                      onChange={(event) =>
+                        selectScene(
+                          displayedScenes.find(
+                            (scene) => scene.id === event.target.value,
+                          ),
+                        )
+                      }
+                    >
+                      <option value="" disabled>
+                        Choose a GAMUS preview scene…
+                      </option>
+                      <optgroup
+                        label={`Urban / building-rich (${urbanScenes.length})`}
+                      >
+                        {urbanScenes.map((scene) => (
+                          <option
+                            key={`${scene.split}-${scene.id}`}
+                            value={scene.id}
+                          >
+                            {scene.id} — {scene.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup
+                        label={`Other GAMUS tiles (${otherScenes.length})`}
+                      >
+                        {otherScenes.map((scene) => (
+                          <option
+                            key={`${scene.split}-${scene.id}`}
+                            value={scene.id}
+                          >
+                            {scene.id} — {scene.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    <div className="photo-nav">
+                      <button onClick={() => changeScene(-1)}>
+                        ← Previous
+                      </button>
+                      <button onClick={() => changeScene(1)}>Next →</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="control-section upload-switcher">
+                    <div className="label-row">
+                      <label>Upload imagery</label>
+                      <span>PNG · JPG · GeoTIFF</span>
+                    </div>
+                    <p className="upload-copy">
+                      A fine-tuned height model estimates metric height above
+                      ground (nDSM) for every pixel. GeoTIFFs with coordinates
+                      also get an absolute DSM on Copernicus GLO-30 or SRTM.
+                      You can optionally compare with both public DEMs.
+                    </p>
+                    <div className="upload-options">
+                      <label>
+                        <small>Pixel size (m/px, optional)</small>
+                        <input
+                          type="number"
+                          min="0.05"
+                          max="10"
+                          step="0.01"
+                          placeholder="from GeoTIFF, else 0.33"
+                          value={uploadGsd}
+                          onChange={(e) => setUploadGsd(e.target.value)}
+                        />
+                      </label>
+                      <input
+                        ref={referenceFileRef}
+                        type="file"
+                        accept=".tif,.tiff,.png,.h5"
+                        onChange={(e) =>
+                          setReferenceFile(e.target.files?.[0] ?? null)
+                        }
+                        hidden
+                      />
+                    <div className="upload-reference-row">
+                        <button
+                          className="upload-reference"
+                          onClick={() => referenceFileRef.current?.click()}
+                        >
+                          {referenceFile
+                            ? `Reference: ${referenceFile.name}`
+                            : "Add reference heights (optional)"}
+                        </button>
+                        {referenceFile && (
+                          <button
+                            className="upload-reference-clear"
+                            title="Remove reference"
+                            onClick={() => {
+                              setReferenceFile(null);
+                              if (referenceFileRef.current)
+                                referenceFileRef.current.value = "";
+                            }}
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        ref={gcpFileRef}
+                        type="file"
+                        accept=".csv,.txt"
+                        onChange={(e) =>
+                          setGcpFile(e.target.files?.[0] ?? null)
+                        }
+                        hidden
+                      />
+                      <div className="upload-reference-row">
+                        <button
+                          className="upload-reference"
+                          title="CSV rows of lon, lat, height (m above sea level). Corrects the absolute DSM of a GeoTIFF."
+                          onClick={() => gcpFileRef.current?.click()}
+                        >
+                          {gcpFile
+                            ? `Control points: ${gcpFile.name}`
+                            : "Add ground control points (optional, GeoTIFF)"}
+                        </button>
+                        {gcpFile && (
+                          <button
+                            className="upload-reference-clear"
+                            title="Remove control points"
+                            onClick={() => {
+                              setGcpFile(null);
+                              if (gcpFileRef.current)
+                                gcpFileRef.current.value = "";
+                            }}
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+                      <div className="quality-row">
+                        <small>Quality</small>
+                        <div className="segmented">
+                          <button
+                            className={
+                              uploadQuality === "high" ? "selected" : ""
+                            }
+                            onClick={() => setUploadQuality("high")}
+                            title="Averages 4 flipped predictions: most accurate"
+                          >
+                            High
+                          </button>
+                          <button
+                            className={
+                              uploadQuality === "fast" ? "selected" : ""
+                            }
+                            onClick={() => setUploadQuality("fast")}
+                            title="Single prediction: about 4x faster"
+                          >
+                            Fast
+                          </button>
                         </div>
-                        <div>
-                          <small>DSM range</small>
-                          <strong>
-                            {uploadMeta.dsm.min_m.toFixed(0)}–
-                            {uploadMeta.dsm.max_m.toFixed(0)} m
-                          </strong>
+                      </div>
+                      <div className="quality-row">
+                        <small>Base terrain (GeoTIFF)</small>
+                        <div className="segmented">
+                          <button
+                            className={baseDem === "glo30" ? "selected" : ""}
+                            onClick={() => setBaseDem("glo30")}
+                            title="Copernicus GLO-30 (2011-15, EGM2008)"
+                          >
+                            Copernicus
+                          </button>
+                          <button
+                            className={baseDem === "srtm" ? "selected" : ""}
+                            onClick={() => setBaseDem("srtm")}
+                            title="SRTM GL1 (2000, EGM96)"
+                          >
+                            SRTM
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <input
+                      ref={uploadFileRef}
+                      type="file"
+                      accept=".png,.jpg,.jpeg,.tif,.tiff"
+                      onChange={onPickUpload}
+                      hidden
+                    />
+                    <label className="contour-toggle">
+                      <input type="checkbox" checked={compareDems}
+                        onChange={(event) => setCompareDems(event.target.checked)} />
+                      Compare against public DEMs (may take longer)
+                    </label>
+                    <button
+                      className="upload-dropzone"
+                      onClick={() => uploadFileRef.current?.click()}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={onDropFile}
+                      disabled={uploadStatus === "loading" || demoLoading || backendStatus !== "online"}
+                    >
+                      <Upload size={20} />
+                      <span>
+                        {uploadStatus === "loading"
+                          ? `${uploadProgress?.stage ?? "Working"} · ${Math.round((uploadProgress?.progress ?? 0) * 100)}%`
+                          : uploadFileName
+                            ? `${uploadFileName} — drop or click to replace`
+                            : "Drop an image here, or click to choose"}
+                      </span>
+                      {uploadStatus === "loading" && (
+                        <i className="progress-track">
+                          <i
+                            className="progress-fill"
+                            style={{
+                              width: `${Math.round((uploadProgress?.progress ?? 0) * 100)}%`,
+                            }}
+                          />
+                        </i>
+                      )}
+                    </button>
+                    {uploadStatus === "error" && (
+                      <div className="upload-error">{uploadError}</div>
+                    )}
+                    {uploadMeta && (
+                      <>
+                        <div className="metric-grid">
+                          <div>
+                            <small>{sample?.savedDemo ? "Original processing time" : "Processed in"}</small>
+                            <strong>{uploadMeta.seconds.toFixed(2)}s</strong>
+                          </div>
+                          <div>
+                            <small>Tallest object</small>
+                            <strong>{uploadMeta.max_m.toFixed(1)} m</strong>
+                          </div>
+                          {uploadMeta.dsm && (
+                            <>
+                              <div>
+                                <small>
+                                  Ground (
+                                  {uploadMeta.dsm.base_dem === "srtm"
+                                    ? "SRTM"
+                                    : "GLO-30"}
+                                  )
+                                </small>
+                                <strong>
+                                  {uploadMeta.dsm.ground_min_m.toFixed(0)}–
+                                  {uploadMeta.dsm.ground_max_m.toFixed(0)} m
+                                </strong>
+                              </div>
+                              <div>
+                                <small>DSM range</small>
+                                <strong>
+                                  {uploadMeta.dsm.min_m.toFixed(0)}–
+                                  {uploadMeta.dsm.max_m.toFixed(0)} m
+                                </strong>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        {uploadMeta.models && (
+                          <div className="models-line">
+                            Models: {uploadMeta.models.join(" · ")}
+                            {uploadMeta.height_mode ===
+                              "assumed_gsd_experimental" &&
+                              " · unknown GSD: metric scale is experimental"}
+                            {uploadMeta.gsd_m &&
+                              uploadMeta.work_gsd_m > 0.34 &&
+                              ` · processed at ${uploadMeta.work_gsd_m.toFixed(2)} m (very large scene)`}
+                            {uploadMeta.models.some((m) =>
+                              m.startsWith("CHMv2"),
+                            ) && (
+                              <span className="dino-credit">
+                                {" "}
+                                · Built with DINOv3
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {uploadMeta.dsm_error && (
+                          <div className="upload-error">
+                            Absolute DSM unavailable: {uploadMeta.dsm_error}
+                          </div>
+                        )}
+                        {uploadMeta.base_dem_fallback && (
+                          <div className="upload-error">
+                            {uploadMeta.base_dem_fallback}
+                          </div>
+                        )}
+                        {uploadMeta.geospatial_warnings?.map((warning) => (
+                          <div className="upload-error" key={warning}>
+                            GeoTIFF warning: {warning}
+                          </div>
+                        ))}
+                        <RasterDownloads downloads={uploadMeta.downloads} />
+                        <div className="class-breakdown">
+                          {CLASSIFY_CLASS_LABELS.map((name) => {
+                            const count =
+                              uploadMeta.class_pixel_counts?.[name] ?? 0;
+                            const total =
+                              uploadMeta.width * uploadMeta.height_px;
+                            const pct = total
+                              ? ((count / total) * 100).toFixed(1)
+                              : "0.0";
+                            return (
+                              <div key={name} className="class-breakdown-row">
+                                <i
+                                  className={`class-dot ${CLASS_DOT_STYLE[name]}`}
+                                />
+                                <span>{name.replace("_", " ")}</span>
+                                <strong>{pct}%</strong>
+                              </div>
+                            );
+                          })}
                         </div>
                       </>
                     )}
                   </div>
-                  {uploadMeta.models && (
-                    <div className="models-line">
-                      Models: {uploadMeta.models.join(" · ")}
-                      {uploadMeta.height_mode === "assumed_gsd_experimental" &&
-                        " · unknown GSD: metric scale is experimental"}
-                      {uploadMeta.gsd_m && uploadMeta.work_gsd_m > 0.34 &&
-                        ` · processed at ${uploadMeta.work_gsd_m.toFixed(2)} m (very large scene)`}
-                      {uploadMeta.models.some((m) => m.startsWith("CHMv2")) && (
-                        <span className="dino-credit"> · Built with DINOv3</span>
-                      )}
-                    </div>
-                  )}
-                  {uploadMeta.dsm_error && (
-                    <div className="upload-error">
-                      Absolute DSM unavailable: {uploadMeta.dsm_error}
-                    </div>
-                  )}
-                  {uploadMeta.geospatial_warnings?.map((warning) => (
-                    <div className="upload-error" key={warning}>
-                      GeoTIFF warning: {warning}
-                    </div>
-                  ))}
-                  {uploadMeta.gcp &&
-                    (uploadMeta.gcp.error ? (
-                      <div className="upload-error">
-                        Control points not applied: {uploadMeta.gcp.error}
-                      </div>
-                    ) : uploadMeta.gcp.model === "none" ? (
-                      <div className="gcp-result">
-                        Control points: {uploadMeta.gcp.n_used} of {uploadMeta.gcp.n_given} inside
-                        the image · {uploadMeta.gcp.note}
-                      </div>
-                    ) : (
-                      <div className="gcp-result">
-                        Control points: {uploadMeta.gcp.n_used} of {uploadMeta.gcp.n_given} inside
-                        the image · DSM shifted {uploadMeta.gcp.offset_m >= 0 ? "+" : ""}
-                        {uploadMeta.gcp.offset_m.toFixed(2)} m · ground error at them{" "}
-                        {uploadMeta.gcp.rmse_before_m.toFixed(2)} →{" "}
-                        {uploadMeta.gcp.rmse_after_m.toFixed(2)} m
-                        {uploadMeta.gcp.rmse_left_out_m != null &&
-                          ` (${uploadMeta.gcp.rmse_left_out_m.toFixed(2)} m on left-out points)`}
-                      </div>
-                    ))}
-                  {uploadMeta.dem_agreement && (
-                    <div
-                      className="gcp-result"
-                      title="Agreement over approximate image-aligned 30 m blocks, not native DEM cells. Agreement with the base DEM is not independent building-height accuracy."
-                    >
-                      DEM agreement (approximate 30 m blocks)
-                      {[["glo30", "Copernicus GLO-30"], ["srtm", "SRTM"]].map(([key, label]) => {
-                        const a = uploadMeta.dem_agreement[key];
-                        return (
-                          <div key={key}>
-                            {label}
-                            {uploadMeta.dsm?.base_dem === key ? " (base)" : ""}:{" "}
-                            {a?.cell_rmse != null && a?.cell_bias != null
-                              ? `RMSE ${a.cell_rmse.toFixed(2)} m · bias ${a.cell_bias >= 0 ? "+" : ""}${a.cell_bias.toFixed(2)} m`
-                              : "unavailable"}
-                          </div>
-                        );
-                      })}
-                      <small>Base-DEM agreement is not independent building-height validation.</small>
-                    </div>
-                  )}
-                  {uploadMeta.validation && (
-                    <div className="metric-grid validation-grid">
-                      <div>
-                        <small>RMSE vs reference</small>
-                        <strong>{uploadMeta.validation.rmse?.toFixed(2)} m</strong>
-                      </div>
-                      <div>
-                        <small>MAE</small>
-                        <strong>{uploadMeta.validation.mae?.toFixed(2)} m</strong>
-                      </div>
-                      <div>
-                        <small>Correlation r</small>
-                        <strong>
-                          {uploadMeta.validation.pearson?.toFixed(3) ?? "n/a"}
-                        </strong>
-                      </div>
-                      <div>
-                        <small>Building RMSE</small>
-                        <strong>
-                          {uploadMeta.validation.building_rmse != null
-                            ? `${uploadMeta.validation.building_rmse.toFixed(2)} m`
-                            : "n/a"}
-                        </strong>
-                      </div>
-                    </div>
-                  )}
-                  {uploadMeta.validation?.scatter && (
-                    <ValidationDetail v={uploadMeta.validation} />
-                  )}
-                  <div className="download-row">
-                    {Object.entries(uploadMeta.downloads ?? {})
-                      .filter(([name]) => name.endsWith(".tif") || name.endsWith(".geojson"))
-                      .map(([name, path]) => (
-                        <a key={name} href={`${API_BASE}${path}`} download>
-                          ⬇{" "}
-                          {name === "dsm.tif"
-                            ? "Absolute DSM (GeoTIFF)"
-                            : name === "ndsm.tif"
-                              ? "nDSM (GeoTIFF)"
-                              : "3D buildings (GeoJSON)"}
-                        </a>
-                      ))}
-                  </div>
-                  <div className="class-breakdown">
-                    {CLASSIFY_CLASS_LABELS.map((name) => {
-                      const count = uploadMeta.class_pixel_counts?.[name] ?? 0;
-                      const total = uploadMeta.width * uploadMeta.height_px;
-                      const pct = total
-                        ? ((count / total) * 100).toFixed(1)
-                        : "0.0";
-                      return (
-                        <div key={name} className="class-breakdown-row">
-                          <i className={`class-dot ${CLASS_DOT_STYLE[name]}`} />
-                          <span>{name.replace("_", " ")}</span>
-                          <strong>{pct}%</strong>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
-            )}
-            <div className="metric-grid">
-              <div>
-                <small>Surface max</small>
-                <strong>{shown.max}</strong>
-                <em className="neutral">
-                  {shown.metricHeights ? "model estimate" : sample ? "LiDAR reference" : "scene max"}
-                </em>
-              </div>
-              <div>
-                <small>Coverage</small>
-                <strong>
-                  {sample
-                    ? `${(shown.areaKm2 ?? (1024 * GAMUS_GSD_M) ** 2 / 1e6).toFixed(3)} km²`
-                    : "—"}
-                </strong>
-                <em className="neutral">
-                  {shown.gsdAssumed ? "GSD experimental 0.33 m" : "ground area"}
-                </em>
-              </div>
-            </div>
-            {sample?.city && (
-              <div className="control-section">
-                <div className="label-row">
-                  <label>3D model</label>
-                  <span>
-                    {sample.city.buildings.length} buildings ·{" "}
-                    {sample.city.trees.length} trees
-                  </span>
-                </div>
-                <div className="segmented layer-tabs">
-                  <button
-                    className={cityMode ? "selected" : ""}
-                    onClick={() => setCityMode(true)}
-                  >
-                    City model
-                  </button>
-                  <button
-                    className={!cityMode ? "selected" : ""}
-                    onClick={() => setCityMode(false)}
-                  >
-                    Exact DSM
-                  </button>
-                </div>
+                )}
               </div>
             )}
-            <div className="control-section">
-              <label>Active layer</label>
+            {inspectorTab === "view" && (
               <div
-                className={`segmented layer-tabs ${shown.metricHeights ? "wide" : ""}`}
+                className="tab-panel"
+                role="tabpanel"
+                id="inspector-panel-view"
+                aria-labelledby="inspector-tab-view"
+                tabIndex={0}
               >
-                <button
-                  className={layer === "elevation" ? "selected" : ""}
-                  onClick={() => setLayer("elevation")}
-                >
-                  <Mountain size={14} /> Surface
-                </button>
-                <button
-                  className={layer === "depth" ? "selected" : ""}
-                  onClick={() => setLayer("depth")}
-                >
-                  <Activity size={14} /> Height
-                </button>
-                <button
-                  className={layer === "texture" ? "selected" : ""}
-                  onClick={() => setLayer("texture")}
-                >
-                  <FileImage size={14} /> RGB
-                </button>
-                <button
-                  className={layer === "classes" ? "selected" : ""}
-                  onClick={() => setLayer("classes")}
-                >
-                  <Layers3 size={14} /> Classes
-                </button>
-                {shown.metricHeights && (
-                  <button
-                    className={layer === "slope" ? "selected" : ""}
-                    onClick={() => setLayer("slope")}
-                  >
-                    <TriangleRight size={14} /> Slope
-                  </button>
-                )}
-                {shown.metricHeights && (
-                  <button
-                    className={layer === "error" ? "selected" : ""}
-                    disabled={!sample?.error}
-                    title={
-                      sample?.error
-                        ? "Where the model reads higher or lower than the reference"
-                        : "Add reference heights to the upload to see the error map"
-                    }
-                    onClick={() => setLayer("error")}
-                  >
-                    <Diff size={14} /> Error
-                  </button>
-                )}
-              </div>
-              {shown.metricHeights && (
-                <label className="contour-toggle">
-                  <input
-                    type="checkbox"
-                    checked={contours}
-                    onChange={(e) => setContours(e.target.checked)}
-                  />
-                  <Waves size={13} /> Contour lines every {contourInterval(viewSample?.maxM ?? 1)} m
-                </label>
-              )}
-              {layer === "classes" && (
-                <div
-                  className="class-legend"
-                  aria-label="GAMUS semantic classes"
-                >
-                  <span>
-                    <i className="class-dot building" /> Buildings
-                  </span>
-                  <span>
-                    <i className="class-dot tree" /> Trees
-                  </span>
-                  <span>
-                    <i className="class-dot road" /> Roads
-                  </span>
-                  <span>
-                    <i className="class-dot ground" /> Ground
-                  </span>
-                  <span>
-                    <i className="class-dot water" /> Water
-                  </span>
-                  <span>
-                    <i className="class-dot vegetation" /> Low vegetation
-                  </span>
-                </div>
-              )}
-            </div>
-            <div className="control-section">
-              <div className="label-row">
-                <label>Vertical exaggeration</label>
-                <span>{exaggeration.toFixed(1)}×</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="3"
-                step=".1"
-                value={exaggeration}
-                onChange={(e) => setExaggeration(+e.target.value)}
-              />
-              <div className="range-labels">
-                <span>subtle</span>
-                <span>dramatic</span>
-              </div>
-            </div>
-            <div className="profile">
-              <div className="label-row">
-                <label>
-                  <Activity size={14} /> Height profile
-                </label>
-                <button
-                  className="text-btn"
-                  onClick={() => {
-                    setProfileCleared(true);
-                    setProfilePoints([]);
-                    notify("Profile cleared");
-                  }}
-                >
-                  Clear
-                </button>
-              </div>
-              <div className={`sparkline ${profileCleared ? "cleared" : ""}`}>
-                <svg viewBox="0 0 300 70" preserveAspectRatio="none">
-                  {profileView && (
-                    <>
-                      <path
-                        d={profileView.line}
-                        fill="none"
-                        stroke="#8bd2c4"
-                        strokeWidth="1.5"
-                        vectorEffect="non-scaling-stroke"
-                      />
-                      <path
-                        d={profileView.area}
-                        fill="url(#fill)"
-                        opacity=".22"
-                      />
-                    </>
-                  )}
-                  <defs>
-                    <linearGradient id="fill" x1="0" x2="0" y1="0" y2="1">
-                      <stop stopColor="#8bd2c4" />
-                      <stop offset="1" stopColor="#8bd2c4" stopOpacity="0" />
-                    </linearGradient>
-                  </defs>
-                </svg>
-              </div>
-              <div className="profile-values">
-                {profileView ? (
-                  <>
-                    <span>{profileView.fmt(profileView.min)}</span>
+                <div className="metric-grid">
+                  <div>
+                    <small>Surface max</small>
+                    <strong>{shown.max}</strong>
+                    <em className="neutral">
+                      {shown.metricHeights
+                        ? "model estimate"
+                        : sample
+                          ? "LiDAR reference"
+                          : "scene max"}
+                    </em>
+                  </div>
+                  <div>
+                    <small>Coverage</small>
                     <strong>
-                      {profileView.fmt(profileView.avg)} avg ·{" "}
-                      {profile?.label ?? "centre line (Measure: double-click A, then B)"}
+                      {sample
+                        ? `${(shown.areaKm2 ?? (1024 * GAMUS_GSD_M) ** 2 / 1e6).toFixed(3)} km²`
+                        : "—"}
                     </strong>
-                    <span>{profileView.fmt(profileView.max)}</span>
+                    <em className="neutral">
+                      {shown.gsdAssumed
+                        ? "GSD experimental 0.33 m"
+                        : "ground area"}
+                    </em>
+                  </div>
+                </div>
+                {sample?.city && (
+                  <div className="control-section">
+                    <div className="label-row">
+                      <label>3D model</label>
+                      <span>
+                        {sample.city.buildings.length} buildings ·{" "}
+                        {sample.city.trees.length} trees
+                      </span>
+                    </div>
+                    <div className="segmented layer-tabs">
+                      <button
+                        className={cityMode ? "selected" : ""}
+                        onClick={() => setCityMode(true)}
+                      >
+                        City model
+                      </button>
+                      <button
+                        className={!cityMode ? "selected" : ""}
+                        onClick={() => setCityMode(false)}
+                      >
+                        Exact DSM
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {cityMode && sample?.city && sample?.terrain && (
+                  <div className="control-section">
+                    <label>Ground display</label>
+                    <div className="segmented layer-tabs">
+                      <button className={!flatGround ? "selected" : ""}
+                        aria-pressed={!flatGround} onClick={() => setFlatGround(false)}>
+                        Estimated terrain
+                      </button>
+                      <button className={flatGround ? "selected" : ""}
+                        aria-pressed={flatGround} onClick={() => setFlatGround(true)}>
+                        Flat ground
+                      </button>
+                    </div>
+                    <p className="tab-empty">
+                      {flatGround
+                        ? "Flat visualization: terrain and flood-defence relief are hidden. Buildings retain estimated heights; elevation readouts and GeoTIFFs retain original values."
+                        : "Terrain is estimated from a coarse surface DEM. Buildings in that DEM can leave artificial slopes on streets."}
+                    </p>
+                  </div>
+                )}
+                <div className="control-section">
+                  <label>Active layer</label>
+                  <div
+                    className={`segmented layer-tabs ${shown.metricHeights ? "wide" : ""}`}
+                  >
+                    <button
+                      className={layer === "elevation" ? "selected" : ""}
+                      onClick={() => setLayer("elevation")}
+                    >
+                      <Mountain size={14} /> Surface
+                    </button>
+                    <button
+                      className={layer === "depth" ? "selected" : ""}
+                      onClick={() => setLayer("depth")}
+                    >
+                      <Activity size={14} /> Height
+                    </button>
+                    <button
+                      className={layer === "texture" ? "selected" : ""}
+                      onClick={() => setLayer("texture")}
+                    >
+                      <FileImage size={14} /> RGB
+                    </button>
+                    <button
+                      className={layer === "classes" ? "selected" : ""}
+                      onClick={() => setLayer("classes")}
+                    >
+                      <Layers3 size={14} /> Classes
+                    </button>
+                    {shown.metricHeights && (
+                      <button
+                        className={layer === "slope" ? "selected" : ""}
+                        onClick={() => setLayer("slope")}
+                      >
+                        <TriangleRight size={14} /> Slope
+                      </button>
+                    )}
+                    {shown.metricHeights && (
+                      <button
+                        className={layer === "error" ? "selected" : ""}
+                        disabled={!sample?.error}
+                        title={
+                          sample?.error
+                            ? "Where the model reads higher or lower than the reference"
+                            : "Add reference heights to the upload to see the error map"
+                        }
+                        onClick={() => setLayer("error")}
+                      >
+                        <Diff size={14} /> Error
+                      </button>
+                    )}
+                  </div>
+                  {shown.metricHeights && (
+                    <label className="contour-toggle">
+                      <input
+                        type="checkbox"
+                        checked={contours}
+                        onChange={(e) => setContours(e.target.checked)}
+                      />
+                      <Waves size={13} /> Contour lines every{" "}
+                      {contourInterval(viewSample?.maxM ?? 1)} m
+                    </label>
+                  )}
+                  {layer === "classes" && (
+                    <div
+                      className="class-legend"
+                      aria-label="GAMUS semantic classes"
+                    >
+                      <span>
+                        <i className="class-dot building" /> Buildings
+                      </span>
+                      <span>
+                        <i className="class-dot tree" /> Trees
+                      </span>
+                      <span>
+                        <i className="class-dot road" /> Roads
+                      </span>
+                      <span>
+                        <i className="class-dot ground" /> Ground
+                      </span>
+                      <span>
+                        <i className="class-dot water" /> Water
+                      </span>
+                      <span>
+                        <i className="class-dot vegetation" /> Low vegetation
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="control-section">
+                  <div className="label-row">
+                    <label>Vertical exaggeration</label>
+                    <span>
+                      {exaggeration.toFixed(1)}×
+                      {shown.metricHeights && Math.abs(exaggeration - 1) < 0.05
+                        ? " · true scale"
+                        : ""}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="3"
+                    step=".1"
+                    value={exaggeration}
+                    onChange={(e) => setExaggeration(+e.target.value)}
+                  />
+                  <div className="range-labels">
+                    <span>subtle</span>
+                    <span>dramatic</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            {inspectorTab === "measure" && (
+              <div
+                className="tab-panel"
+                role="tabpanel"
+                id="inspector-panel-measure"
+                aria-labelledby="inspector-tab-measure"
+                tabIndex={0}
+              >
+                {uploadMeta && (
+                  <>
+                    {uploadMeta.height_mode !== "metadata_metric" &&
+                      lastUploadFile && (
+                        <div className="gcp-result scale-tool">
+                          <div>
+                            Pixel size used:{" "}
+                            {(uploadMeta.gsd_m ?? GAMUS_GSD_M).toFixed(3)} m
+                            {uploadMeta.gsd_m == null ? " (assumed)" : ""}.
+                            Heights scale with it.
+                          </div>
+                          <div>
+                            Set the scale: Measure, double-click both ends of
+                            something you know (a road lane ≈ 3.5 m, a car ≈ 4.5
+                            m, a building side), then enter its real length.
+                          </div>
+                          <div className="scale-row">
+                            <span>
+                              A → B{" "}
+                              {profile?.lengthM
+                                ? `${profile.lengthM.toFixed(1)} m now`
+                                : "not measured yet"}{" "}
+                              · real
+                            </span>
+                            <input
+                              type="number"
+                              min="0.1"
+                              step="0.1"
+                              placeholder="m"
+                              aria-label="Known length in metres"
+                              value={knownLengthM}
+                              onChange={(e) => setKnownLengthM(e.target.value)}
+                            />
+                            <button
+                              disabled={
+                                !(profile?.lengthM > 0 && +knownLengthM > 0) ||
+                                uploadStatus === "loading"
+                              }
+                              onClick={() => {
+                                const gsd =
+                                  (uploadMeta.gsd_m ?? GAMUS_GSD_M) *
+                                  (+knownLengthM / profile.lengthM);
+                                setUploadGsd(gsd.toFixed(3));
+                                setMeasure(false);
+                                runClassification(
+                                  lastUploadFile,
+                                  gsd.toFixed(3),
+                                );
+                              }}
+                            >
+                              Reprocess
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                  </>
+                )}
+                <div className="profile">
+                  <div className="label-row">
+                    <label>
+                      <Activity size={14} /> Height profile
+                    </label>
+                    <button
+                      className="text-btn"
+                      onClick={() => {
+                        setProfileCleared(true);
+                        setProfilePoints([]);
+                        notify("Profile cleared");
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div
+                    className={`sparkline ${profileCleared ? "cleared" : ""}`}
+                  >
+                    <svg viewBox="0 0 300 70" preserveAspectRatio="none">
+                      {profileView && (
+                        <>
+                          <path
+                            d={profileView.line}
+                            fill="none"
+                            stroke="#8bd2c4"
+                            strokeWidth="1.5"
+                            vectorEffect="non-scaling-stroke"
+                          />
+                          <path
+                            d={profileView.area}
+                            fill="url(#fill)"
+                            opacity=".22"
+                          />
+                        </>
+                      )}
+                      <defs>
+                        <linearGradient id="fill" x1="0" x2="0" y1="0" y2="1">
+                          <stop stopColor="#8bd2c4" />
+                          <stop
+                            offset="1"
+                            stopColor="#8bd2c4"
+                            stopOpacity="0"
+                          />
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                  </div>
+                  <div className="profile-values">
+                    {profileView ? (
+                      <>
+                        <span>{profileView.fmt(profileView.min)}</span>
+                        <strong>
+                          {profileView.fmt(profileView.avg)} avg ·{" "}
+                          {profile?.label ??
+                            "centre line (Measure: double-click A, then B)"}
+                        </strong>
+                        <span>{profileView.fmt(profileView.max)}</span>
+                      </>
+                    ) : (
+                      <strong>{sample ? "loading…" : "—"}</strong>
+                    )}
+                  </div>
+                </div>
+                <div className="control-section waypoint-panel">
+                  <div className="label-row">
+                    <label>Camera route</label>
+                    <span>
+                      {selectedWaypoint !== null
+                        ? `Point ${selectedWaypoint + 1} selected`
+                        : `${waypointCount} points`}
+                    </span>
+                  </div>
+                  <p>
+                    Set points on the terrain. Click a point to reselect it,
+                    drag its arrows to reposition, or press Delete to remove it.
+                  </p>
+                  <div className="waypoint-actions">
+                    <button
+                      className={waypointMode ? "tool-active" : ""}
+                      onClick={() => {
+                        const next = !waypointMode;
+                        setWaypointMode(next);
+                        if (next) setAutoRotate(false);
+                        notify(
+                          next
+                            ? "Click terrain to add points"
+                            : "Point mode off",
+                        );
+                      }}
+                    >
+                      <Target size={14} />{" "}
+                      {waypointMode ? "Point mode on" : "Set points"}
+                    </button>
+                    <button
+                      onClick={togglePathPlayback}
+                      disabled={waypointCount < 2}
+                    >
+                      {playing ? <Pause size={14} /> : <Play size={14} />}
+                      {playing ? "Pause" : "Play"}
+                    </button>
+                    <button
+                      onClick={removeSelectedWaypoint}
+                      disabled={selectedWaypoint === null}
+                    >
+                      <Trash2 size={14} /> Remove point
+                    </button>
+                    <button onClick={clearPath} disabled={!waypointCount}>
+                      <X size={14} /> Clear
+                    </button>
+                  </div>
+                </div>
+                <div className="tool-row">
+                  <button
+                    className={autoRotate ? "tool-active" : ""}
+                    onClick={toggleAutoRotate}
+                    disabled={playing}
+                  >
+                    <RotateCw size={15} />{" "}
+                    {autoRotate ? "Rotating…" : "Auto-rotate"}
+                  </button>
+                  <button
+                    className={measure ? "tool-active" : ""}
+                    onClick={() => {
+                      setMeasure(!measure);
+                      notify(
+                        measure
+                          ? "Measure mode off"
+                          : "Measure mode on — double-click terrain",
+                      );
+                    }}
+                  >
+                    <Ruler size={15} /> Measure
+                  </button>
+                  <button
+                    onClick={() => {
+                      setResetToken((x) => x + 1);
+                      notify("Camera reset");
+                    }}
+                  >
+                    <RotateCcw size={15} /> Reset view
+                  </button>
+                </div>
+              </div>
+            )}
+            {inspectorTab === "accuracy" && (
+              <div
+                className="tab-panel"
+                role="tabpanel"
+                id="inspector-panel-accuracy"
+                aria-labelledby="inspector-tab-accuracy"
+                tabIndex={0}
+              >
+                {uploadMeta && !uploadMeta.validation && <p className="tab-empty">
+                  No independent height reference was supplied for this scene.
+                  Building and canopy heights have not been validated.
+                </p>}
+                {uploadMeta &&
+                (uploadMeta.validation ||
+                  uploadMeta.dem_agreement ||
+                  uploadMeta.gcp) ? (
+                  <>
+                    {uploadMeta.validation && (
+                      <div className="metric-grid validation-grid">
+                        <div>
+                          <small>RMSE vs reference</small>
+                          <strong>
+                            {uploadMeta.validation.rmse?.toFixed(2)} m
+                          </strong>
+                        </div>
+                        <div>
+                          <small>MAE</small>
+                          <strong>
+                            {uploadMeta.validation.mae?.toFixed(2)} m
+                          </strong>
+                        </div>
+                        <div>
+                          <small>Correlation r</small>
+                          <strong>
+                            {uploadMeta.validation.pearson?.toFixed(3) ?? "n/a"}
+                          </strong>
+                        </div>
+                        <div>
+                          <small>Building RMSE</small>
+                          <strong>
+                            {uploadMeta.validation.building_rmse != null
+                              ? `${uploadMeta.validation.building_rmse.toFixed(2)} m`
+                              : "n/a"}
+                          </strong>
+                        </div>
+                      </div>
+                    )}
+                    {uploadMeta.validation?.scatter && (
+                      <ValidationDetail v={uploadMeta.validation} />
+                    )}
+                    {uploadMeta.dem_agreement && (
+                      <div
+                        className="gcp-result"
+                        title="Approximate image-aligned 30 m blocks; base-DEM agreement is not independent building-height validation"
+                      >
+                        DEM agreement (approximate 30 m blocks)
+                        {[
+                          ["glo30", "Copernicus GLO-30"],
+                          ["srtm", "SRTM"],
+                        ].map(([key, label]) => {
+                          const a = uploadMeta.dem_agreement[key];
+                          return (
+                            <div key={key}>
+                              {label}
+                              {uploadMeta.dsm?.base_dem === key
+                                ? " (base)"
+                                : ""}
+                              :{" "}
+                              {a?.cell_rmse != null && a?.cell_bias != null
+                                ? `RMSE ${a.cell_rmse.toFixed(2)} m · bias ${a.cell_bias >= 0 ? "+" : ""}${a.cell_bias.toFixed(2)} m`
+                                : "unavailable"}
+                            </div>
+                          );
+                        })}
+                        <p className="tab-empty">
+                          Coarse DEM agreement measures elevation consistency;
+                          it does not validate individual buildings or trees.
+                        </p>
+                      </div>
+                    )}
+                    {uploadMeta.gcp &&
+                      (uploadMeta.gcp.error ? (
+                        <div className="upload-error">
+                          Control points not applied: {uploadMeta.gcp.error}
+                        </div>
+                      ) : uploadMeta.gcp.model === "none" ? (
+                        <div className="gcp-result">
+                          Control points: {uploadMeta.gcp.n_used} of{" "}
+                          {uploadMeta.gcp.n_given} inside the image ·{" "}
+                          {uploadMeta.gcp.note}
+                        </div>
+                      ) : (
+                        <div className="gcp-result">
+                          Control points: {uploadMeta.gcp.n_used} of{" "}
+                          {uploadMeta.gcp.n_given} inside the image · DSM
+                          shifted {uploadMeta.gcp.offset_m >= 0 ? "+" : ""}
+                          {uploadMeta.gcp.offset_m.toFixed(2)} m · ground error
+                          at them {uploadMeta.gcp.rmse_before_m.toFixed(2)} →{" "}
+                          {uploadMeta.gcp.rmse_after_m.toFixed(2)} m
+                          {uploadMeta.gcp.rmse_left_out_m != null &&
+                            ` (${uploadMeta.gcp.rmse_left_out_m.toFixed(2)} m on left-out points)`}
+                        </div>
+                      ))}
                   </>
                 ) : (
-                  <strong>{sample ? "loading…" : "—"}</strong>
+                  <p className="tab-empty">
+                    Add reference heights when you upload (a LiDAR DSM or a
+                    height map) and the model is scored against them here.
+                    GeoTIFFs are also checked against SRTM and Copernicus for
+                    coarse elevation consistency.
+                  </p>
                 )}
               </div>
-            </div>
-            <div className="control-section waypoint-panel">
-              <div className="label-row">
-                <label>Camera route</label>
-                <span>
-                  {selectedWaypoint !== null
-                    ? `Point ${selectedWaypoint + 1} selected`
-                    : `${waypointCount} points`}
-                </span>
+            )}
+            {inspectorTab === "context" && (
+              <div
+                className="tab-panel"
+                role="tabpanel"
+                id="inspector-panel-context"
+                aria-labelledby="inspector-tab-context"
+                tabIndex={0}
+              >
+                <p className="tab-empty">Mapped features are from <a className="source-credit" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>.
+                  Coverage may be incomplete; elevations are estimates.</p>
+                {uploadMeta &&
+                (uploadMeta.bridges ||
+                  uploadMeta.flood ||
+                  uploadMeta.facilities?.length ||
+                  uploadMeta.facilities_error) ? (
+                  <>
+                    {!tabHasResults("context") && (
+                      <p className="tab-empty">
+                        No mapped bridges, flood defences or critical facilities
+                        were found in this image's area.
+                      </p>
+                    )}
+                    {uploadMeta.bridges &&
+                      (uploadMeta.bridges.error ||
+                        uploadMeta.bridges.deck_m2 > 0) && (
+                        <div className="gcp-result bridge-line">
+                          Bridges (OpenStreetMap):{" "}
+                          {uploadMeta.bridges.error
+                            ? `unavailable (${uploadMeta.bridges.error})`
+                            : `${Math.round(uploadMeta.bridges.deck_m2).toLocaleString()} m² of deck from ${uploadMeta.bridges.ways} ways, heights from the banks`}
+                        </div>
+                      )}
+                    {uploadMeta.flood &&
+                      (uploadMeta.flood.error ||
+                        uploadMeta.flood.items?.length > 0) && (
+                        <div className="gcp-result facility-list">
+                          Embankments and flood defences (OpenStreetMap)
+                          {uploadMeta.flood.error ? (
+                            <div>unavailable: {uploadMeta.flood.error}</div>
+                          ) : (
+                            uploadMeta.flood.items.map((e, i) => (
+                              <div key={i}>
+                                <i
+                                  className="facility-dot"
+                                  style={{ background: "#2bd4ff" }}
+                                />
+                                {e.kind}
+                                {e.name ? ` "${e.name}"` : ""}: crest ≈{" "}
+                                {e.crest_m.toFixed(1)} m ({geoid},{" "}
+                                {uploadMeta.dsm?.base_dem === "glo30"
+                                  ? "Copernicus"
+                                  : "SRTM"}
+                                )
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    {(uploadMeta.facilities?.length > 0 ||
+                      uploadMeta.facilities_error) && (
+                      <div className="gcp-result facility-list">
+                        Critical facilities (OpenStreetMap)
+                        {uploadMeta.facilities_error ? (
+                          <div>unavailable: {uploadMeta.facilities_error}</div>
+                        ) : (
+                          Object.entries(
+                            uploadMeta.facilities.reduce((acc, f) => {
+                              (acc[f.kind] ??= []).push(f.name);
+                              return acc;
+                            }, {}),
+                          ).map(([kind, names]) => (
+                            <div key={kind}>
+                              <i
+                                className="facility-dot"
+                                style={{
+                                  background:
+                                    FACILITY_STYLE[kind]?.colour ?? "#888",
+                                }}
+                              />
+                              {FACILITY_STYLE[kind]?.label ?? kind} (
+                              {names.length})
+                              {names.filter(Boolean).length > 0 &&
+                                `: ${names.filter(Boolean).slice(0, 4).join(", ")}${names.filter(Boolean).length > 4 ? "…" : ""}`}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="tab-empty">
+                    {uploadMeta?.georeferenced
+                      ? "OpenStreetMap context is unavailable for this image."
+                      : "Upload a GeoTIFF with coordinates to find bridges, flood defences and critical facilities from OpenStreetMap in its area."}
+                  </p>
+                )}
               </div>
-              <p>
-                Set points on the terrain. Click a point to reselect it, drag
-                its arrows to reposition, or press Delete to remove it.
-              </p>
-              <div className="waypoint-actions">
-                <button
-                  className={waypointMode ? "tool-active" : ""}
-                  onClick={() => {
-                    const next = !waypointMode;
-                    setWaypointMode(next);
-                    if (next) setAutoRotate(false);
-                    notify(
-                      next ? "Click terrain to add points" : "Point mode off",
-                    );
-                  }}
-                >
-                  <Target size={14} />{" "}
-                  {waypointMode ? "Point mode on" : "Set points"}
-                </button>
-                <button
-                  onClick={togglePathPlayback}
-                  disabled={waypointCount < 2}
-                >
-                  {playing ? <Pause size={14} /> : <Play size={14} />}
-                  {playing ? "Pause" : "Play"}
-                </button>
-                <button
-                  onClick={removeSelectedWaypoint}
-                  disabled={selectedWaypoint === null}
-                >
-                  <Trash2 size={14} /> Remove point
-                </button>
-                <button onClick={clearPath} disabled={!waypointCount}>
-                  <X size={14} /> Clear
-                </button>
-              </div>
-            </div>
-            <div className="tool-row">
-              <button
-                className={autoRotate ? "tool-active" : ""}
-                onClick={toggleAutoRotate}
-                disabled={playing}
-              >
-                <RotateCw size={15} />{" "}
-                {autoRotate ? "Rotating…" : "Auto-rotate"}
-              </button>
-              <button
-                className={measure ? "tool-active" : ""}
-                onClick={() => {
-                  setMeasure(!measure);
-                  notify(
-                    measure
-                      ? "Measure mode off"
-                      : "Measure mode on — double-click terrain",
-                  );
-                }}
-              >
-                <Ruler size={15} /> Measure
-              </button>
-              <button
-                onClick={() => {
-                  setResetToken((x) => x + 1);
-                  notify("Camera reset");
-                }}
-              >
-                <RotateCcw size={15} /> Reset view
-              </button>
-            </div>
+            )}
           </aside>
         </section>
       </main>
-      {toast && <div className="toast">{toast}</div>}
+      {toast && <div className="toast" role="status">{toast}</div>}
       {measure && (
         <div className="measure-hint">
           <Ruler size={15} />{" "}
