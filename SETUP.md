@@ -1,18 +1,19 @@
 # Setting up AltiMap
 
-Everything a teammate needs to go from a fresh clone to the running app: upload a satellite or
-aerial image, get a metric height model, a 3D city model and GeoTIFF downloads. Tested on Ubuntu
-with an RTX 3050 6 GB laptop GPU; each step says what it is for, so you can tell what to skip.
+This guide explains how to run AltiMap, upload a colour image and view its 3D city model.
+It also explains the height-map downloads. The current Windows app was checked in an existing
+environment with an RTX 3050 6 GB GPU. Earlier Ubuntu/Docker checks were reported by the teammate.
+A new Windows install and the Docker build were not repeated during documentation work.
 
 ## What you need
 
 | | Version | Why |
 |---|---|---|
-| Linux (Ubuntu tested) / Windows | — | Windows app tested in an existing environment; fresh native install and macOS untested; CPU-only is slow |
+| Linux (Ubuntu tested) / Windows | N/A | Windows app tested in an existing environment; fresh native install and macOS untested; CPU-only is slow |
 | NVIDIA GPU + driver for CUDA 12.x | 6 GB VRAM or more | the height model (DINOv2 ViT-L) runs here; training needs 24 GB |
 | [uv](https://docs.astral.sh/uv/) | any recent | creates the Python envs and installs Python 3.12 itself |
 | Node.js | 20+ (22 tested) | builds the React viewer |
-| git | — | also clones the SynRS3D model code |
+| git | N/A | also clones the SynRS3D model code |
 | Disk | ~15 GB | ~7 GB Python env (PyTorch), ~6 GB model weights (3 height models + CHMv2), the rest data/cache |
 | RAM | 16 GB recommended | the server holds ~5.5 GB with all three models loaded (two wait on the CPU while one runs on the GPU) |
 | Internet | first run | model downloads; GeoTIFF uploads fetch the Copernicus DEM live |
@@ -33,7 +34,8 @@ docker run --gpus all -p 8000:8000 altimap      # then open http://<host>:8000
 
 Without `--gpus all` it runs on the CPU (a 1024 px tile took 86 s instead of ~16 s). Uploads
 live inside the container; add `-v altimap-uploads:/app/viewer/web/data-uploads` to keep them.
-Tested: GPU visible in the container, both DEM sources reachable, an upload through v1 + v2.
+The teammate's earlier container test reported a visible GPU, access to both elevation sources
+and an upload using v1 and v2. This is not a new test of the current main container.
 
 Version note: the tested production snapshot on `main` is based on commit `665f514`
 plus the JSON-safety, opt-in DEM-comparison and camera-repaint fixes. The same snapshot
@@ -102,19 +104,20 @@ shutil.copy(hf_hub_download('Dilavesh/altimap-height', 'v2/best.pth'), 'viewer/c
 snapshot_download('WEO-SAS/chm-meta-v2', allow_patterns=['*.json', 'model.safetensors', 'LICENSE.md'])"
 ```
 
-What each model does (all measured against USGS LiDAR, see ARCHITECTURE.md §5):
+What each model does (see [the architecture guide](ARCHITECTURE.md#4-predicting-object-heights)):
 - `best.pth` gives the heights everywhere.
 - `best_v2.pth` contributes 75% of the result on building pixels; `best.pth` contributes 25%.
   This blend was selected on full GAMUS validation and confirmed on the untouched test split.
   v2 alone over-reads trees and ground on unfamiliar imagery.
-- CHMv2 replaces canopy heights inside extensive forest, where the main model reads trees
-  ~16 m low.
+- CHMv2 is an optional tree-height specialist used inside extensive forest.
+  Earlier measurements showed a benefit there, but it was not installed in the local upload checks.
 - The last two are optional: without them the app runs with `best.pth` alone and says so in
   the upload panel ("Models").
 
 The server uses `viewer/cache/best.pth` if it exists, else the stock weights. It also honours
-`ALTIMAP_HEIGHT_CKPT=/path/to/ckpt.pth`. The fine-tuned model is much better (test RMSE 5.02 m
-vs 7.25 m zero-shot, see README), so don't run on the fallback. The model card at
+`ALTIMAP_HEIGHT_CKPT=/path/to/ckpt.pth`. The historical model-card experiment reported v1 test
+RMSE 5.02 m versus 7.25 m zero-shot. That protocol is different from the larger one-pass fusion
+experiment in [README](README.md#measured-evidence); do not mix their scores. The model card at
 https://huggingface.co/Dilavesh/altimap-height has the architecture, results, known limitations
 and licences; its source is `docs/model-card.md`. v1 is MIT. v2 is also trained on SynRS3D data
 (CC BY-NC 4.0), so treat it as non-commercial. CHMv2 is under Meta's DINOv3 licence; when CHMv2
@@ -161,12 +164,14 @@ Open the app, click **Import** (or drop a file on the viewport):
 - **PNG / JPG** gives heights above ground (nDSM) and a 3D city model on flat ground. Enter the
   pixel size in metres if you know it. Without one, the app uses an explicitly reported
   experimental 0.33 m/pixel assumption for the footprint scale; it is not known physical truth.
-- **GeoTIFF** also gives an absolute DSM (metres above sea level, EGM2008) on real terrain when
+- **GeoTIFF** also gives an absolute DSM (metres above sea level; EGM2008 for Copernicus,
+  EGM96 for SRTM) on real terrain when
   its CRS and grid are north-up and square. Rotated/sheared or strongly non-square inputs are
   rejected for absolute DSM export with a warning instead of silently producing wrong geometry.
-- **Add reference heights** (optional): a single-band height map, either height above ground
-  or an absolute DSM (the app works out which). A georeferenced reference is reprojected onto
-  the image by its coordinates; any other is assumed to cover the same area. The app scores the
+- **Add reference heights** (optional): a single-band map containing known heights, either above
+  ground or absolute surface elevations. Main chooses the comparison using the values, so check
+  the label in the result. A map with coordinates is aligned with the image. A map without them
+  is assumed to cover the same area. The app scores the
   model (RMSE, MAE, correlation, bias, per land-cover class, a scatter plot) and adds an
   **Error** layer showing where the model reads high or low.
 - **Add ground control points** (optional, GeoTIFF only): a CSV of `lon, lat, height` (WGS84
@@ -174,9 +179,11 @@ Open the app, click **Import** (or drop a file on the viewport):
   columns is fine). They are compared with the bare-earth ground. The DSM is shifted by their
   mean difference only if that is at least 4 m (beyond GLO-30's own accuracy) and consistent
   across the points; otherwise nothing changes, and the panel says why. That's for real vertical
-  offsets: e.g. GPS (ellipsoidal) heights vs EGM2008 differ by tens of metres over India. On our
-  LiDAR test scenes the DEM had no such offset, so nothing was applied.
-- **Quality**: *High* averages 4 flipped passes (~3x slower), *Fast* runs one pass.
+  offsets. Use points with a compatible height reference. Do not assume a GPS altitude uses the
+  same reference as Copernicus or SRTM. The app does not perform a full vertical-datum conversion.
+  Earlier LiDAR scene checks found no useful shift, so the rule left those scenes unchanged.
+- **Quality**: *High* averages four flipped passes; *Fast* runs one pass. Model work increases,
+  but the total upload-time ratio also depends on DEM fetching, image size and model loading.
 - **Time**: a 2000 px GeoTIFF takes about 1.5–2 minutes on *Fast* with an RTX 3050 laptop GPU
   (two height-model passes, plus CHMv2 in forests). Scenes wider than ~1 km are processed in
   tiles and take proportionally longer.
@@ -202,7 +209,8 @@ Test images: `demo/` is not in git (195 MB); ask for it. It holds:
 - `india/`: three Sikkim satellite scenes. `scripts/fetch_india_samples.py` downloads these
   itself.
 
-Any RGB aerial or satellite image works too.
+Other supported RGB aerial or satellite images can be uploaded too.
+Image quality, pixel size and location affect prediction accuracy.
 
 Batch use without the viewer:
 
@@ -214,8 +222,12 @@ Batch use without the viewer:
 ## 6. Tests
 
 ```bash
-.venv/bin/python -m pytest -q     # ~110 tests, under a second, no GPU or network
+.venv/bin/python -m pytest -q     # torch-free suite; some app/model tests skip in this environment
 ```
+
+The [dated verification](docs/real-upload-verification-20261004.md) records 128 passing tests
+in this environment plus 12 passing API/loss tests in the separate application environment.
+These are recorded results, not a guarantee that every environment will discover the same tests.
 
 ## 7. Evaluation and training (optional)
 

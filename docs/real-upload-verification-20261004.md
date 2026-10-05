@@ -1,4 +1,4 @@
-# Real-upload verification — 4 October 2026
+# Real-upload verification: 4 October 2026
 
 Tested snapshot: upstream `665f514` plus the local JSON-safety, opt-in public-DEM
 comparison and camera-repaint fixes. This report does not cover the four later
@@ -31,9 +31,9 @@ wheel-zoom and orbit rendering assertions after the viewer fix.
 
 | Input | Backend seconds | Reference/output | RMSE m | MAE m | Bias m |
 |---|---:|---|---:|---:|---:|
-| Sikkim Namchi town | 359.26 | No independent reference | — | — | — |
-| Sikkim Chungthang town | 328.98 | No independent reference | — | — | — |
-| Sikkim Chungthang forest | 171.82 | No independent reference | — | — | — |
+| Sikkim Namchi town | 359.26 | No independent reference | N/A | N/A | N/A |
+| Sikkim Chungthang town | 328.98 | No independent reference | N/A | N/A | N/A |
+| Sikkim Chungthang forest | 171.82 | No independent reference | N/A | N/A | N/A |
 | NAIP Philadelphia City Hall | 33.54 | LiDAR / absolute DSM | 35.41 | 23.01 | -9.00 |
 | NAIP Chevy Chase suburb | 332.89 | LiDAR / absolute DSM | 3.96 | 2.90 | -0.79 |
 | NAIP Pittsburgh hills | 331.29 | LiDAR / absolute DSM | 5.02 | 3.33 | -2.39 |

@@ -20,3 +20,7 @@ viewer/web/data-demdirect/
 viewer/cache/
 viewer/web/data-uploads/
 .coverage
+
+# Local runtime and bulk verification artifacts; curated public evidence is in docs/.
+*.log
+/test_samples/

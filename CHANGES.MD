@@ -1,6 +1,9 @@
 # 48-hour hardening sprint changes
 
-Branch: `codex/48h-final-hardening` (local only; no GitHub changes made).
+Historical sprint record: the branch and local-operation notes below describe that run,
+not the current checkout. See [README](README.md) for the tested production snapshot.
+
+Original branch: `codex/48h-final-hardening` (local only at the time).
 
 ## Final building-fusion decision
 
@@ -11,7 +14,8 @@ focused TTA run improved pooled overall RMSE from **3.1690 m to 3.0916 m** and b
 
 The fusion evaluator was corrected before this decision: GAMUS `-5 m` no-data sentinels are now
 excluded with `clean_height()`, and caches record their TTA mode so incompatible predictions cannot
-be mixed. See `BUILDING_FUSION_075_REPORT.md` for the complete evidence and impact analysis.
+be mixed. See [building-fusion adoption report](docs/evaluation/BUILDING_FUSION_075_REPORT.md)
+for the complete evidence and impact analysis.
 
 ## Implemented
 

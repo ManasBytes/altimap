@@ -1,247 +1,489 @@
-# AltiMap
+# AltiMap: one image to an interactive 3D city model
 
-Single-view optical RGB imagery → metric elevation (nDSM / absolute DSM) → interactive 3D flythrough.
-Built for SIH 2026 problem statement 26175, *DepthWizard* (ISRO). Brief: `docs/problem-statement.md`.
+AltiMap is our working prototype for **SIH 2026 · SIH26175 · DepthWizard (ISRO)**.
+Our main output is an interactive **3D city model with buildings, roof levels, trees and terrain**.
+It starts with one aerial or satellite colour image. Our models estimate object heights and labels
+such as buildings and trees. We use these predictions to create 3D shapes and place the original
+image on the roofs and ground. For a suitable GeoTIFF, map coordinates help us add landscape
+elevation. Height maps and error views help check the result. They are not the whole product.
 
-| Input | Output |
+**Current implementation:** tested `main` snapshot [`84136c4`](https://github.com/ManasBytes/altimap/commit/84136c4013837f141624ed62a1d6cff80f52c05c).
+The newer `updated-dilavesh-new` branch is a separate experiment, **not an approved replacement for main**.
+Screenshots show what the app can display. Accuracy must be checked against known heights on
+images not used to train the model.
+
+![Photo-textured Chungthang GeoTIFF reconstruction, with buildings, trees and mountain relief](docs/images/current/chungthang-city-overview.png)
+
+*Team capture, 4 October: Chungthang, Sikkim, 3,932 × 3,932 RGB GeoTIFF; city display at 1×.
+The corresponding verified upload produced a DSM range of 1,533–2,244 m. No independent height
+reference was supplied for this scene, so this image is reconstruction evidence, not an accuracy claim.*
+
+[Setup and downloads](SETUP.md) · [How it works and simple definitions](ARCHITECTURE.md) ·
+[Project journey](docs/PROJECT_JOURNEY.md) · [Evidence and screenshot provenance](docs/evidence/README.md) ·
+[Model card](docs/model-card.md) · [Problem statement](docs/problem-statement.md)
+
+## Our journey in brief
+
+We started with generic monocular depth and direct DEM rendering. The first gave unreliable overhead
+height patterns; the second made good terrain but could not infer unknown buildings. Mark-1 added
+prediction/reference/error inspection, and Biplab's work established the terrain workspace. Dilavesh's
+RS3DAda height/semantic models then supplied learned object heights, with a building specialist and
+an optional forest specialist. Validation selected today's **25% v1 + 75% v2 building blend**.
+
+The current city view turns those outputs into separate buildings and tree crowns. Newer teammate
+work explores mapped context and an updated inspector, but remains separate from tested main.
+[Detailed branch history and historical screenshots](docs/PROJECT_JOURNEY.md).
+
+## What we have built
+
+| Capability | What works today |
 |---|---|
-| PNG / JPG (no coordinates) | **nDSM**: height above ground in metres, per pixel (a relative DSM: heights are metric, the ground datum is unknown) |
-| GeoTIFF (with CRS) | **nDSM** + **absolute DSM** on Copernicus GLO-30 (default) or SRTM, same CRS and grid as the input; optional agreement check against both DEMs |
+| RGB input | PNG, JPG and optical RGB GeoTIFF upload, with processing progress |
+| Height prediction | RS3DAda v1 adapted to our height task, plus an optional v2 building model |
+| Land-cover prediction | Buildings, trees, roads, water, ground and low vegetation predicted from the colour image |
+| GeoTIFF elevation | Absolute DSM composed using Copernicus GLO-30 or SRTM |
+| 3D reconstruction | Original image draped on a height mesh; simplified roof blocks and tree crowns |
+| Exploration | Orbit/zoom, WASD/QE flight, first-person Walk, waypoint flythrough |
+| Analysis | Height and slope probes, A–B profiles, contours, class/height/error layers |
+| Validation | Optional reference-height upload, RMSE/MAE/bias/correlation, per-class errors and scatter plot |
+| Downloads | Height GeoTIFFs, files describing their units, building outlines and a 3D GLB model |
+| Reliability | DEM cache/fallback, unresolved-data warnings, JSON-safe undefined metrics, optional secondary DEM comparison |
 
-All elevation outputs are float32 Cloud-Optimized GeoTIFFs in metres, NaN nodata, with a JSON sidecar
-(GSD, vertical datum, height range, DEM source).
+The application processes uploaded RGB; the built-in GAMUS **reference gallery is not model output**.
+The forest specialist **Meta CHMv2** is supported when downloaded. It was **unavailable in our local
+RTX 3050 upload verification**, so those forest screenshots/results must not be described as CHMv2 runs.
 
-Docs: **[SETUP.md](SETUP.md)** (install and run), **[ARCHITECTURE.md](ARCHITECTURE.md)** (how every
-part works, data formats, API, models, measured results and limits), [model card](https://huggingface.co/Dilavesh/altimap-height).
+## Understanding the outputs
 
-## How it works
+An RGB GeoTIFF normally contains **colour pixels, map coordinates, pixel placement and pixel size**.
+Georeferencing does **not** mean it already contains a DSM or the height of every building.
 
-1. **Height model.** RS3DAda ([SynRS3D, NeurIPS 2024](https://github.com/JTRNEO/SynRS3D)): a DINOv2 ViT-L
-   encoder with a DPT decoder, pre-trained for monocular height on 69k synthetic remote-sensing
-   images. We fine-tune it on **GAMUS** (the organisers' reference dataset: 0.33 m aerial RGB with
-   LiDAR-derived nDSM), training only the encoder's bias terms (BitFit) plus the decoder, with a joint
-   land-cover head as a semantic prior. Loss: L1 on metres + L1 on height gradients + 0.2 × class
-   cross-entropy.
-2. **Three models, by land cover.** Each was measured against USGS airborne LiDAR
-   (ARCHITECTURE.md §5):
-   - **Fine-tune v1**: heights everywhere.
-   - **v2** (8 encoder blocks, height-weighted loss, SynRS3D high-rises): contributes 75% of the
-     height on building pixels (v1 contributes 25%), selected on full GAMUS validation and confirmed
-     on the untouched test split. Alone it over-reads trees and ground on unfamiliar imagery.
-   - **Meta's CHMv2 canopy model**: tree heights inside extensive forest (≥ 80 % canopy within
-     150 m), where the main model reads trees ~16 m low. It is worse than ours outside forests.
-   - The last two are optional downloads.
-3. **Scale.** The models output metres directly. Inputs are resampled to the model's 0.33 m ground
-   sampling distance (from the GeoTIFF, or a user-supplied GSD), then back to the input grid.
-   Large scenes are processed in ~1 km tiles with a context margin, so every part is seen at full
-   resolution.
-4. **Absolute elevation (GeoTIFF input).** The organisers score GeoTIFF output against SRTM/Copernicus
-   and require values that "match DEM heights". So the exported DSM is **DEM-consistent**: Copernicus
-   GLO-30 supplies absolute level and terrain, and the model adds the detail inside each 30 m cell with
-   its own cell-mean removed (`DSM = GLO-30 − mean₃₀(nDSM) + nDSM`). Averaged over 30 m, the DSM
-   reproduces GLO-30; at full resolution it has the buildings and trees. Heights are **orthometric
-   (EGM2008 geoid)**, and the sidecar says so. Known trade-off: in dense downtowns GLO-30's radar
-   under-records building mass, so street pixels come out below their true (LiDAR) level while the
-   30 m average still matches the DEM. In extensive forest the fine detail is left out (both
-   models place it poorly under closed canopy), so the DSM there is GLO-30's own surface.
-5. **Terrain in the 3D view.** A bare-earth estimate chosen by scene type (measured against USGS
-   LiDAR on four scenes): a 300 m morphological opening of GLO-30 for dense cities, 150 m for towns
-   (keeps hills), model subtraction for forest and farmland. Display only.
-6. **3D city model (display).** From the same prediction, `viewer/city_model.py` builds an LoD1
-   city: each building complex cut into roofs where the roof height steps or dips (touching row
-   houses become separate blocks) and into distinct height levels (a tower on a podium becomes two
-   blocks), outlines kept as traced unless squaring them off barely moves them, extruded with the
-   photo on the roof. On 40 GAMUS val tiles (`viewer/city_eval.py`) this scores footprint IoU 0.841
-   and edge F1 0.655 against the true outlines, 2372 separate buildings (was 0.787 / 0.564 / 1281);
-   SAM 3 masks scored lower (0.72–0.78 IoU) and aren't used. Trees are detected as individual crowns
-   (height, width and colour from the image), and flat ground. It is also exported as
-   `buildings.geojson` (footprint + height, WGS84 for GeoTIFF input). This is for the 3D view only:
-   regularizing heights this way raised RMSE from 2.66 m to 2.86–3.38 m on validation tiles, so the
-   GeoTIFFs stay the raw model output. The viewer's *Exact surface* toggle shows that raw DSM.
-7. **Viewer.** React + three.js. The RGB image is draped on a displaced mesh: 1025 × 1025 on
-   capable GPUs, 513 × 513 on integrated or software graphics, chosen automatically. Navigation:
-   orbit, WASD/QE flight, first-person **Walk** and waypoint flythroughs.
+- **nDSM:** height above the local ground. A 20 m building has an nDSM height of about 20 m.
+- **DSM:** surface elevation of roofs, treetops and ground, using a stated height reference.
+  If that building stands on ground at
+  100 m elevation, its roof is conceptually at 120 m.
+- **DTM / ground estimate:** ground elevation without buildings and trees. Our display ground is an
+  estimate derived from coarse elevation data, not a surveyed high-resolution DTM.
 
-   Uploads get:
-   - a height-and-slope probe and an **A→B height profile** (Measure mode);
-   - **Slope** and **Error** layers and **contour lines**;
-   - GeoTIFF downloads;
-   - validation against an optional reference height map (RMSE/MAE/correlation, bias, per-class
-     errors, scatter plot).
-   Drop an image anywhere on the view or use Import; a live progress bar shows each processing stage,
-   and *Quality: Fast* skips the 4-flip averaging (~4× quicker). Click a building for its height,
-   estimated floors, footprint area and roof elevation; *Export* saves the current 3D model as a
-   `.glb` in metres (opens in Blender and other 3D tools).
+| Input | Product and qualification |
+|---|---|
+| PNG/JPG + known pixel size | Predicted above-ground height in metres, local-grid 3D; no absolute geographic elevation |
+| PNG/JPG + unknown pixel size | Relative/local reconstruction with an **experimental 0.33 m/pixel assumption**; displayed metres are not verified physical scale |
+| Supported georeferenced RGB GeoTIFF | Predicted nDSM plus absolute DSM when the selected public elevation source is available |
+| GeoTIFF with unavailable DEM or unsupported grid | nDSM retained, with an explicit absolute-DSM warning; no invented sea-level ground |
 
-   **Public DEM comparison is optional and off by default.** Enable *Compare against public
-   DEMs* before an upload, or pass `--compare-dems` to `python -m viewer.estimate`.
-   Normal GeoTIFF uploads fetch only the selected base DEM; the optional check may fetch a
-   second source and take longer. A failed secondary read is shown as unavailable, and
-   undefined metrics (such as correlation with a flat DEM) are JSON `null`, not zero.
-   These scores use approximate image-aligned 30 m blocks, not native DEM grid cells.
-   Agreement with a DEM used to construct the DSM is **not independent building-height
-   accuracy**; attach independent reference heights for that. `python -m viewer.dem_check`
-   explicitly enables both comparisons.
+Saved height maps use decimal values in metres. Missing pixels have no value, represented as NaN.
+They use a COG layout, which lets software read parts of a GeoTIFF efficiently.
+Supported georeferenced outputs keep the input map system and pixel placement.
+Rotated, sheared and strongly non-square image grids currently trigger warnings.
+See [geospatial limits](SETUP.md#5-run-the-app).
 
-## Results (GAMUS)
+## Current pipeline
 
-Metrics are pixel-pooled over whole 1024 × 1024 tiles, in metres. *Building RMSE* is restricted to
-LiDAR building pixels. It matters because all-pixel RMSE hides how badly tall structures are
-underestimated. Two trivial baselines are included on purpose: a model that can't beat *predict the
-average height* has learned nothing.
-
-**Zero-shot RS3DAda (before fine-tuning), 300 val tiles:**
-
-| City | RMSE | MAE | r | Building RMSE |
-|---|---|---|---|---|
-| Washington DC | 9.08 | 5.13 | 0.48 | 7.54 |
-| Philadelphia | 2.53 | 1.33 | 0.72 | 3.86 |
-| **All** | **6.08** | **2.86** | **0.53** | **6.06** |
-| baseline: predict 0 | 8.00 | 4.00 | — | 11.16 |
-| baseline: predict train mean | 8.04 | 6.94 | — | 7.18 |
-
-**Held-out test split, 500 tiles (none used for training or checkpoint selection), 4-flip TTA:**
-
-| City | Model | RMSE | MAE | r | Building RMSE |
-|---|---|---|---|---|---|
-| Washington DC | **fine-tuned** | **3.95** | **2.17** | **0.915** | **4.51** |
-| | zero-shot | 10.08 | 5.80 | 0.410 | 6.80 |
-| New York | **fine-tuned** | **3.95** | **2.02** | **0.855** | **3.20** |
-| | zero-shot | 7.17 | 3.94 | 0.480 | 4.82 |
-| Philadelphia | **fine-tuned** | **5.90** | **1.39** | **0.822** | **10.04** |
-| | zero-shot | 6.28 | 1.92 | 0.777 | 10.57 |
-| **All** | **fine-tuned** | **5.02** | **1.72** | **0.833** | **8.28** |
-| | zero-shot | 7.25 | 3.19 | 0.638 | 9.06 |
-| | predict 0 | 10.26 | 4.89 | — | 16.28 |
-| | predict train mean | 9.98 | 7.66 | — | 12.66 |
-
-Fine-tuning cuts overall RMSE by 31% and MAE by 46%, and raises correlation from 0.64 to 0.83.
-Land-cover pixel accuracy is 0.88, and 95.5% of LiDAR building pixels are recognised as buildings.
-The weak spot is tall buildings: Philadelphia's test tiles include high-rises, and its building
-RMSE (10.0 m) against MAE (1.4 m) shows a small number of very tall pixels being underestimated
-(the long-tail problem, §4.3 of the design doc). New York was in the training split; the validation
-split used for checkpoint selection covered DC and Philadelphia only.
-
-## Results by landscape (USGS 3DEP airborne LiDAR)
-
-Four NAIP scenes covering the brief's landscape types, scored as the app produces them
-(`python -m viewer.dsm_eval`, one pass without flip averaging). *DSM* is the exported absolute
-DSM; *GLO-30 alone* is what you'd get with no model at all. This table is the historical external
-run with the former 50/50 building blend. It remains useful domain-gap evidence but has not been
-rerun for the current 25/75 blend.
-
-| Scene (pixel size) | nDSM RMSE (predict 0) | nDSM bias | DSM RMSE (GLO-30 alone) | DSM r (GLO-30 alone) |
-|---|---|---|---|---|
-| Dense city, Philadelphia (0.3 m) | 30.1 m (42.4) | −1.2 m | 35.0 m (36.3) | 0.376 (0.272) |
-| Suburb, Chevy Chase (0.6 m) | 4.5 m (6.5) | +1.4 m | 3.97 m (4.02) | 0.820 (0.796) |
-| Hilly town, Pittsburgh (0.6 m) | 3.5 m (6.5) | −0.4 m | 5.02 m (5.53) | 0.941 (0.923) |
-| Forest, Smoky Mountains (0.6 m) | 15.7 m (24.7) | −10.8 m | 8.75 m (8.53) | 0.992 (0.993) |
-
-- **Where it helps**: the model improves the absolute DSM over Copernicus in the city, suburb and
-  hills, and in the forest it stays within 0.2 m of it.
-- **What that historical three-model run fixed** (vs the first model alone):
-  - the city's tallest objects: 66 m → 104 m (LiDAR 151 m);
-  - forest canopy bias: −15.9 → −10.8 m;
-  - forest DSM: 9.03 → 8.75 m.
-
-  Remaining weak spots in that run: very tall towers and forest canopy still read low.
-- **India** (Sikkim, Maxar satellite scenes, `viewer/dem_check.py`): the DSM matches Copernicus
-  to ~1 m. Copernicus itself sits 7–14 m above SRTM in the Himalaya, so the choice of reference
-  DEM matters (ARCHITECTURE.md §9.6).
-- **Resolution** (images block-averaged to 1, 2, 5 and 10 m): object heights hold up to about
-  1–2 m and fade to flat by 5–10 m. Because the export is DEM-consistent, the DSM stays within
-  0.1 m of GLO-30 alone there.
-
-Full breakdown in [ARCHITECTURE.md](ARCHITECTURE.md) §9.
-
-### Current building-fusion evidence
-
-The active building rule is **25% v1 + 75% v2**, with v1 unchanged elsewhere. After fixing invalid
-GAMUS `-5 m` reference masking, it beat the former 50/50 route on all 859 validation tiles
-(overall/building RMSE 2.7511/3.3352 → 2.7402/3.2763 m) and all 2,861 untouched test tiles
-(3.7573/5.2308 → 3.6972/4.9934 m). A 24-tile High-quality/TTA check also improved both pooled
-metrics (3.1690/5.1284 → 3.0916/4.9140 m); the ordinary-scene overall regression was only 0.04%.
-Soft routing was tested and not adopted because it did not provide a meaningful enough gain.
-
-## Run it
-
-With Docker (weights included): `docker build -t altimap . && docker run --gpus all -p 8000:8000
-altimap`, then open http://localhost:8000 (SETUP.md has the requirements).
-
-Teammates setting up from scratch: follow **[SETUP.md](SETUP.md)** (every step, model
-downloads, troubleshooting). The short version:
-
-Needs Python 3.12, Node 18+, an NVIDIA GPU (6 GB is enough for inference; CPU works, slowly), and
-internet on first run (DINOv2 model code from GitHub, then cached; GLO-30 ground from Microsoft
-Planetary Computer for GeoTIFF inputs).
-
-```bash
-# 1. Python environment
-uv venv --python 3.12 .venv-da3
-uv pip install --python .venv-da3/bin/python torch torchvision --index-url https://download.pytorch.org/whl/cu128
-uv pip install --python .venv-da3/bin/python h5py numpy scipy rasterio pillow fastapi uvicorn \
-    python-multipart pystac-client planetary-computer huggingface_hub shapely
-uv pip install --python .venv-da3/bin/python -e . --no-deps
-
-# 2. Model code + weights (fine-tuned checkpoint goes to viewer/cache/best.pth; if it is
-#    absent, the stock RS3DAda weights are used)
-git clone https://github.com/JTRNEO/SynRS3D.git viewer/cache/SynRS3D
-.venv-da3/bin/python -c "from huggingface_hub import hf_hub_download; hf_hub_download('JTRNEO/RS3DAda', 'RS3DAda_vitl_DPT_height.pth', local_dir='viewer/cache/SynRS3D/pretrain')"
-# fine-tuned weights, public: https://huggingface.co/Dilavesh/altimap-height
-.venv-da3/bin/python -c "from huggingface_hub import hf_hub_download; hf_hub_download('Dilavesh/altimap-height', 'best.pth', local_dir='viewer/cache')"
-
-# 3a. Batch CLI: images in, GeoTIFFs out
-.venv-da3/bin/python -m viewer.estimate scene.tif photo.png --out results/
-.venv-da3/bin/python -m viewer.estimate photo.jpg --gsd 0.5 --out results/   # known pixel size
-
-# 3a'. With ground control points (CSV lon, lat, height) correcting the DSM's vertical offset
-.venv-da3/bin/python -m viewer.estimate scene.tif --gcps points.csv --out results/
-
-# 3b. Interactive app: build the viewer once, then one server serves app + API
-(cd frontend && npm ci && npm run build)
-.venv-da3/bin/python -m viewer.server            # open http://127.0.0.1:8000
-.venv-da3/bin/python -m viewer.server --host 0.0.0.0   # on a VM, reachable from other machines
+```text
+RGB image / optical RGB GeoTIFF
+  │
+  ├─ read image, valid pixels, CRS, affine transform and pixel size
+  └─ resample for the height model; overlapping-window inference
+       │
+       └─ RS3DAda v1 → height above ground + predicted land-cover classes
+            ├─ buildings → 25% v1 + 75% v2, when v2 is installed
+            ├─ dense-forest trees → CHMv2, when installed and routing permits
+            └─ otherwise → v1
+                 │
+                 ├─ PNG/JPG → local nDSM / relative reconstruction
+                 └─ GeoTIFF → selected public DEM + estimated fine detail → absolute DSM
+                                      │
+                       ┌──────────────┴───────────────┐
+                       │                              │
+                 scientific rasters             display geometry
+                 reference validation           textured mesh / city
+                 GeoTIFF downloads              navigation / GLB export
 ```
 
-Reproduce training and evaluation (24 GB GPU, ~8 h):
+### Height models and training
 
-```bash
-python -m viewer.height_eval --split val --limit 300 --out zeroshot_val.json    # zero-shot baseline
-python -m viewer.height_train --hours 8 --out runs/ft                           # keeps runs/ft/best.pth
-python -m viewer.height_eval --split test --ckpt runs/ft/best.pth --out test.json
+The main height model is **RS3DAda**, adapted from [SynRS3D](https://github.com/JTRNEO/SynRS3D).
+Its DINOv2 image encoder reads patterns. Its DPT decoder turns them into height and class maps.
+We adapted v1 using GAMUS colour images, measured heights above ground and class labels.
+
+Training rewards accurate heights, clear height boundaries and correct class labels.
+The technical loss is **height L1 + 0.5 × gradient L1 + 0.2 × semantic cross-entropy**.
+The v2 specialist adapts more encoder blocks and uses height-weighted supervision and high-rise
+training examples. Because it can overestimate unfamiliar ground/vegetation, it is routed to
+**predicted building pixels only**. Uploading an image does not retrain either model.
+
+CHMv2 is an optional canopy specialist routed to predicted tree pixels inside extensive forest:
+at least 80% canopy in an approximately 150 m neighbourhood. It is not used indiscriminately on
+suburban trees. Actual loaded models are listed with each result.
+
+### How GeoTIFF metadata is used
+
+The coordinate system, called the CRS, tells us how to read the map coordinates.
+The transform tells us where the pixels are placed. Together they help find the pixel size,
+fetch elevation for the right area and line up reference maps.
+The model estimates object heights from **the colour image**.
+It does not read hidden building heights from GeoTIFF metadata.
+
+Copernicus and SRTM are coarse elevation sources, not alternative AI models. Their spacing is
+approximately 30 m; they cannot directly describe every individual roof. Copernicus is itself a
+surface model, already influenced by buildings and canopy. The main pipeline therefore approximates:
+
+```text
+absolute DSM ≈ selected DEM − local 30 m mean(predicted detail) + predicted detail
 ```
 
-(`ALTIMAP_DATA` points at a folder holding `gamus/` and `SynRS3D/`.)
+The local average uses a moving filter on our image grid, **not the exact original DEM cells**.
+This keeps broad elevation while adding estimated detail. It does not guarantee exact agreement
+with every DEM cell or surveyed building heights. We leave out fine forest detail where it was
+unreliable. Ground used for the city display is estimated separately.
 
-Tests (no GPU, no network): `uv pip install -e ".[dev]"`, then `python -m pytest -q`.
+Copernicus uses the EGM2008 height reference; SRTM uses EGM96.
+This reference is also called a vertical datum. Different references and capture dates can
+affect a comparison with LiDAR laser measurements.
+[Copernicus documentation](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM) ·
+[USGS SRTM documentation](https://www.usgs.gov/centers/eros/science/usgs-eros-archive-digital-elevation-shuttle-radar-topography-mission-srtm)
 
-## Known limitations
+### City view and height measurements
 
-- **Training domain.** GAMUS is 0.33 m aerial imagery from three US cities. On imagery that differs a
-  lot in resolution, off-nadir angle or landscape (hilly, forested, rural India), accuracy will drop.
-  Supplying the true GSD matters most.
-- **PNG/JPG without a GSD** uses an explicitly reported experimental 0.33 m/pixel assumption.
-  Measured on the 0.6 m NAIP scenes
-  uploaded as plain PNGs, the wrong assumption moved nDSM RMSE by −0.7 to +1.0 m (better in the
-  suburb, worse in the hills and forest). Pass `--gsd` (or fill the UI field) when it's known.
-- **Absolute DSM accuracy is bounded by GLO-30** (30 m posting, ~2–4 m vertical accuracy) for the
-  ground component. Hilly terrain relief comes from the DEM, not the model.
-- **Vertical datum** is orthometric (EGM2008). Comparing against ellipsoidal references needs a
-  geoid correction.
-- **Very tall buildings and forest canopy** remained low in the historical 50/50 external run
-  (towers ~104 m where LiDAR says 151 m; canopy ~11 m low). The 25/75 route should improve towers,
-  but this is not a universal accuracy guarantee (ARCHITECTURE.md §5). Local 4 October 2026
-  uploads using 25/75 produced absolute-DSM RMSEs of 35.41 m (Philadelphia), 3.96 m
-  (Chevy Chase), 5.02 m (Pittsburgh) and 8.76 m (Smoky Mountains). CHMv2 was unavailable
-  during this run; these are not measurements of the complete forest-specialist stack.
-  References and qualifications are in the
-  [real-upload validation summary](docs/real-upload-verification-20261004.md).
-  Full screenshots and raw upload outputs remain in the local test-results folder.
-- **Large scenes** run tile by tile at full resolution (no seams: ARCHITECTURE.md §9.5). They
-  take minutes on a laptop GPU.
-- **Network**: GeoTIFFs need the selected base DEM: Copernicus GLO-30 (AWS Open Data, with
-  Microsoft Planetary Computer as fallback) or SRTM (OpenTopography). The optional public-DEM
-  comparison can fetch the other source too; it is off by default. Remote reads time out
-  after 60 s; if the base DEM is unavailable the app returns nDSM with a DSM warning.
-- **Licences**: RS3DAda weights are MIT (JTRNEO/RS3DAda), and so are our fine-tuned v1 weights.
-  v2 is also trained on SynRS3D data (CC BY-NC 4.0): treat it as non-commercial.
+**City model is the primary presentation view.** It combines predicted classes, object heights and
+estimated ground into recognizable buildings, roof levels and tree crowns, then maps the original
+image onto the terrain and roofs. Connected building regions are separated into roof parts.
+Heights inside each roof set how tall its block is. Higher points in tree regions help place tree crowns.
+This is implemented in `viewer/city_model.py` and rendered in the React/Three.js viewer.
+
+**Exact DSM is a separate check view:** a continuous height surface, not the same building/tree
+shapes. “Exact” describes how it is drawn, not whether the heights are correct. The original height
+maps remain the outputs used to measure error. The simpler display shapes do not replace them.
+Roof/floor estimates and tree counts are estimates, not surveyed measurements. Vertical exaggeration
+is display-only; use 1× when discussing physical proportions.
+
+## Main result: the 3D city model
+
+The gallery below shows **city geometry**, not only the Exact DSM surface. These are the supplied
+team photographs, displayed directly rather than hidden in a collapsed section.
+
+### Textured buildings and trees, up close
+
+![City-model close-up with textured roof blocks and individual tree crowns](docs/images/current/city-roofs-close.png)
+
+*Screenshot 203126: original imagery on the roofs and ground; simplified walls and tree crowns.
+The cropped capture does not identify its input scene or reference, so it demonstrates geometry,
+not independently established height accuracy.*
+
+### The same city representation with classes and height colouring
+
+| Class-layer city view · 203153 | Height-coloured city view · 203055 |
+|---|---|
+| ![City-model class overlay with textured roof blocks and tree crowns](docs/images/current/city-classes-close.png) | ![City-model height colours on extruded buildings and tree crowns](docs/images/current/city-height-close.png) |
+
+*The class view separates land-cover categories; the height view makes object-height variation
+visible on the 3D geometry. The height screenshot is cropped without its legend, so colours alone
+cannot be read as particular metre values. Use the live Height layer's scale for numeric interpretation.*
+
+### GeoTIFF city model on real landscape relief
+
+![Chungthang city-model close-up with buildings, tree crowns and height profile](docs/images/current/chungthang-rgb-close.png)
+
+*Screenshot 191733: Chungthang GeoTIFF, city geometry over mountainous terrain, at 0.5× vertical
+exaggeration. Screenshot 192448 is the 1× overview at the top of this README. No independent height
+reference was supplied for this landscape.*
+
+| Slope inspection · 192039 | Semantic city view · 192634 |
+|---|---|
+| ![Chungthang city and terrain with the slope analysis overlay](docs/images/current/chungthang-slope.png) | ![Chungthang city geometry over a predicted land-cover overlay](docs/images/current/chungthang-classes.png) |
+
+*Slope and class overlays are tools for inspecting the reconstructed landscape. They are not a
+flood-risk forecast or supplied ground truth.*
+
+### Plain-image reconstruction
+
+![PNG image reconstructed into photo-textured building blocks and tree crowns](docs/images/current/png-city-unknown-gsd.png)
+
+*Screenshot 193331: PNG input without coordinates or known GSD. The UI explicitly marks the 0.33 m/pixel
+assumption as experimental. This demonstrates local reconstruction, not validated absolute heights.*
+
+Some supplied captures predate the final UI fixes and contain older explanatory wording. The algorithm
+documented above, rather than text embedded in those screenshots, describes tested main.
+
+### Newer teammate branch: experimental city-context view
+
+![Experimental Pittsburgh city model with textured buildings, bridges and mapped facility markers](docs/images/experimental/pittsburgh-city-context-team.png)
+
+*Team-provided screenshot from newer `updated-dilavesh-new` work: `naip_pittsburgh_bridges.tif`,
+0.60 m/pixel, displayed DSM range 214–345 m. Visible additions include the Context tab, mapped
+bridge/embankment context and facility markers. This is **not tested main**. The exact capture commit
+and independent height accuracy were not established; including this image does not merge or approve
+the feature code. OpenStreetMap context is map-assisted, not a claim that our neural model detected
+or accurately measured the bridges and facilities.*
+
+## Supporting height and error diagnostics
+
+These views explain and evaluate the underlying height estimate. They are **not substitutes for
+the city-model gallery above**. Error metrics concern the raster prediction, not the decorative
+shape of a tree crown or a simplified wall.
+
+<details>
+<summary>Open the height/class rasters and independent-reference DSM error view</summary>
+
+### Predicted height and land-cover layers
+
+| Height above ground | Predicted classes |
+|---|---|
+| ![GAMUS height layer with metre scale](docs/images/current/gamus-height-map.png) | ![GAMUS classes predicted from RGB](docs/images/current/gamus-predicted-classes.png) |
+
+*Verified 4 October uploads. Left: DC_12_17 height map. Right: DC_04_27 classes. These are different
+validation tiles, not a pixel-matched comparison; GAMUS upload spot checks are not the blind test benchmark.*
+
+### Independent-reference error analysis
+
+![Pittsburgh reconstruction with signed height error against a LiDAR DSM](docs/images/current/pittsburgh-reference-error.png)
+
+*Diagnostic DSM/error view, not the primary city presentation. Pittsburgh hills: absolute-DSM
+RMSE 5.02 m, MAE 3.33 m, bias −2.39 m. Blue indicates too low, red too
+high, and grey missing reference coverage. The full-raster metrics were independently recomputed.*
+
+</details>
+
+## Measured evidence
+
+### GAMUS building-fusion experiment
+
+The complete inventory contains **5,004 training, 859 validation and 2,861 test tiles** with matching
+RGB, height and class files. Validation covers DC/Philadelphia; test covers DC/New York/Philadelphia.
+The full dataset has 8,724 complete triplets.
+
+We saved v1/v2 predictions and compared five fixed blends and five probability-based alternatives
+on validation data. We then checked the selected rule on the separate test split.
+Invalid GAMUS `−5 m` reference pixels were excluded.
+These scores combine all valid pixels and compare **heights above ground from one-pass inference**.
+They are not absolute-DSM scores or High/TTA results for the full dataset.
+
+| Evaluation | Building route | Overall RMSE (m) | MAE (m) | Building RMSE (m) |
+|---|---|---:|---:|---:|
+| Validation · 859 tiles | Previous 50% v1 / 50% v2 | 2.7511 | 1.2948 | 3.3352 |
+| Validation · 859 tiles | **Current 25% v1 / 75% v2** | **2.7402** | **1.2873** | **3.2763** |
+| Test · 2,861 tiles | v1 only | 3.9623 | 1.5963 | 5.9289 |
+| Test · 2,861 tiles | Previous 50% v1 / 50% v2 | 3.7573 | 1.5513 | 5.2308 |
+| Test · 2,861 tiles | **Current 25% v1 / 75% v2** | **3.6972** | **1.5402** | **4.9934** |
+
+Against the former blend, test RMSE improved **1.60% overall and 4.54% on buildings**.
+This is a modest, measured improvement. It is not a new model or a guarantee for every image.
+Probability-based routing did not show enough benefit to replace the fixed rule.
+
+A separate **24-validation-tile four-flip TTA check** improved pooled RMSE from 3.1690 to 3.0916 m
+and building RMSE from 5.1284 to 4.9140 m. The ordinary 16-tile subset regressed 0.04% in overall RMSE;
+the tall eight-tile subset improved. The selected change adds no additional inference passes.
+
+Proof: [validation CSV](docs/evidence/fusion-validation-corrected.csv) ·
+[test CSV](docs/evidence/fusion-test-corrected.csv) ·
+[TTA CSV](docs/evidence/fusion-tta24-all.csv) ·
+[full evaluation summary](docs/evaluation/fusion-evaluation-summary.md) ·
+[adoption report](docs/evaluation/BUILDING_FUSION_075_REPORT.md)
+
+Building metrics here use **reference class labels**. The upload UI instead uses **predicted semantic
+masks** to identify buildings; those two building scores must not be confused.
+
+### Actual uploads on an RTX 3050 laptop
+
+The dated checks covered **10 real browser uploads**. Seven included independent height references.
+We checked **17 height downloads** for image size, pixel placement, map coordinates, file layout
+and missing-data handling. We also checked that predictions were not flat.
+The run used a **6 GB RTX 3050**, High quality and v1/v2. **CHMv2 was absent**.
+
+| Scene | Reference comparison | RMSE (m) | MAE (m) | Bias (m) |
+|---|---|---:|---:|---:|
+| Chevy Chase suburb | LiDAR / absolute DSM | 3.96 | 2.90 | −0.79 |
+| Pittsburgh hills | LiDAR / absolute DSM | 5.02 | 3.33 | −2.39 |
+| Smoky Mountains forest | LiDAR / absolute DSM | 8.76 | 6.84 | +5.55 |
+| GAMUS DC_04_27 | AGL / nDSM | 2.79 | 1.65 | −0.30 |
+| GAMUS DC_12_17 | AGL / nDSM | 4.21 | 2.64 | −0.25 |
+| GAMUS DC_15_17 | AGL / nDSM | 4.11 | 2.74 | −0.49 |
+| Three Sikkim scenes | No independent height reference | N/A | N/A | N/A |
+
+This table shows **selected examples**, not all upload results or an aggregate external benchmark.
+The complete dated report and raw measurements remain linked below, including unsuccessful accuracy
+cases. Successful processing is not uniformly accurate reconstruction; dense-urban errors remain
+an improvement target. Reference vertical-datum and acquisition-date differences were not resolved
+in these spot checks.
+
+![Independent-reference metrics for a suburban scene](docs/images/current/chevy-chase-reference-metrics.png)
+
+*Chevy Chase: 3.96 m absolute-DSM RMSE. The scatter compares reference elevation (horizontal) with
+model elevation (vertical); the diagonal is perfect agreement.*
+
+The application regression checks also cover flat DEMs, unavailable secondary DEMs, valid JSON
+responses and optional comparisons. The 4 October report records **128 passing torch-free tests plus
+12 passing API/loss tests in separate environments**, and a successful frontend build.
+These are dated test results, not a claim that every newer branch has the same coverage.
+
+[Upload verification and qualifications](docs/real-upload-verification-20261004.md) ·
+[Complete measurements CSV](docs/evidence/real-upload-measurements-20261004.csv)
+
+## Our journey: what changed and what we learned
+
+Some branches tried ideas at the same time. They were not all tested in the same way.
+Do not compare their scores as if they used the same images, data splits and quality settings.
+
+| Stage | What it explored | What we learned / carried forward |
+|---|---|---|
+| Early depth experiments | Generic DA3 relative depth on overhead imagery | Strong artificial ramps/domain gap; relative depth alone was not defensible height |
+| Direct GeoTIFF/reference rendering | RGB draped on real DEM, known-height mapped buildings | Good visualization and geospatial plumbing; reference reconstruction is not RGB-only height prediction |
+| `Rishabh_prototype_Mark_1` · [97c078d](https://github.com/ManasBytes/altimap/commit/97c078d47474e7b7cd4c27a43aa711090526b137) | Frozen DAV2/RDAH path; 18 prepared GAMUS scenes | Raw RDAH collapsed in that setup; visible fallback used training-fitted height priors and supplied CLS labels |
+| `biplab-feat` · [17a8016](https://github.com/ManasBytes/altimap/commit/17a801645481c46be0d5d4522b17e2968ec1590a) | Terrain workspace and a separate supervised U-Net surface model | Useful viewer and RGB/class/height integration; prepared reference previews are not inferred uploads |
+| `dilavesh-new` · [c7142f9](https://github.com/ManasBytes/altimap/commit/c7142f9424b2213bcb096a3850ff1d3c196c8187) | RS3DAda metric height, v1/v2 specialists, optional CHMv2 | Task-specific supervision and selective specialist routing rather than raw depth as elevation |
+| Tested production · [84136c4](https://github.com/ManasBytes/altimap/commit/84136c4013837f141624ed62a1d6cff80f52c05c) | Validated 25/75 fusion, real upload checks, API/viewer fixes | Current main; preserve measured baseline and its known limitations |
+| Newer teammate work · [e5837d0](https://github.com/ManasBytes/altimap/commit/e5837d0d25a13909785e3f6d1e43d37b7d83951d) | New inspector, prepared-demo hosting, scale tools and mapped context | Potential improvements; separate branch, limited smoke checks, not production-approved |
+
+<details>
+<summary>Historical screenshots and the newer experimental viewer</summary>
+
+![Mark-1 prepared DAV2 plus supplied-CLS fallback prediction](docs/images/history/mark1-predicted-dc0326.jpg)
+
+*Mark-1 replay, captured 5 October from exact snapshot 97c078d: DC_03_26. The UI identifies the
+CLS-assisted fallback; it is not the raw RDAH prediction or an RGB-only inference result.*
+
+![Biplab terrain workspace showing a prepared GAMUS reference preview](docs/images/history/biplab-reference-workspace.jpg)
+
+*Biplab snapshot 17a8016: prepared GAMUS reference preview. This captures the earlier visualization
+work, not a fresh evaluation of its trained surface model.*
+
+![Experimental inspector showing a prepared result and reference-height metrics](docs/images/experimental/prepared-demo-accuracy.jpg)
+
+*Experimental snapshot e5837d0. We tested its saved-scene loader, texture/geometry rendering,
+Accuracy/View tabs and orbit navigation using a previously verified main result. The displayed
+metrics come from that saved main result. They are not a new accuracy result for this branch.
+Live inference was deliberately disabled in this preview.*
+
+The newer snapshot passed 141 non-GPU tests and built successfully during documentation checks;
+Mark-1 passed 51 tests (one skipped), Biplab passed 52 (seven skipped). Passing unit tests does not
+resolve the newer branch's missing production JSON-safety/opt-in comparison fixes or certify its
+GeoTIFF accuracy. No experimental code was merged.
+
+[Detailed chronology, historical test screenshots and limitations](docs/PROJECT_JOURNEY.md)
+
+</details>
+
+## How to use the interface
+
+Set options and attach reference files **before choosing the input image**.
+
+| Control | Meaning |
+|---|---|
+| Pixel size | Ground metres per pixel; read from a suitable GeoTIFF or supplied by the user |
+| High / Fast | Same models; High averages original + three flipped predictions, Fast uses one pass |
+| Copernicus / SRTM | Select the coarse elevation source for GeoTIFF absolute DSM; not an AI-model switch |
+| Compare against public DEMs | Off by default; optional agreement with both sources, which may add network time |
+| Add reference heights | Independent metre-valued height raster/HDF5 for evaluation, not another RGB photo |
+| Add ground control points | CSV `lon,lat,height` of known ground elevations; may correct a consistent vertical offset |
+| DSM range | Minimum/maximum absolute surface elevation, not building-height range |
+| Height / Surface / RGB / Classes | Colour-coded object height, shaded surface, original texture, predicted land cover |
+| Error / Slope / Contours | Signed reference error, surface steepness and elevation/height contour visualization |
+| City model / Exact DSM | Simplified display objects versus raster height-field geometry |
+| Vertical exaggeration | Display-only height multiplier; use 1× when discussing physical proportions |
+
+**MAE** is the average absolute error. **RMSE** penalizes large mistakes more strongly.
+**Bias** is the signed average error; negative means too low. **Building RMSE** evaluates only building
+pixels. **Correlation** measures pattern agreement, not proof of correct absolute values.
+“85% of pixels” means valid evaluation coverage, not 85% accuracy.
+
+Reference plots show sampled pixel pairs: reference on the horizontal axis, model on the vertical;
+below the diagonal means underestimation. Metrics use all valid overlapping pixels, not just plotted dots.
+Main currently infers whether an uploaded reference is nDSM or absolute DSM; check the comparison label.
+Ordinary coloured height screenshots are not valid metre-valued reference rasters.
+
+Matching a public DEM used to build the DSM is **not an independent check of building heights**.
+Ground control points are known ground elevations, not roof heights. They must use a compatible
+height reference. The current correction shifts all elevations by one amount; it does not replace
+an independent accuracy check.
+
+## Run the tested version
+
+Follow [SETUP.md](SETUP.md) for prerequisites, weights, the native Windows/Linux path and troubleshooting.
+Model weights and bulk imagery are downloaded separately; they are not stored in Git.
+
+Existing Docker workflow:
+
+```bash
+git clone --branch main https://github.com/ManasBytes/altimap.git
+cd altimap
+docker build -t altimap .
+docker run --gpus all -p 8000:8000 altimap
+```
+
+Open **http://localhost:8000**. GPU Docker requires NVIDIA container support and sufficient disk.
+The Dockerfile exists, but the Windows verification did **not** rebuild/run Docker because its daemon
+was unavailable. See the dated setup notes rather than treating this as a fresh container certification.
+
+For an already configured native environment:
+
+```powershell
+# Windows, repository root
+cd frontend
+npm ci
+npm run build
+cd ..
+.\.venv-da3\Scripts\python.exe -m viewer.server
+```
+
+Models load lazily on first inference. The legacy health endpoint's `model_loaded` field describes the
+old depth-model instance, not whether the current height stack has been loaded. Check actual upload
+results and their model provenance.
+
+## Next steps: compare models on the same data
+
+**Planned research, not implemented in main.** Preserve the current models as Candidate A and keep
+production stable until a candidate wins on the same evidence.
+
+| Candidate | Why test it | Status / decision gate |
+|---|---|---|
+| **A · current AltiMap** | v1 + 75% building-specialist contribution + optional CHMv2 | Measured baseline; record which specialists are actually installed |
+| **B · RDAH-Net** | RGB combined with a relative-depth prior and a learned height mapping | Revisit preprocessing/domain adaptation after the early Mark-1 failure; train/evaluate fairly |
+| **C · Depth2Elevation** | Depth Anything features with scale modulation for remote-sensing height | Reproduce with the same supervision and holdout, subject to implementation/compute availability |
+| **D · DINOv3 satellite features + height/semantic decoder** | Test satellite-domain representations | Future backbone experiment; frozen backbone first, not a claimed current general-height model |
+| **Other lightweight/specialist candidates** | Alternative tall-building or efficient height estimators | Only benchmark usable, appropriately licensed implementations; no automatic adoption |
+
+Research references: [RDAH-Net paper](https://www.mdpi.com/2072-4292/18/7/1024) and
+[official implementation](https://github.com/Elenairene/RDAH-Net);
+[Depth2Elevation paper and accepted manuscript](https://openrepository.aut.ac.nz/items/4d5713c5-f7ea-4a08-9a73-4c2555e29743);
+[DINOv3](https://github.com/facebookresearch/dinov3).
+
+Execution priorities:
+
+1. **Freeze a reproducible benchmark:** fixed RGB/reference pairs, known GSD, valid-data masks,
+   city-disjoint development/final-check scenes, and the same evaluator.
+2. **Compare raw nDSM first:** overall/building/tree RMSE, MAE, bias, correlation and height bins
+   0–2, 2–5, 5–10, 10–20, 20–50 and >50 m. Report counts, latency and VRAM.
+3. **Stress-test generalization:** Cartosat-like 0.6 m imagery and resolution sweeps across
+   0.35–10 m, without pretending upsampling restores lost roof detail.
+4. **Evaluate absolute DSM separately:** DEM-only versus model-assisted DSM, vertical-datum handling,
+   dense-urban ground errors and safer native-grid fusion.
+5. **Validate changes from the newer branch selectively:** API failure paths, geospatial units,
+   navigation, context reliability and measured raster effects before adoption.
+6. **Improve deployment evidence:** independently rerun the full specialist stack and container setup,
+   then save matched RGB/reference/prediction/error/3D examples.
+
+Do not rank candidates using published numbers from different datasets/splits. Optional ensembles,
+fine-tuning or routing changes must beat the fixed baseline without hidden reference-label inputs
+or tuning on the final-check set.
+
+## Repository guide and limitations
+
+| Location | Purpose |
+|---|---|
+| `viewer/` | Current FastAPI app, height models, DEM composition, evaluation and city generation |
+| `frontend/` | Current React/Three.js viewer and prepared reference-gallery assets |
+| `tests/` | Unit and upload-regression tests; synthetic tests check correctness, not model accuracy |
+| `scripts/` | Data/model preparation and evaluation helpers |
+| `docs/evidence/` | Small shareable measured reports and screenshot provenance |
+| `docs/evaluation/` | Detailed fusion decision and impact reports |
+| `backend/`, `src/`, `spikes/`, older dashboards | Earlier implementations/research preserved for reproducibility; not the current launch path |
+
+Key limits remain domain shift, tall buildings, sparse/forest canopy, coarse DEM ground accuracy,
+unknown PNG scale, unsupported affine grids, acquisition/datum mismatches and network dependence.
+Rendered tree shapes and roof blocks are simplified; smooth appearance is not proof of accurate heights.
+Large scenes can take minutes on a laptop GPU.
+
+Upstream work and dataset licences matter. Keep the supplied notices with distributed weights;
+the v2/SynRS3D path includes non-commercial restrictions and CHMv2 carries the DINOv3 licence.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

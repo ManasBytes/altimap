@@ -1,8 +1,18 @@
-# SIH 2026 — Problem Statement 26175
+# SIH 2026: Problem Statement 26175
 
 **Title:** DepthWizard - Single-View Height Estimation and 3D Flythrough
 **Organization:** Indian Space Research Organisation (ISRO), Department of Space
 **Category:** Software · **Theme:** Disaster Management
+
+## In simple words
+
+Build software that turns one satellite or aerial colour image into heights and an explorable
+3D scene. For a PNG without coordinates, a relative height scale is acceptable. For a suitable
+GeoTIFF, use its map information and an elevation source to place the surface at absolute heights.
+Check accuracy against independent reference data where it is available.
+
+The sections below record the organisers' brief and FAQ. They contain the original technical
+terms. The [README](../README.md) and [architecture guide](../ARCHITECTURE.md) explain our solution.
 
 ## Background
 
@@ -96,6 +106,7 @@ Answers that constrain the design, recorded verbatim in substance:
 - **Deployment:** a locally hosted web app or a desktop executable are both acceptable. Extra features
   earn no direct marks but "will definitely make impact on the viewer". Full CRS/geospatial metadata
   handling is expected for GeoTIFFs.
-- **Presentation:** the initial submission covers problem understanding, implementation idea, proposed
-  architecture, plus one extra slide of preliminary work; detailed technical documentation comes after
-  selection.
+- **Presentation:** the final clarification limits the initial submission to **six slides in total**.
+  Cover problem understanding, the implementation idea and architecture. Put preliminary work or
+  a repository link on the final slide. Do not add an extra slide. More detailed documentation
+  is needed after selection.

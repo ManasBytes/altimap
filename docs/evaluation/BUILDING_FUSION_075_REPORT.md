@@ -1,8 +1,16 @@
 # Building fusion 0.75 adoption report
 
+In simple words, we changed how the two models are combined on building pixels.
+The old result used half from v1 and half from v2. The new result uses 25% from v1 and 75% from v2.
+This report records the tests behind that decision. It does not describe new model training.
+
 Date: 2026-10-03<br>
 Scope: GAMUS building-height routing only<br>
 Decision: adopt `25% v1 + 75% v2` on predicted building pixels
+
+Archive note: this is the 3 October adoption record. Public copies of the small result artifacts
+are linked in [the evidence index](../evidence/README.md); the local paths below document the
+original run. Later upload/API verification is reported [separately](../real-upload-verification-20261004.md).
 
 ## What changed
 
@@ -24,10 +32,10 @@ training, VRAM use, or inference pass.
 
 ## Why the change was considered
 
-v1 is the general estimator and is stable across land-cover types, but tends to under-read taller
-buildings. v2 was trained as a building specialist with more encoder adaptation, a height-weighted
-loss, and SynRS3D high-rise examples. Giving v2 more influence should recover tall-building height,
-but too much influence could hurt ordinary buildings or non-building pixels routed incorrectly.
+v1 is the general height model, but it can predict tall buildings too low.
+v2 was trained to pay more attention to tall buildings, using extra high-rise examples.
+Giving v2 more weight could help those buildings. Giving it too much weight could also hurt normal
+buildings or pixels wrongly labelled as buildings. That is why we tested several blends first.
 
 The weight was therefore treated as an evaluation question rather than an assumption. Fixed weights
 `0.00`, `0.25`, `0.50`, `0.75`, and `1.00` and five soft-routing alternatives were compared on the

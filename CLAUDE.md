@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+These are developer working notes for this repository. Start with README.md and ARCHITECTURE.md
+for explanations intended for a general audience. Older measurements below are historical records,
+not a fresh benchmark of the current version.
 
 ## What this is
 
@@ -12,8 +14,9 @@ on rendering quality, navigability and standalone deployment.
 
 Hard requirements any change must keep satisfiable:
 - PNG/JPG (no georeferencing) → relative DSM; GeoTIFF → **absolute metric DSM** as a COG GeoTIFF.
-- A pre-trained monocular depth backbone; calibration to metres may use a low-res DEM, GCPs,
-  scene statistics or semantic priors.
+- The original brief suggested a depth-pretrained model. The later FAQ permits any suitable
+  method. Current main uses RS3DAda/DINOv2 height supervision. Absolute elevation may use a
+  public DEM and compatible ground control points.
 - Optical image draped on the mesh, first-person navigation, height/slope analysis from any view,
   upload in the UI, validation against reference data. One standalone module with source + docs.
 - **Final evaluation is ISRO's own imagery** (FAQ: Cartosat-2S, 0.6 m, nadir, no sun angle or
@@ -26,7 +29,7 @@ Where the rest lives:
   measured results, limits).
 - **`SETUP.md`**: the from-scratch install guide.
 - `THIRD_PARTY_NOTICES.md`: model/data licences and attribution.
-- `BUILDING_FUSION_075_REPORT.md`: the evidence behind the current building fusion.
+- `docs/evaluation/BUILDING_FUSION_075_REPORT.md`: the evidence behind the current building fusion.
 - `docs/superpowers/specs/`: design reasoning; read `2026-08-23-single-view-dsm-design.md` before
   architectural changes.
 - `docs/superpowers/spikes/`: frozen empirical findings.
@@ -48,12 +51,12 @@ ROS's pytest plugins break the run. There is no lint script: match the surroundi
 Prettier is installed in `frontend/`.
 
 ```bash
-# Tests (.venv: no GPU, no network, ~120 tests in a few seconds)
+# Torch-free tests; some model/API tests require the app environment
 .venv/bin/python -m pytest -q
 .venv/bin/python -m pytest tests/test_estimate.py -k gcp -v          # one file / matching tests
 
 # The app: build the viewer once, then one server serves it and the API at http://127.0.0.1:8000
-(cd frontend && npm install && npm run build)
+(cd frontend && npm ci && npm run build)
 .venv-da3/bin/python -m viewer.server [--host 0.0.0.0]
 # frontend dev: `npm run dev` on :5173 proxies /api and /data-uploads to :8000 (vite.config.js);
 # can hit the inotify limit (ENOSPC), then use build + server
@@ -128,9 +131,10 @@ absolute level from a public DEM, rather than recovering absolute scale from the
    fallback) or SRTM GL1 (`base_dem="srtm"`; OpenTopography via `dem.srtm`), read once per upload
    (`padded_dem`: image + 300 m margin). Complete patches are cached, keyed by source.
    Unresolved coverage stays NaN; it never becomes 0 m.
-6. **DEM-consistent DSM**: `DSM = GLO-30 − mean₃₀ₘ(nDSM) + nDSM`, orthometric. Every 30 m cell
-   reproduces the DEM, which is how the FAQ scores, while the model supplies sub-cell detail. In
-   forest, the detail is dropped (GLO-30 already holds the canopy surface). Optional
+6. **Approximate DSM composition**: selected DEM minus a local mean of predicted detail,
+   plus that detail. The mean uses an image-grid moving filter, not native DEM-cell aggregation.
+   Exact agreement within every 30 m cell is not guaranteed. In extensive forest, the detail is
+   suppressed. Optional
    `compare_dems=True` (default off; CLI `--compare-dems`) checks agreement against GLO-30
    and SRTM in approximate image-aligned 30 m blocks, not native DEM cells. Undefined metrics
    are `null`; agreement with the base DEM is not independent building-height validation.
@@ -239,7 +243,8 @@ for distributions.
 
 ## Decisions backed by measurement
 
-The numbers are in `ARCHITECTURE.md` §5 and §9 and in `BUILDING_FUSION_075_REPORT.md`. Re-run
+Current results are in `ARCHITECTURE.md` section 9 and
+`docs/evaluation/BUILDING_FUSION_075_REPORT.md`. Older experiments remain in Git history. Re-run
 the named evaluator before changing any of these:
 
 - **Building fusion 25/75** (`fusion_eval`, `height_eval`): beat 50/50 on all 859 validation
@@ -261,7 +266,7 @@ the named evaluator before changing any of these:
 - **Network**: the DEM comes from AWS because Planetary Computer's URL signing stalled for
   50–120 s at a time. `viewer/dem.py` sets GDAL and `requests` timeouts at import, so import it
   before any remote read.
-- **Open issue — base DEM**: GLO-30 sits 5–14 m above SRTM in the Himalaya (`dem_check`), and the
+- **Open issue: base DEM**: GLO-30 sits 5–14 m above SRTM in the Himalaya (`dem_check`), and the
   FAQ names both. The base is selectable (`base_dem`, default GLO-30), but which one the
   organisers score against is unresolved: ask them.
 
@@ -285,8 +290,8 @@ the named evaluator before changing any of these:
 - **Synthetic fixtures**: `tests/conftest.py` builds long-tailed synthetic nDSMs (mostly flat
   ground plus a few tall blocks), because metrics that pass on uniform noise can fail on real
   elevation distributions.
-- **Degenerate inputs are first-class**: constant depth, zero median, single-channel images
-  return `nan` for the affected metric; they never raise and never become `0.0`.
+- **Undefined metrics**: internal calculations can return NaN for constant inputs or other
+  undefined cases. Public JSON must use `null`, never a non-standard NaN token or invented zero.
 - **Model code needs no torch in tests**: test the pure functions (`fuse_heights`,
   `forest_mask`, `predict_scene` with a fake per-pixel model, `gcp_correction`, `warp_to_grid`).
 - **Network**: a `network` pytest marker exists for live-network tests; none currently uses it.

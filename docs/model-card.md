@@ -17,17 +17,21 @@ pipeline_tag: depth-estimation
 
 # AltiMap height model
 
-Single-image height estimation for aerial and satellite RGB imagery: for every pixel, the
-**height above ground in metres (nDSM)** plus an 8-class land-cover map. Built for Smart India
+This model estimates **height above ground (nDSM)** from one aerial or satellite colour image.
+It also predicts land-cover labels, such as buildings and trees, using eight internal classes.
+AltiMap maps these to the seven GAMUS categories shown in the viewer. Built for Smart India
 Hackathon 2026, problem statement 26175 (ISRO, "DepthWizard"), as the model behind
 [AltiMap](https://github.com/ManasBytes/altimap), which turns one image into metric elevation
 GeoTIFFs and a 3D city model. Setup and usage: the repo's
-[SETUP.md](https://github.com/ManasBytes/altimap/blob/dilavesh-new/SETUP.md).
+[SETUP.md](https://github.com/ManasBytes/altimap/blob/main/SETUP.md).
+
+This file describes the model weights and their evaluation. The complete application also builds
+the city geometry and combines GeoTIFF predictions with public elevation data.
 
 ## Model
 
-- **Architecture:** RS3DAda: DINOv2 ViT-L/14 encoder + DPT decoder with a height-regression head
-  and a segmentation head ([SynRS3D, NeurIPS 2024](https://arxiv.org/abs/2406.18151)). Needs the
+- **Architecture:** RS3DAda uses DINOv2 to read image features and DPT to turn them into height
+  and class maps ([SynRS3D, NeurIPS 2024](https://arxiv.org/abs/2406.18151)). It needs the
   model code from [JTRNEO/SynRS3D](https://github.com/JTRNEO/SynRS3D).
 - **Starting point:** the authors' [RS3DAda height weights](https://huggingface.co/JTRNEO/RS3DAda).
 - **Fine-tuning (`best.pth`, v1):** on [GAMUS](https://huggingface.co/datasets/earthflow/GAMUS)
@@ -39,7 +43,27 @@ GeoTIFFs and a 3D city model. Setup and usage: the repo's
   hills) and 50 % satellite-style degradation (1.3–6× coarser, blur, haze). 6.5 h on an RTX A5000,
   best checkpoint at step 25,500.
 
-## Results (GAMUS test split, 500 tiles, 4-flip test-time averaging)
+## Current application results
+
+The current building blend is **25% v1 + 75% v2**. It was selected using all 859 validation tiles
+and confirmed using 2,861 test tiles. These are one-pass above-ground-height results.
+
+| Split | Previous 50/50 overall RMSE | Current 25/75 overall RMSE | Previous building RMSE | Current building RMSE |
+|---|---:|---:|---:|---:|
+| Validation | 2.7511 m | 2.7402 m | 3.3352 m | 3.2763 m |
+| Test | 3.7573 m | 3.6972 m | 5.2308 m | 4.9934 m |
+
+The test improvement is 1.60% overall and 4.54% for buildings.
+See the [evaluation evidence](evidence/README.md) for the reports and a separate 24-tile High/TTA check.
+MAE is the average size of the error. RMSE gives larger mistakes more weight.
+Building RMSE applies the same calculation only to building pixels.
+
+## Older model comparison: 500 GAMUS test tiles
+
+The table below is the earlier four-flip test-time-averaging experiment.
+It compares the separate v1 and v2 models, not the current combined pipeline.
+The images and inference settings differ from the full-split results above.
+These historical results were not rerun during the documentation update.
 
 | City | RMSE (m) v1 | RMSE (m) v2 | RMSE (m) zero-shot RS3DAda | Pearson r (v1 / v2) | Building RMSE (m) (v1 / v2) |
 |---|---|---|---|---|---|
@@ -50,9 +74,9 @@ GeoTIFFs and a 3D city model. Setup and usage: the repo's
 
 ## How AltiMap uses them
 
-v2 wins on GAMUS but generalises worse to other imagery: against USGS airborne LiDAR on NAIP
-scenes it over-reads trees and ground. On buildings, though, it is right where v1 isn't. So the app
-combines three models by land cover:
+v2 performed better in the older GAMUS experiment, but can predict trees and ground too high
+on other imagery. The application therefore chooses models using predicted land-cover labels:
+
 - **v1** gives heights everywhere.
 - **Building pixels** use 25% v1 + 75% v2. This fixed blend was selected on all 859 GAMUS
   validation tiles, confirmed once on all 2,861 untouched test tiles, and retained under a focused
@@ -60,16 +84,20 @@ combines three models by land cover:
   RMSE changed 2.7511/3.3352 → 2.7402/3.2763 m; untouched test changed
   3.7573/5.2308 → 3.6972/4.9934 m. The TTA subset changed
   3.1690/5.1284 → 3.0916/4.9140 m, with only a 0.04% ordinary-scene overall regression.
-- **Tree pixels in extensive forest** (≥ 80 % canopy within 150 m) come from Meta's CHMv2 canopy
-  model.
+- **Tree pixels in extensive forest** (at least 80% canopy within about 150 m) use Meta's CHMv2
+  when it is installed. This is an optional tree-height model.
+
+Without a specialist, the application keeps v1. The result names the models actually used.
+CHMv2 was absent from the dated Windows real-upload checks.
 
 
-## Limitations (measured, not guessed)
+## Limits and older measurements
 
 - **Out of domain, by landscape** (NAIP aerial RGB vs USGS 3DEP airborne LiDAR, one pass). This
   table is the historical external run with the former 50/50 building blend; v1 alone is in
   brackets. It remains useful domain-gap evidence but has not been rerun for the current 25/75
-  blend. Absolute DSM = these heights on Copernicus GLO-30, DEM-consistent:
+  blend. Absolute DSM uses public elevation with predicted fine detail. Its local moving-average
+  method does not guarantee exact agreement on native Copernicus cells:
 
   | Scene | nDSM RMSE (predict 0) | nDSM bias | DSM RMSE (GLO-30 alone) |
   |---|---|---|---|
@@ -83,8 +111,12 @@ combines three models by land cover:
   rerun, so no replacement tower number is claimed. Object heights hold up to ~1–2 m pixels and
   fade to flat by 5–10 m. ISRO's evaluation imagery is 0.6 m Cartosat-2S over India, outside the
   training domain (aerial imagery of US cities).
-- Heights are **above ground**. Absolute elevation needs a terrain model; AltiMap adds Copernicus
-  GLO-30 ground for georeferenced inputs.
+- Heights are **above ground**. Absolute surface elevation also needs a public elevation source.
+  AltiMap supports Copernicus or SRTM for suitable GeoTIFF inputs. Copernicus is a surface dataset,
+  not a surveyed bare-ground DTM.
+- PNG/JPG images without known pixel size use an experimental 0.33 m/pixel assumption.
+  Displayed metre heights and footprint sizes are not independently verified in that case.
+- A public DEM used to create a DSM is not an independent reference for building-height accuracy.
 
 ## Usage
 

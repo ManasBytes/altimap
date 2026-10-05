@@ -1,0 +1,966 @@
+{
+  "split": "test",
+  "tiles": 2861,
+  "tta": false,
+  "cities": [
+    "DC",
+    "NYC",
+    "PHL"
+  ],
+  "variants": {
+    "hard_w0.00": {
+      "overall": {
+        "ALL": {
+          "n": 2990094705,
+          "rmse": 3.9622765007598657,
+          "mae": 1.5962872683620917,
+          "bias": -0.15144722683215986,
+          "pearson": 0.8514244176411571,
+          "building_rmse": 5.928920729515872,
+          "building_mae": 2.3607567169128334,
+          "building_bias": -0.787645764215036
+        },
+        "DC": {
+          "n": 368654730,
+          "rmse": 3.945551721910521,
+          "mae": 2.1761845867965026,
+          "bias": -0.40051049317932824,
+          "pearson": 0.911846569328513,
+          "building_rmse": 4.638129588532883,
+          "building_mae": 2.783727051694268,
+          "building_bias": -0.5329310300323271
+        },
+        "NYC": {
+          "n": 1048575975,
+          "rmse": 4.066395010659955,
+          "mae": 2.0631874651300697,
+          "bias": 0.2115597996741775,
+          "pearson": 0.8427151575199593,
+          "building_rmse": 3.4211244398644376,
+          "building_mae": 1.9657067407742703,
+          "building_bias": -0.7756181821904718
+        },
+        "PHL": {
+          "n": 1572864000,
+          "rmse": 3.8952978195697523,
+          "mae": 1.1491016131440823,
+          "bias": -0.3350753698518999,
+          "pearson": 0.8347490601912617,
+          "building_rmse": 6.73185148827095,
+          "building_mae": 2.4001642737340196,
+          "building_bias": -0.8429006190230659
+        }
+      },
+      "height_bins": {
+        "ALL": [
+          {
+            "bin": "0-2m",
+            "n": 1649009525,
+            "rmse": 2.2950888068061404,
+            "mae": 0.6361389564858938,
+            "bias": 0.44642100905335586,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 273937734,
+            "rmse": 3.25434465466503,
+            "mae": 2.126960476104692,
+            "bias": 0.2577868265224164,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 524829469,
+            "rmse": 3.0614965396801908,
+            "mae": 1.9499497550697025,
+            "bias": -0.3371312182081672,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 308118710,
+            "rmse": 4.8674012653460785,
+            "mae": 3.646960376755592,
+            "bias": -1.4191563322294911,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 128294528,
+            "rmse": 7.339665000519362,
+            "mae": 5.269962578961535,
+            "bias": -4.130046901016287,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 5103132,
+            "rmse": 54.52446936519601,
+            "mae": 42.50452096481801,
+            "bias": -42.49134944393842,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ],
+        "DC": [
+          {
+            "bin": "0-2m",
+            "n": 164639686,
+            "rmse": 2.567205435571931,
+            "mae": 0.7769033079262347,
+            "bias": 0.6129848848018603,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 31892947,
+            "rmse": 3.655845913389299,
+            "mae": 2.465226111750224,
+            "bias": 0.33474901216660696,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 62712334,
+            "rmse": 3.518902657452364,
+            "mae": 2.389430295698006,
+            "bias": -0.3530624828524836,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 64578756,
+            "rmse": 4.826974487091596,
+            "mae": 3.52937302207984,
+            "bias": -1.3364562687540371,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 44704190,
+            "rmse": 6.473331684744367,
+            "mae": 4.833889154083675,
+            "bias": -3.354968982044562,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 46157,
+            "rmse": 38.03130379007803,
+            "mae": 29.059107332470884,
+            "bias": -29.059107332470884,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ],
+        "NYC": [
+          {
+            "bin": "0-2m",
+            "n": 489805460,
+            "rmse": 3.498028068706213,
+            "mae": 1.1284800205195886,
+            "bias": 0.9257538433168452,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 85764074,
+            "rmse": 4.392861104973276,
+            "mae": 2.7775480175907443,
+            "bias": 0.6425725565977376,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 149186516,
+            "rmse": 4.082921690719315,
+            "mae": 2.7429218653206417,
+            "bias": -0.03799817778262548,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 158410032,
+            "rmse": 4.824663559815882,
+            "mae": 3.674013542420362,
+            "bias": -0.9153321850019553,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 64486283,
+            "rmse": 5.907396473491226,
+            "mae": 4.266102563534682,
+            "bias": -3.589039163271603,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 202663,
+            "rmse": 32.751347187735874,
+            "mae": 26.519281035579972,
+            "bias": -26.517702990359684,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ],
+        "PHL": [
+          {
+            "bin": "0-2m",
+            "n": 994564379,
+            "rmse": 1.2713811265988846,
+            "mae": 0.37036758406571957,
+            "bias": 0.1827851207005644,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 156280713,
+            "rmse": 2.2905476115042616,
+            "mae": 1.7008981376186014,
+            "bias": 0.030917227225935075,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 312930619,
+            "rmse": 2.3001217633948894,
+            "mae": 1.4838349423677604,
+            "bias": -0.4765471995256006,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 85129922,
+            "rmse": 4.975909134423493,
+            "mae": 3.685820417619173,
+            "bias": -2.419409410166679,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 19104055,
+            "rmse": 12.079660016212339,
+            "mae": 9.678948539632795,
+            "bias": -7.769944746573697,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 4854312,
+            "rmse": 55.37839965588597,
+            "mae": 43.299734918269586,
+            "bias": -43.28595413979658,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ]
+      }
+    },
+    "hard_w0.50": {
+      "overall": {
+        "ALL": {
+          "n": 2990094705,
+          "rmse": 3.7573481517115384,
+          "mae": 1.551291428500247,
+          "bias": -0.11586163110000655,
+          "pearson": 0.8675369827175455,
+          "building_rmse": 5.230839716098479,
+          "building_mae": 2.1388573835298357,
+          "building_bias": -0.6515204866725866
+        },
+        "DC": {
+          "n": 368654730,
+          "rmse": 3.8482547907243387,
+          "mae": 2.1235546523771993,
+          "bias": -0.3582014000098716,
+          "pearson": 0.9161936468407356,
+          "building_rmse": 4.259547236980149,
+          "building_mae": 2.5454122191990876,
+          "building_bias": -0.38120217444335663
+        },
+        "NYC": {
+          "n": 1048575975,
+          "rmse": 4.03238074209365,
+          "mae": 2.0415007959363836,
+          "bias": 0.22626223683377977,
+          "pearson": 0.845671114773296,
+          "building_rmse": 3.1083325315136565,
+          "building_mae": 1.798673130207424,
+          "building_bias": -0.7177398627374865
+        },
+        "PHL": {
+          "n": 1572864000,
+          "rmse": 3.5393962272000943,
+          "mae": 1.090355638946427,
+          "bias": -0.2871435514146137,
+          "pearson": 0.8649643101288585,
+          "building_rmse": 5.900641381598872,
+          "building_mae": 2.1642414457196386,
+          "building_bias": -0.6851985360928974
+        }
+      },
+      "height_bins": {
+        "ALL": [
+          {
+            "bin": "0-2m",
+            "n": 1649009525,
+            "rmse": 2.3371018278910065,
+            "mae": 0.641660560851188,
+            "bias": 0.4525022862804122,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 273937734,
+            "rmse": 3.275567849854267,
+            "mae": 2.1100600465486776,
+            "bias": 0.2719875045590709,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 524829469,
+            "rmse": 3.0319449444357436,
+            "mae": 1.8901465106390118,
+            "bias": -0.3556288299709429,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 308118710,
+            "rmse": 4.798049287503857,
+            "mae": 3.5531238451140967,
+            "bias": -1.3570500431370704,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 128294528,
+            "rmse": 6.899706232312196,
+            "mae": 4.9602244491014975,
+            "bias": -3.7983466724122517,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 5103132,
+            "rmse": 46.81406417410898,
+            "mae": 34.802751004605256,
+            "bias": -34.6177618367126,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ],
+        "DC": [
+          {
+            "bin": "0-2m",
+            "n": 164639686,
+            "rmse": 2.5332116662236253,
+            "mae": 0.7805341854164453,
+            "bias": 0.6188674775856192,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 31892947,
+            "rmse": 3.6861202544519642,
+            "mae": 2.4635763766879397,
+            "bias": 0.3931884234730313,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 62712334,
+            "rmse": 3.487050289299031,
+            "mae": 2.339543896396717,
+            "bias": -0.3297164221214818,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 64578756,
+            "rmse": 4.73319224427916,
+            "mae": 3.4388647964389003,
+            "bias": -1.3057272267683093,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 44704190,
+            "rmse": 6.158698986154076,
+            "mae": 4.590671333516268,
+            "bias": -3.1488284377315687,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 46157,
+            "rmse": 35.51850703605218,
+            "mae": 26.866072864948737,
+            "bias": -26.866072864948737,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ],
+        "NYC": [
+          {
+            "bin": "0-2m",
+            "n": 489805460,
+            "rmse": 3.5026561581404603,
+            "mae": 1.1324235139317647,
+            "bias": 0.9305728862117802,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 85764074,
+            "rmse": 4.387422334252886,
+            "mae": 2.759901722022887,
+            "bias": 0.6632950691946967,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 149186516,
+            "rmse": 4.04840742672872,
+            "mae": 2.689464531604118,
+            "bias": -0.04108254857333585,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 158410032,
+            "rmse": 4.775400960989963,
+            "mae": 3.6208252222293114,
+            "bias": -0.8901361180665474,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 64486283,
+            "rmse": 5.743704421957025,
+            "mae": 4.1717190695764845,
+            "bias": -3.4893452495880863,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 202663,
+            "rmse": 27.51997543779444,
+            "mae": 21.615026312336934,
+            "bias": -21.602416365196078,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ],
+        "PHL": [
+          {
+            "bin": "0-2m",
+            "n": 994564379,
+            "rmse": 1.3970779400636435,
+            "mae": 0.37697937028675405,
+            "bias": 0.18952091625320547,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 156280713,
+            "rmse": 2.3388833401032083,
+            "mae": 1.6812947444322155,
+            "bias": 0.03251083021446396,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 312930619,
+            "rmse": 2.2731194863530626,
+            "mae": 1.4190189803599733,
+            "bias": -0.5107785292027213,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 85129922,
+            "rmse": 4.888115969350808,
+            "mae": 3.513820742145507,
+            "bias": -2.264817977508936,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 19104055,
+            "rmse": 10.935496464086016,
+            "mae": 8.486614723066221,
+            "bias": -6.3612863085927165,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 4854312,
+            "rmse": 47.542362383103736,
+            "mae": 35.42879174986459,
+            "bias": -35.234846949322524,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ]
+      }
+    },
+    "hard_w0.75": {
+      "overall": {
+        "ALL": {
+          "n": 2990094705,
+          "rmse": 3.6972300419131967,
+          "mae": 1.540158192294613,
+          "bias": -0.09806883324722528,
+          "pearson": 0.8722175166008171,
+          "building_rmse": 4.993383041523013,
+          "building_mae": 2.0791759898798725,
+          "building_bias": -0.5834578479624406
+        },
+        "DC": {
+          "n": 368654730,
+          "rmse": 3.8337409001872227,
+          "mae": 2.1115842958097457,
+          "bias": -0.3370468534395207,
+          "pearson": 0.9168450642857633,
+          "building_rmse": 4.190186964454384,
+          "building_mae": 2.487037302588218,
+          "building_bias": -0.3053377467104276
+        },
+        "NYC": {
+          "n": 1048575975,
+          "rmse": 4.024103875954768,
+          "mae": 2.0365315826946278,
+          "bias": 0.23361345540210238,
+          "pearson": 0.8465660499109174,
+          "building_rmse": 3.0160990633984244,
+          "building_mae": 1.7562900607097638,
+          "building_bias": -0.6888007031049995
+        },
+        "PHL": {
+          "n": 1572864000,
+          "rmse": 3.4272361528280664,
+          "mae": 1.075309262120689,
+          "bias": -0.2631776422102228,
+          "pearson": 0.8717456852107881,
+          "building_rmse": 5.606154316755477,
+          "building_mae": 2.0988292537645066,
+          "building_bias": -0.6063474946783913
+        }
+      },
+      "height_bins": {
+        "ALL": [
+          {
+            "bin": "0-2m",
+            "n": 1649009525,
+            "rmse": 2.369454127813713,
+            "mae": 0.6446577471395794,
+            "bias": 0.45554292489279846,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 273937734,
+            "rmse": 3.3035204145909027,
+            "mae": 2.112058984632224,
+            "bias": 0.2790878435682518,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 524829469,
+            "rmse": 3.044910643303872,
+            "mae": 1.8815116760877046,
+            "bias": -0.36487763590905314,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 308118710,
+            "rmse": 4.815507150891749,
+            "mae": 3.540170201946646,
+            "bias": -1.3259968986108546,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 128294528,
+            "rmse": 6.8045494352582425,
+            "mae": 4.867846928553192,
+            "bias": -3.6324965581628947,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 5103132,
+            "rmse": 43.4049519202441,
+            "mae": 31.16455265435132,
+            "bias": -30.680968031689606,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ],
+        "DC": [
+          {
+            "bin": "0-2m",
+            "n": 164639686,
+            "rmse": 2.541872175512811,
+            "mae": 0.7831524592334945,
+            "bias": 0.6218087739777566,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 31892947,
+            "rmse": 3.7242774610316243,
+            "mae": 2.4776921058959256,
+            "bias": 0.4224081291435544,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 62712334,
+            "rmse": 3.495247899642591,
+            "mae": 2.335027938766454,
+            "bias": -0.31804339175906093,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 64578756,
+            "rmse": 4.715446213598549,
+            "mae": 3.4166165023676385,
+            "bias": -1.2903627058308826,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 44704190,
+            "rmse": 6.073875694471466,
+            "mae": 4.511850430571179,
+            "bias": -3.045758165633766,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 46157,
+            "rmse": 34.36086952335849,
+            "mae": 25.76955562030224,
+            "bias": -25.76955562030224,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ],
+        "NYC": [
+          {
+            "bin": "0-2m",
+            "n": 489805460,
+            "rmse": 3.506556779467376,
+            "mae": 1.1347071181586894,
+            "bias": 0.9329824076599665,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 85764074,
+            "rmse": 4.391465676438589,
+            "mae": 2.7606027959691315,
+            "bias": 0.6736563254775573,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 149186516,
+            "rmse": 4.044414625552478,
+            "mae": 2.678162655667831,
+            "bias": -0.042624734034274595,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 158410032,
+            "rmse": 4.765637923904706,
+            "mae": 3.608606671732037,
+            "bias": -0.8775380846234081,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 64486283,
+            "rmse": 5.684423846729427,
+            "mae": 4.133967820638127,
+            "bias": -3.4394982927128654,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 202663,
+            "rmse": 25.140876695835846,
+            "mae": 19.174664087142794,
+            "bias": -19.144773050912697,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ],
+        "PHL": [
+          {
+            "bin": "0-2m",
+            "n": 994564379,
+            "rmse": 1.4776839190672948,
+            "mae": 0.38039070816640086,
+            "bias": 0.1928888140272365,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "2-5m",
+            "n": 156280713,
+            "rmse": 2.3907208267647215,
+            "mae": 1.681533196170729,
+            "bias": 0.03330763169773486,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "5-10m",
+            "n": 312930619,
+            "rmse": 2.3028568448446958,
+            "mae": 1.4108301942890633,
+            "bias": -0.5278941941045294,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "10-20m",
+            "n": 85129922,
+            "rmse": 4.9801263646799105,
+            "mae": 3.506550070699973,
+            "bias": -2.1875222611646747,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": "20-50m",
+            "n": 19104055,
+            "rmse": 10.749068533062834,
+            "mae": 8.178121680480038,
+            "bias": -5.656957089931468,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          },
+          {
+            "bin": ">50m",
+            "n": 4854312,
+            "rmse": 44.07883950149446,
+            "mae": 31.716417401569213,
+            "bias": -31.209293352777674,
+            "pearson": null,
+            "building_rmse": null,
+            "building_mae": null,
+            "building_bias": null
+          }
+        ]
+      }
+    }
+  }
+}

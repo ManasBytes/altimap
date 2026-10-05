@@ -1,0 +1,185 @@
+{
+  "root": "E:\\TEST\\gamus",
+  "splits": {
+    "train": {
+      "tiles": 5004,
+      "loader_tiles": 5004,
+      "cities": [
+        "DC",
+        "NYC",
+        "PHL"
+      ],
+      "incomplete": [],
+      "samples": [
+        {
+          "scene": "DC_01_25",
+          "rgb": [
+            1024,
+            1024,
+            3
+          ],
+          "classes": [
+            1024,
+            1024
+          ],
+          "heights": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "scene": "DC_02_24",
+          "rgb": [
+            1024,
+            1024,
+            3
+          ],
+          "classes": [
+            1024,
+            1024
+          ],
+          "heights": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "scene": "DC_02_25",
+          "rgb": [
+            1024,
+            1024,
+            3
+          ],
+          "classes": [
+            1024,
+            1024
+          ],
+          "heights": [
+            1024,
+            1024
+          ]
+        }
+      ]
+    },
+    "val": {
+      "tiles": 859,
+      "loader_tiles": 859,
+      "cities": [
+        "DC",
+        "PHL"
+      ],
+      "incomplete": [],
+      "samples": [
+        {
+          "scene": "DC_02_26",
+          "rgb": [
+            1024,
+            1024,
+            3
+          ],
+          "classes": [
+            1024,
+            1024
+          ],
+          "heights": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "scene": "DC_04_23",
+          "rgb": [
+            1024,
+            1024,
+            3
+          ],
+          "classes": [
+            1024,
+            1024
+          ],
+          "heights": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "scene": "DC_04_27",
+          "rgb": [
+            1024,
+            1024,
+            3
+          ],
+          "classes": [
+            1024,
+            1024
+          ],
+          "heights": [
+            1024,
+            1024
+          ]
+        }
+      ]
+    },
+    "test": {
+      "tiles": 2861,
+      "loader_tiles": 2861,
+      "cities": [
+        "DC",
+        "NYC",
+        "PHL"
+      ],
+      "incomplete": [],
+      "samples": [
+        {
+          "scene": "DC_03_26",
+          "rgb": [
+            1024,
+            1024,
+            3
+          ],
+          "classes": [
+            1024,
+            1024
+          ],
+          "heights": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "scene": "DC_05_28",
+          "rgb": [
+            1024,
+            1024,
+            3
+          ],
+          "classes": [
+            1024,
+            1024
+          ],
+          "heights": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "scene": "DC_05_30",
+          "rgb": [
+            1024,
+            1024,
+            3
+          ],
+          "classes": [
+            1024,
+            1024
+          ],
+          "heights": [
+            1024,
+            1024
+          ]
+        }
+      ]
+    }
+  },
+  "total": 8724
+}

@@ -1,8 +1,15 @@
 # AltiMap GAMUS building-routing evaluation
 
+This test asks a simple question: how much should each model contribute to a building's height?
+We tried several blends using validation images, then checked the selected blend on separate test
+images. The selected building result uses 25% v1 and 75% v2.
+
 Date: 2026-10-03<br>
 Decision: `hard_w0.75` adopted locally after corrected validation, untouched-test confirmation, and
 a focused TTA safety check.
+
+Archive note: local paths below refer to the original experiment. Downloadable public reports
+and their scope are listed in [the evidence index](../evidence/README.md).
 
 ## Dataset
 
@@ -70,5 +77,6 @@ pixels. Non-building routing is unchanged.
 - `E:\TEST\height-test.json`
 - `E:\TEST\gamus-verification.json`
 
-See `BUILDING_FUSION_075_REPORT.md` for causes, production impact, limitations, and code touchpoints.
+See [building-fusion adoption report](BUILDING_FUSION_075_REPORT.md) for causes, production impact,
+limitations, and code touchpoints.
 No GitHub or GitLab operation was performed.
