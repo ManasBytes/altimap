@@ -14,6 +14,7 @@ heights. Tests using different images, training labels or quality settings are n
 | Biplab feature branch | [17a8016](https://github.com/ManasBytes/altimap/commit/17a801645481c46be0d5d4522b17e2968ec1590a) | Existing training documents/code; rebuilt reference gallery |
 | Dilavesh height stack | [c7142f9](https://github.com/ManasBytes/altimap/commit/c7142f9424b2213bcb096a3850ff1d3c196c8187) | Implementation and historical model/evaluation records |
 | Tested main | [84136c4](https://github.com/ManasBytes/altimap/commit/84136c4013837f141624ed62a1d6cff80f52c05c) | Corrected fusion reports and real-upload verification |
+| Current main viewer | [5e21266](https://github.com/ManasBytes/altimap/commit/5e21266f5a8bdef71d5a93c3b77c2058d6a4ebca) | Studio and prepared hosting; Python inference/API unchanged |
 | Newer teammate experiments | [e5837d0](https://github.com/ManasBytes/altimap/commit/e5837d0d25a13909785e3f6d1e43d37b7d83951d) | Non-GPU tests, build and prepared-scene UI smoke test only |
 
 Branch names can move. These commit links identify what was actually inspected.
@@ -210,6 +211,14 @@ No historical/custom weights were silently substituted to imply successful infer
 
 The existing main app remained separate on port 8000 throughout; previews used 8002–8004.
 Documentation evidence is independent of running those preview servers again.
+
+## Main viewer update during publication
+
+Before publishing this documentation, main had received commit `5e21266`.
+It added the studio inspector and prepared-scene hosting. We preserved that commit and updated
+the guides rather than replacing the teammate's code. The new viewer includes some ideas from
+the experimental branch, but it does not include every newer model/DSM calculation.
+The dated height accuracy and screenshot checks remain tied to their recorded snapshots.
 
 ## Next chapter
 

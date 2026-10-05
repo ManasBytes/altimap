@@ -1,14 +1,26 @@
 # AltiMap browser viewer
 
-This is the React and Three.js viewer for the tested main version.
+This is the React and Three.js viewer on main, including studio update `5e21266`.
 It shows the **3D city model**, including building blocks, roof levels, tree crowns and terrain.
 
 The early static GAMUS Terrain Studio was a prototype.
-This folder now contains the upload interface and the interactive viewer.
+This folder now contains the studio inspector, upload interface and saved-scene viewer.
 Do not use the old prototype's file paths or scene counts as current setup instructions.
 
 [Project README](../README.md) | [How the system works](../ARCHITECTURE.md) |
 [Full setup](../SETUP.md)
+
+## Saved demos and the studio inspector
+
+The inspector has Scenes, View, Measure, Accuracy and Context tabs.
+Scenes separates prepared model demos from live uploads and the GAMUS reference gallery.
+Saved demos can work without the inference server, but they do not process new images.
+The [current hosted demo](https://altimap-demo.vercel.app) is saved-scene only. New TIFF/PNG/JPG
+uploads are not available there. The local app can process new files with the Python server.
+
+`VITE_DEMO_CATALOG` selects the saved-scene collection.
+`VITE_API_BASE` selects the live backend, or `disabled` for prepared scenes only.
+See [hosting and configuration](../docs/DEPLOYMENT.md).
 
 ## Build and run
 
@@ -47,7 +59,8 @@ A build can show a large-bundle warning; a successful build alone does not prove
 ## Uploads and the reference gallery are different
 
 - **Uploaded RGB images:** the backend predicts object heights and classes, then builds city geometry.
-- **Built-in GAMUS scenes:** prepared reference-height images for viewing. Opening a gallery scene
+- **Prepared model demos:** saved predictions with their original geometry, grids and scores.
+- **Built-in GAMUS reference scenes:** prepared reference-height images for viewing. Opening a gallery scene
   is not running the trained height model.
 
 Set the pixel size, quality, elevation source and optional reference files before choosing an image.
@@ -90,10 +103,17 @@ These settings change backend work, not only how detailed the mesh looks.
 | File | Role |
 |---|---|
 | `src/main.jsx` | Scene, upload interface, layers and controls |
-| `src/styles.css`, `src/blender.css` | Viewer layout and appearance |
+| `src/studio.css` | Current studio layout and themes |
+| `src/styles.css`, `src/blender.css` | Older renderer styles retained by the viewer |
+| `src/hosting.js` | Saved-asset and API URL handling |
+| `src/cityDisplay.js` | Display-only flat-ground helper |
 | `src/gamusScenes.js`, `public/` | Prepared gallery information and reference images |
 | `vite.config.js` | Build and development-server settings |
 | `package-lock.json` | Exact frontend dependency versions |
 
-Inspector tabs and mapped bridges/facilities from the newer teammate branch are not part
-of tested main. Screenshots of that work are labelled experimental in the project README.
+The studio update is in main, but it does not import every newer teammate-branch backend change.
+Some saved scenes contain map-assisted bridges/facilities. The current Python upload backend
+does not fetch this context for new images. These names are saved map records, not RGB predictions.
+Earlier screenshot and accuracy evidence is labelled by its source version in the project README.
+The [5 October local check](../docs/local-studio-verification-20261005.md) lists the new UI checks,
+fresh API result and browser upload/export checks that still need manual confirmation.

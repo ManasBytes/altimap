@@ -7,8 +7,14 @@ such as buildings and trees. We use these predictions to create 3D shapes and pl
 image on the roofs and ground. For a suitable GeoTIFF, map coordinates help us add landscape
 elevation. Height maps and error views help check the result. They are not the whole product.
 
-**Current implementation:** tested `main` snapshot [`84136c4`](https://github.com/ManasBytes/altimap/commit/84136c4013837f141624ed62a1d6cff80f52c05c).
-The newer `updated-dilavesh-new` branch is a separate experiment, **not an approved replacement for main**.
+**Tested height/API baseline:** [`84136c4`](https://github.com/ManasBytes/altimap/commit/84136c4013837f141624ed62a1d6cff80f52c05c).
+Main also includes the newer viewer and prepared-demo update
+[`5e21266`](https://github.com/ManasBytes/altimap/commit/5e21266f5a8bdef71d5a93c3b77c2058d6a4ebca).
+That update does not change the Python height models or API. The accuracy tables and older UI
+photographs below belong to the dated baseline checks. A separate
+[local studio check on 5 October](docs/local-studio-verification-20261005.md) tested saved scenes,
+viewer controls and a fresh GeoTIFF API request. It was not a complete browser upload/export test.
+Other changes on `updated-dilavesh-new` remain separate and are not automatically included in main.
 Screenshots show what the app can display. Accuracy must be checked against known heights on
 images not used to train the model.
 
@@ -22,6 +28,14 @@ reference was supplied for this scene, so this image is reconstruction evidence,
 [Project journey](docs/PROJECT_JOURNEY.md) · [Evidence and screenshot provenance](docs/evidence/README.md) ·
 [Model card](docs/model-card.md) · [Problem statement](docs/problem-statement.md)
 
+[Hosted demo: saved scenes only](https://altimap-demo.vercel.app) · [Hosting and demo setup](docs/DEPLOYMENT.md)
+
+Only the viewer and saved scenes are currently deployed. The public site lets you explore
+previously generated 3D models, but **new TIFF, GeoTIFF, PNG and JPG uploads are not available there**.
+To process your own image, run the local app with its Python inference server.
+Prepared demos do not run a new model prediction. Publishing this documentation does not
+redeploy the hosted site.
+
 ## Our journey in brief
 
 We started with generic monocular depth and direct DEM rendering. The first gave unreliable overhead
@@ -30,8 +44,9 @@ prediction/reference/error inspection, and Biplab's work established the terrain
 RS3DAda height/semantic models then supplied learned object heights, with a building specialist and
 an optional forest specialist. Validation selected today's **25% v1 + 75% v2 building blend**.
 
-The current city view turns those outputs into separate buildings and tree crowns. Newer teammate
-work explores mapped context and an updated inspector, but remains separate from tested main.
+The current city view turns those outputs into separate buildings and tree crowns. Main now also
+includes the studio inspector and prepared-scene hosting from the viewer update. Other teammate
+experiments, including changes to DSM calculations, still need separate validation.
 [Detailed branch history and historical screenshots](docs/PROJECT_JOURNEY.md).
 
 ## What we have built
@@ -203,8 +218,37 @@ flood-risk forecast or supplied ground truth.*
 *Screenshot 193331: PNG input without coordinates or known GSD. The UI explicitly marks the 0.33 m/pixel
 assumption as experimental. This demonstrates local reconstruction, not validated absolute heights.*
 
-Some supplied captures predate the final UI fixes and contain older explanatory wording. The algorithm
-documented above, rather than text embedded in those screenshots, describes tested main.
+These supplied captures show the earlier validated viewer and predate the current studio layout.
+Some contain older explanatory wording. The algorithm above describes the tested height/API
+baseline; the current Scenes/View/Measure/Accuracy/Context tabs are explained in the hosting guide.
+
+### New studio UI: light and dark themes
+
+The following pictures were captured locally on 5 October using viewer commit `5e21266`.
+The older black-UI pictures above are kept to show the working prototype and its journey.
+Both new pictures show the **same saved Washington GAMUS prediction**, not two new inference runs.
+
+| Light studio | Dark studio |
+|---|---|
+| ![New light studio showing a saved Washington city and reference-height graph](docs/images/current/studio-washington-accuracy-light.png) | ![New dark studio showing the same saved Washington city and reference-height graph](docs/images/current/studio-washington-accuracy-dark.png) |
+
+*The saved scene displays RMSE 2.83 m, MAE 1.68 m and building RMSE 2.23 m.
+These are its saved reference scores, not a new benchmark or a claim about every image.
+The hosted frontend can show saved scenes without a GPU. It currently does not process new
+uploads; use the local Python inference server for those.
+See the [local check and limits](docs/local-studio-verification-20261005.md).*
+
+### Saved map context: experimental, not live detection
+
+![New light studio replaying a Pittsburgh city with saved OpenStreetMap context](docs/images/experimental/studio-pittsburgh-saved-context-light.png)
+
+*Locally checked saved-demo display: Pittsburgh bridges, 5 October. School, clinic and university
+names come from saved OpenStreetMap data. They are not detected from the image by our height model.
+The viewer on main can display these saved fields, but main's Python upload pipeline does not yet
+fetch this context for new images. No independent height reference is attached to this demo.*
+
+We show this as a possible map-assisted extension, not a tested live-upload feature.
+Adding or displaying a facility name does not prove that its building height is accurate.
 
 ### Newer teammate branch: experimental city-context view
 
@@ -214,7 +258,9 @@ documented above, rather than text embedded in those screenshots, describes test
 0.60 m/pixel, displayed DSM range 214–345 m. Visible additions include the Context tab, mapped
 bridge/embankment context and facility markers. This is **not tested main**. The exact capture commit
 and independent height accuracy were not established; including this image does not merge or approve
-the feature code. OpenStreetMap context is map-assisted, not a claim that our neural model detected
+all of its feature code. Main can now display prepared context through the newer studio, but that
+does not mean the live Python estimator contains every newer branch calculation.
+OpenStreetMap context is map-assisted, not a claim that our neural model detected
 or accurately measured the bridges and facilities.*
 
 ## Supporting height and error diagnostics
@@ -333,6 +379,7 @@ Do not compare their scores as if they used the same images, data splits and qua
 | `biplab-feat` · [17a8016](https://github.com/ManasBytes/altimap/commit/17a801645481c46be0d5d4522b17e2968ec1590a) | Terrain workspace and a separate supervised U-Net surface model | Useful viewer and RGB/class/height integration; prepared reference previews are not inferred uploads |
 | `dilavesh-new` · [c7142f9](https://github.com/ManasBytes/altimap/commit/c7142f9424b2213bcb096a3850ff1d3c196c8187) | RS3DAda metric height, v1/v2 specialists, optional CHMv2 | Task-specific supervision and selective specialist routing rather than raw depth as elevation |
 | Tested production · [84136c4](https://github.com/ManasBytes/altimap/commit/84136c4013837f141624ed62a1d6cff80f52c05c) | Validated 25/75 fusion, real upload checks, API/viewer fixes | Current main; preserve measured baseline and its known limitations |
+| Main viewer update · [5e21266](https://github.com/ManasBytes/altimap/commit/5e21266f5a8bdef71d5a93c3b77c2058d6a4ebca) | Studio inspector, prepared results and hosted frontend support | Included in main; height/API code unchanged, full viewer/GPU validation not repeated here |
 | Newer teammate work · [e5837d0](https://github.com/ManasBytes/altimap/commit/e5837d0d25a13909785e3f6d1e43d37b7d83951d) | New inspector, prepared-demo hosting, scale tools and mapped context | Potential improvements; separate branch, limited smoke checks, not production-approved |
 
 <details>
@@ -367,6 +414,8 @@ GeoTIFF accuracy. No experimental code was merged.
 ## How to use the interface
 
 Set options and attach reference files **before choosing the input image**.
+The current studio groups controls under Scenes, View, Measure, Accuracy and Context.
+Scenes separates saved model demos, live uploads and the GAMUS reference gallery.
 
 | Control | Meaning |
 |---|---|

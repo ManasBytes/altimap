@@ -1,6 +1,6 @@
 # How AltiMap works
 
-This guide describes the tested main version, commit
+This guide describes the height/API baseline tested at commit
 [84136c4](https://github.com/ManasBytes/altimap/commit/84136c4013837f141624ed62a1d6cff80f52c05c).
 It explains the system in simple language and gives file names for developers.
 
@@ -8,8 +8,13 @@ AltiMap turns one aerial or satellite colour image into an interactive 3D city m
 The model contains building blocks, roof levels, tree crowns and terrain.
 It also saves height maps so we can check the prediction against a known reference.
 
-The newer teammate branch is separate. Its extra inspector tabs and mapped context are
-not part of this tested version.
+Main also includes viewer update
+[5e21266](https://github.com/ManasBytes/altimap/commit/5e21266f5a8bdef71d5a93c3b77c2058d6a4ebca).
+It adds a studio inspector and prepared-result hosting without changing the Python height/API code.
+Other newer-branch model and DSM changes remain separate. The full upload/accuracy checks were
+not repeated for the new viewer during this documentation update. The
+[5 October local check](docs/local-studio-verification-20261005.md) records saved-scene UI tests
+and one fresh GeoTIFF API request, including its high error and the incomplete browser checks.
 
 [README and screenshots](README.md) | [Setup](SETUP.md) |
 [Project history](docs/PROJECT_JOURNEY.md) | [Test evidence](docs/evidence/README.md)
@@ -252,8 +257,21 @@ A cleaner-looking block can be less accurate than the raw prediction for an indi
 
 ## 7. What the browser shows
 
-Files: `frontend/src/main.jsx`, `frontend/src/styles.css`,
-`frontend/src/blender.css`.
+Files: `frontend/src/main.jsx`, `frontend/src/studio.css`, `frontend/src/hosting.js`,
+`frontend/src/cityDisplay.js`, and the older `styles.css`/`blender.css` renderer styles.
+
+The studio has Scenes, View, Measure, Accuracy and Context tabs.
+Scenes offers saved model demos, live upload options and the separate reference gallery.
+Saved demos restore existing textures, heights, geometry and reference scores.
+They are replayed predictions, not fresh inference. `hosting.js` resolves saved-asset URLs.
+`cityDisplay.js` provides a display-only flat-ground option without changing the source heights.
+
+The current public deployment hosts the viewer and saved scenes only. It cannot process new
+TIFF, PNG or JPG uploads. The local app needs its Python inference backend for new images.
+
+The Context tab can display saved OpenStreetMap names and features. This main backend does not
+yet fetch school, hospital, bridge or flood-defence context for new uploads. These names come
+from map records, not a model that recognizes a building's use from the image.
 
 | View or control | What it does |
 |---|---|
@@ -270,8 +288,9 @@ Files: `frontend/src/main.jsx`, `frontend/src/styles.css`,
 | Walk, fly and orbit | Give different ways to explore the scene |
 | Export | Saves the displayed 3D scene as a GLB file |
 
-The built-in GAMUS gallery shows prepared reference heights. It is not live model inference.
-Uploaded scenes show model results.
+The built-in GAMUS reference gallery shows measured reference heights, not model inference.
+Uploads show fresh predictions. Model demos show saved predictions.
+Keep all three sources clearly labelled.
 
 The browser uses compact height grids for rendering. Float32 GeoTIFFs are the scientific downloads.
 The mesh uses fewer segments on lower-powered graphics devices.
@@ -363,6 +382,11 @@ See [the evidence index](docs/evidence/README.md) and
 One FastAPI process serves the built frontend and the inference API.
 The normal address is http://127.0.0.1:8000.
 Use [SETUP.md](SETUP.md) for install commands, model downloads and Docker instructions.
+
+The frontend can also load saved scenes without the inference API.
+`VITE_DEMO_CATALOG` sets their catalog URL. `VITE_API_BASE` sets the live API address;
+`disabled` allows only prepared scenes. New uploads still require the Python server.
+See [the deployment guide](docs/DEPLOYMENT.md). No hosted deployment was performed here.
 
 There are two separate Python environments:
 

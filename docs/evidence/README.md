@@ -1,6 +1,10 @@
 # AltiMap evidence index
 
-Documentation snapshot: tested main [84136c4](https://github.com/ManasBytes/altimap/commit/84136c4013837f141624ed62a1d6cff80f52c05c).
+Height/API evidence snapshot: [84136c4](https://github.com/ManasBytes/altimap/commit/84136c4013837f141624ed62a1d6cff80f52c05c).
+Main later added studio/prepared-hosting commit `5e21266`. These draft documents preserve that update.
+Its Python inference/API files are unchanged. The existing accuracy tables and photographs are
+not a claim that its full live-upload viewer workflow was rerun. A separate
+[5 October local check](../local-studio-verification-20261005.md) records what was actually checked.
 This index was written on 5 October 2026. These small files let reviewers check our work. Datasets, model
 weights, prediction caches and local runtime files remain outside Git.
 
@@ -177,5 +181,20 @@ updated. Six untracked backend/frontend/manual-server log files were moved, not 
 Local logs and `test_samples/` are now ignored; original datasets, models, tests, source and legacy
 research directories remain intact. Those older directories were not deleted because they support
 reproducibility and may still be referenced. No application code or production routing changed.
+
+## 7. New studio captures and local checks, 5 October
+
+| Capture | Source | What it proves |
+|---|---|---|
+| [Light Washington studio](../images/current/studio-washington-accuracy-light.png) | Main viewer `5e21266`, public saved Washington GAMUS scene | City and stored reference scores display locally |
+| [Dark Washington studio](../images/current/studio-washington-accuracy-dark.png) | Same scene and viewer, dark theme | Theme works; this is not another model run |
+| [Light Pittsburgh context](../images/experimental/studio-pittsburgh-saved-context-light.png) | Main viewer `5e21266`, public saved Pittsburgh bridges scene | Saved OpenStreetMap names/context display; not fresh context inference |
+
+A separate Denver GeoTIFF request through the new frontend's API proxy returned HTTP 200.
+Both raster exports retained the source grid and had COG layout metadata. Its independently
+recomputed RMSE was 30.7943 m, so it must not be presented as high-accuracy evidence.
+Browser file access blocked the complete upload flow. GLB download completion was not confirmed.
+Read the [full local check](../local-studio-verification-20261005.md) before describing the new UI
+as fully verified. No application code, weights, production routing or remote branch was changed.
 
 [Return to README](../../README.md) · [Project journey](../PROJECT_JOURNEY.md)

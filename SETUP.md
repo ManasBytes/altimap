@@ -43,6 +43,11 @@ is preserved on `updated-dilavesh-new-tested-665f514`; the teammate's newer
 `updated-dilavesh-new` branch is separate and is not this tested snapshot.
 The Docker test statement above describes the teammate's upstream test, not a new container
 verification of these local fixes.
+Main now also includes frontend studio/prepared-demo update `5e21266`. Its Python height/API code
+is unchanged from the tested baseline. See [deployment notes](docs/DEPLOYMENT.md) for saved scenes
+and optional hosted API settings. The full GPU checks were not repeated for that viewer update.
+The [public demo](https://altimap-demo.vercel.app) currently displays saved scenes only.
+It does not process new uploads. Follow this guide to run live inference locally.
 The Windows real-upload verification is summarized in
 `docs/real-upload-verification-20261004.md`; it used v1/v2 without CHMv2.
 
